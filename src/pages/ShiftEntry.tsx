@@ -162,8 +162,8 @@ export default function ShiftEntry() {
   const availablePool = useMemo(() => {
     return employees.filter(emp => !assignments.some(a => a.employee_id === emp.id))
       .filter(emp => 
-        emp.employee_code.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        emp.first_name.toLowerCase().includes(searchTerm.toLowerCase())
+        (emp.employee_code || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (emp.first_name || '').toLowerCase().includes(searchTerm.toLowerCase())
       )
   }, [employees, assignments, searchTerm])
 

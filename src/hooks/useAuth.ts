@@ -11,13 +11,31 @@ export function useAuth() {
   useEffect(() => {
     let isMounted = true;
 
-    // Use only onAuthStateChange — it fires INITIAL_SESSION on mount automatically.
-    // Calling getSession() in parallel causes handleSession to run twice (4 DB queries).
+    // Fallback getSession to guarantee loading resolves if INITIAL_SESSION is delayed/missed
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!isMounted) return;
+      if (!initialized.current) {
+        initialized.current = true;
+        handleSession(session);
+      }
+    }).catch(err => {
+      console.error('getSession error:', err);
+      if (!isMounted) return;
+      if (!initialized.current) {
+        initialized.current = true;
+        setLoading(false);
+      }
+    });
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         if (!isMounted) return;
         if (event === 'INITIAL_SESSION' && initialized.current) return;
-        initialized.current = true;
+        
+        // Let getSession handle the initial mount if it hasn't fired yet
+        if (event === 'INITIAL_SESSION') {
+          initialized.current = true;
+        }
         await handleSession(session);
       }
     );

@@ -31,7 +31,8 @@ export default function EmployeeSlip() {
       
       return data
     },
-    enabled: !!token
+    enabled: !!token,
+    retry: false
   })
 
   // Extract the structured data

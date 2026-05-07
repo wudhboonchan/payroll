@@ -46,8 +46,8 @@ export default function Employees() {
 
   const filteredEmployees = employees?.filter(emp => {
     const matchesSearch = 
-      emp.employee_code.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      `${emp.first_name} ${emp.last_name}`.toLowerCase().includes(searchTerm.toLowerCase())
+      (emp.employee_code || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      `${emp.first_name || ''} ${emp.last_name || ''}`.toLowerCase().includes(searchTerm.toLowerCase())
     
     if (showPendingOnly) {
       return matchesSearch && emp.data_complete === false
