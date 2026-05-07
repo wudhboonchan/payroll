@@ -138,7 +138,7 @@ export function Sidebar() {
               {user?.full_name || 'ผู้ใช้งาน'}
             </p>
             <p className="text-xs text-slate-500 truncate capitalize">
-              {user?.role === 'superUser' ? 'Super Admin' : user?.role === 'normalUser' ? 'User' : user?.role}
+              {user?.role === 'superUser' ? 'SuperAdmin' : user?.role === 'normalUser' ? 'User' : user?.role}
             </p>
           </div>
         </div>
