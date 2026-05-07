@@ -96,7 +96,7 @@ export default function ShiftEntry() {
         .from('shift_assignments')
         .select(`
           id, employee_id, shift_type, is_holiday_ot,
-          employee:employees(employee_code, first_name, last_name, prefix)
+          employee:employees(employee_code, first_name, last_name, prefix, nationality)
         `)
         .eq('work_date', workDateStr)
         .eq('period_id', currentPeriod.id)

@@ -7,7 +7,7 @@ export const IMPORT_COLUMNS = [
   { key: 'prefix',         header: 'คำนำหน้า',              example: 'นาย',           required: false, note: 'นาย / นาง / นางสาว (หรือเว้นว่าง)' },
   { key: 'first_name',     header: 'ชื่อ*',                 example: 'สมชาย',         required: true,  note: 'ชื่อจริง' },
   { key: 'last_name',      header: 'นามสกุล',               example: 'ใจดี',          required: false, note: 'บังคับสำหรับสัญชาติไทย' },
-  { key: 'nationality',    header: 'สัญชาติ*',              example: 'ไทย',           required: true,  note: 'ไทย / เมียนมาร์ / กัมพูชา / ลาว' },
+  { key: 'nationality',    header: 'สัญชาติ*',              example: 'ไทย',           required: true,  note: 'ไทย / เมียนมา / กัมพูชา / ลาว' },
   { key: 'national_id',    header: 'เลขบัตร / Passport',    example: '1234567890123', required: false, note: 'เลขบัตรประชาชน 13 หลัก หรือ Passport' },
   { key: 'rate_per_12h',   header: 'ค่าแรง/วัน (บาท)*',    example: '320',           required: true,  note: 'ตัวเลขเท่านั้น เช่น 320' },
   { key: 'payment_method', header: 'วิธีรับเงิน*',          example: 'bank_transfer', required: true,  note: 'cash หรือ bank_transfer' },
@@ -19,7 +19,7 @@ export const IMPORT_COLUMNS = [
 
 // ─── Valid value lists (single source of truth for template + validator) ───────
 
-export const VALID_NATIONALITIES   = ['ไทย', 'เมียนมาร์', 'กัมพูชา', 'ลาว']
+export const VALID_NATIONALITIES   = ['ไทย', 'เมียนมา', 'กัมพูชา', 'ลาว']
 export const VALID_PAYMENT_METHODS = ['cash', 'bank_transfer']
 export const VALID_STATUSES        = ['active', 'inactive']
 export const VALID_PREFIXES        = ['นาย', 'นาง', 'นางสาว']

@@ -20,7 +20,7 @@ import { UserPlus } from 'lucide-react'
 // Nationality options
 export const NATIONALITIES = [
   { value: 'ไทย', label: '🇹🇭 ไทย' },
-  { value: 'เมียนมาร์', label: '🇲🇲 เมียนมาร์/กะเหรี่ยง' },
+  { value: 'เมียนมา', label: '🇲🇲 เมียนมา/กะเหรี่ยง' },
   { value: 'กัมพูชา', label: '🇰🇭 กัมพูชา' },
   { value: 'ลาว', label: '🇱🇦 ลาว' },
 ]
@@ -32,9 +32,9 @@ export function formatEmployeeName(emp: {
   last_name?: string | null
   nationality?: string | null
 }) {
-  const prefix = emp.prefix ? `${emp.prefix} ` : ''
+  // Prefix is hidden in the UI as requested (kept only in DB for forms)
   const lastName = emp.last_name?.trim() ? ` ${emp.last_name.trim()}` : ''
-  const name = `${prefix}${emp.first_name}${lastName}`
+  const name = `${emp.first_name}${lastName}`
   const nat = emp.nationality
   if (!nat || nat === 'ไทย') return name
   return `${name} (${nat})`
@@ -420,19 +420,17 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
             </div>
 
             {/* Data Complete Checkbox */}
-            <div className={`flex items-start gap-4 p-5 rounded-xl border-2 transition-all ${
-              dataComplete
-                ? 'border-[#1D9E75] bg-[#1D9E75]/5'
-                : 'border-amber-200 bg-amber-50'
-            }`}>
+            <div className={`flex items-start gap-4 p-5 rounded-xl border-2 transition-all ${dataComplete
+              ? 'border-[#1D9E75] bg-[#1D9E75]/5'
+              : 'border-amber-200 bg-amber-50'
+              }`}>
               <button
                 type="button"
                 onClick={() => setValue('data_complete', !dataComplete, { shouldDirty: true })}
-                className={`mt-0.5 w-6 h-6 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-all ${
-                  dataComplete
-                    ? 'bg-[#1D9E75] border-[#1D9E75]'
-                    : 'border-amber-400 bg-white'
-                }`}
+                className={`mt-0.5 w-6 h-6 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-all ${dataComplete
+                  ? 'bg-[#1D9E75] border-[#1D9E75]'
+                  : 'border-amber-400 bg-white'
+                  }`}
               >
                 {dataComplete && (
                   <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
@@ -441,14 +439,12 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
                 )}
               </button>
               <div className="flex-1">
-                <p className={`font-bold text-base ${
-                  dataComplete ? 'text-[#1D9E75]' : 'text-amber-800'
-                }`}>
+                <p className={`font-bold text-base ${dataComplete ? 'text-[#1D9E75]' : 'text-amber-800'
+                  }`}>
                   {dataComplete ? '✅ ข้อมูลสมบูรณ์' : '⚠️ ข้อมูลยังไม่สมบูรณ์ (Pending)'}
                 </p>
-                <p className={`text-sm mt-0.5 ${
-                  dataComplete ? 'text-emerald-700' : 'text-amber-700'
-                }`}>
+                <p className={`text-sm mt-0.5 ${dataComplete ? 'text-emerald-700' : 'text-amber-700'
+                  }`}>
                   {dataComplete
                     ? 'ข้อมูลพนักงานได้รับการตรวจสอบและยืนยันความถูกต้องแล้ว'
                     : 'ยังรอข้อมูลเพิ่มเติมจากพนักงาน เช่น เลขบัญชี หรือเลขบัตรประชาชน — ติ๊กเมื่อข้อมูลครบและถูกต้อง'

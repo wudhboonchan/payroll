@@ -149,11 +149,11 @@ export default function ShareLinks() {
         {
           event: '*',
           schema: 'public',
-          table: 'payslip_tokens',
-          filter: `period_id=eq.${selectedPeriodId}`
+          table: 'payslip_tokens'
         },
         () => {
           queryClient.invalidateQueries({ queryKey: ['payslip_tokens', selectedPeriodId] })
+          queryClient.invalidateQueries({ queryKey: ['dashboard-link-stats', selectedPeriodId] })
         }
       )
       .subscribe()

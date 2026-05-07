@@ -245,8 +245,7 @@ export default function Dashboard() {
         {
           event: '*',
           schema: 'public',
-          table: 'payslip_tokens',
-          filter: `period_id=eq.${activePeriod.id}`
+          table: 'payslip_tokens'
         },
         () => {
           queryClient.invalidateQueries({ queryKey: ['dashboard-link-stats', activePeriod.id] })

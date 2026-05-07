@@ -52,6 +52,12 @@ export default function Employees() {
     if (showPendingOnly) {
       return matchesSearch && emp.data_complete === false
     }
+    
+    // Hide inactive employees by default unless the user is actively searching
+    if (searchTerm.trim() === '' && emp.status === 'inactive') {
+      return false
+    }
+    
     return matchesSearch
   }) || []
 
@@ -170,7 +176,11 @@ export default function Employees() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <span className="text-slate-500 text-sm">{emp.nationality || 'ไทย'}</span>
+                      <span className="text-slate-500 text-sm">
+                        {emp.nationality === 'เมียนมา' || emp.nationality === 'เมียนมาร์' 
+                          ? 'เมียนมา/กะเหรี่ยง' 
+                          : (emp.nationality || 'ไทย')}
+                      </span>
                     </TableCell>
                     <TableCell>{formatThaiCurrency(emp.rate_per_12h)} ฿</TableCell>
                     <TableCell>
