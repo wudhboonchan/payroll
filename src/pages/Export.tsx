@@ -16,14 +16,214 @@ import {
   Settings,
   Lock,
   FileText,
-  ArrowRight
+  ArrowRight,
+  Loader2
 } from 'lucide-react'
+import { formatPeriodLabel } from '../lib/formatters'
+import { format } from 'date-fns'
+import { th } from 'date-fns/locale'
 
 export default function Export() {
   const { user } = useAppStore()
   const navigate = useNavigate()
 
   const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(null)
+  const [isExportingSSO, setIsExportingSSO] = useState(false)
+  const [isExportingPayroll, setIsExportingPayroll] = useState(false)
+
+  const handleExportSSO = async () => {
+    if (!selectedPeriodId) {
+      toast.error('กรุณาเลือกงวดการจ่ายเงิน')
+      return
+    }
+
+    setIsExportingSSO(true)
+    try {
+      const XLSX = await import('xlsx')
+
+      const { data, error } = await supabase
+        .from('payroll_entries')
+        .select(`
+          amount_normal,
+          deduct_social_security,
+          employee:employees(
+            national_id,
+            prefix,
+            first_name,
+            last_name,
+            nationality
+          )
+        `)
+        .eq('period_id', selectedPeriodId)
+
+      if (error) throw error
+
+      if (!data || data.length === 0) {
+        toast.error('ไม่พบข้อมูลการจ่ายเงินในงวดนี้')
+        return
+      }
+
+      const groupedData: Record<string, any[]> = {}
+
+      data.filter((row: any) => row.employee).forEach((row: any) => {
+        const emp = row.employee
+        const nat = emp.nationality || 'ไทย'
+
+        if (!groupedData[nat]) {
+          groupedData[nat] = []
+        }
+
+        groupedData[nat].push({
+          'เลขบัตรประชาชน': emp.national_id || '',
+          'คำนำหน้า': emp.prefix || '',
+          'ชื่อ': emp.first_name || '',
+          'สกุล': emp.last_name || '',
+          'ค่าจ้าง': row.amount_normal || 0,
+          'เงินสมทบ': row.deduct_social_security || 0
+        })
+      })
+
+      if (Object.keys(groupedData).length === 0) {
+        toast.error('ไม่พบพนักงานในงวดนี้')
+        return
+      }
+
+      const workbook = XLSX.utils.book_new()
+
+      for (const [nationality, employeesData] of Object.entries(groupedData)) {
+        // Sanitize sheet name: Excel allows max 31 characters and restricts some symbols
+        let safeSheetName = nationality.replace(/[\\/*?:[\]]/g, '').substring(0, 31)
+        if (!safeSheetName) safeSheetName = 'Sheet'
+
+        const worksheet = XLSX.utils.json_to_sheet(employeesData)
+        XLSX.utils.book_append_sheet(workbook, worksheet, safeSheetName)
+      }
+
+      const filename = `SSO_${periodLabel.replace(/\\s+/g, '_')}.xlsx`
+      XLSX.writeFile(workbook, filename)
+
+      toast.success('ดาวน์โหลดฟอร์มประกันสังคมสำเร็จ')
+    } catch (err: any) {
+      console.error(err)
+      toast.error('เกิดข้อผิดพลาดในการ Export', { description: err.message })
+    } finally {
+      setIsExportingSSO(false)
+    }
+  }
+
+  const handleExportPayrollSummary = async () => {
+    if (!selectedPeriodId) {
+      toast.error('กรุณาเลือกงวดการจ่ายเงิน')
+      return
+    }
+    
+    setIsExportingPayroll(true)
+    try {
+      const XLSX = await import('xlsx')
+      
+      const { data, error } = await supabase
+        .from('payroll_entries')
+        .select(`
+          amount_normal,
+          amount_shift,
+          amount_ot,
+          amount_wood_excess,
+          amount_film,
+          amount_special,
+          amount_diligence,
+          amount_position,
+          deduct_social_security,
+          deduct_advance,
+          deduct_safety_equipment,
+          deduct_uniform,
+          employee:employees(
+            employee_code,
+            first_name,
+            last_name
+          )
+        `)
+        .eq('period_id', selectedPeriodId)
+
+      if (error) throw error
+
+      if (!data || data.length === 0) {
+        toast.error('ไม่พบข้อมูลการจ่ายเงินในงวดนี้')
+        return
+      }
+
+      const exportData = data
+        .filter((row: any) => row.employee) 
+        .map((row: any) => {
+          const emp = row.employee
+
+          // Get values or default to 0
+          const normal = row.amount_normal || 0
+          const shift = row.amount_shift || 0
+          const ot = row.amount_ot || 0
+          const wood = row.amount_wood_excess || 0
+          const film = row.amount_film || 0
+          const special = row.amount_special || 0
+          const diligence = row.amount_diligence || 0
+          const position = row.amount_position || 0
+
+          const socSec = Math.abs(row.deduct_social_security || 0)
+          const advance = Math.abs(row.deduct_advance || 0)
+          const safety = Math.abs(row.deduct_safety_equipment || 0)
+          const uniform = Math.abs(row.deduct_uniform || 0)
+
+          const wageTotal = normal + shift
+          const incomeTotal = wageTotal + ot + wood + film + special + diligence + position
+          const deductionTotal = socSec + advance + safety + uniform
+          const netTotal = incomeTotal - deductionTotal
+
+          return {
+            'รหัสพนักงาน': emp.employee_code || '',
+            'ชื่อ-นามสกุล': `${emp.first_name || ''} ${emp.last_name || ''}`.trim(),
+            'ค่าจ้างรวม': wageTotal,
+            'ค่าจ้างปกติ': normal,
+            'ค่ากะ': shift,
+            'OT': ot,
+            'ค่าไม้เกิน': wood,
+            'ค่าฟิล์ม': film,
+            'ค่าพิเศษ': special,
+            'เบี้ยขยัน': diligence,
+            'ค่าตำแหน่ง': position,
+            'ประกันสังคม': socSec,
+            'เบิกล่วงหน้า': advance,
+            'ค่าอุปกรณ์ความปลอดภัย': safety,
+            'ค่าเสื้อพนักงาน': uniform,
+            'รวม': netTotal
+          }
+        })
+
+      if (exportData.length === 0) {
+        toast.error('ไม่พบพนักงานในงวดนี้')
+        return
+      }
+
+      // Sort by Employee Code
+      exportData.sort((a, b) => {
+        return String(a['รหัสพนักงาน']).localeCompare(String(b['รหัสพนักงาน']))
+      })
+
+      // Start JSON data at row 2 so we can add a title on row 1
+      const worksheet = XLSX.utils.json_to_sheet(exportData, { origin: 'A2' })
+      XLSX.utils.sheet_add_aoa(worksheet, [[`ค่าแรง ${periodLabel}`]], { origin: 'A1' })
+
+      const workbook = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Payroll Summary')
+
+      const filename = `Payroll_Summary_${periodLabel.replace(/[\\s/\\*?:[\]]/g, '_')}.xlsx`
+      XLSX.writeFile(workbook, filename)
+
+      toast.success('ดาวน์โหลดตาราง Payroll รวมสำเร็จ')
+    } catch (err: any) {
+      console.error(err)
+      toast.error('เกิดข้อผิดพลาดในการ Export', { description: err.message })
+    } finally {
+      setIsExportingPayroll(false)
+    }
+  }
 
   const { data: periods = [] } = useQuery({
     queryKey: ['periods', user?.factory_id],
@@ -49,20 +249,22 @@ export default function Export() {
 
   const selectedPeriod = periods.find((p: any) => p.id === selectedPeriodId)
   const periodLabel = selectedPeriod
-    ? `${selectedPeriod.label || selectedPeriod.period_start + ' – ' + selectedPeriod.period_end}`
+    ? formatPeriodLabel(selectedPeriod.period_start, selectedPeriod.period_end)
     : '—'
 
-  // Mockup Data for Filters
-  const months = ['ม.ค. 2569', 'ก.พ. 2569', 'มี.ค. 2569', 'เม.ย. 2569']
+  // Extract unique months from periods
+  const uniqueMonths = Array.from(new Set(periods.map((p: any) => {
+    return format(new Date(p.period_start), 'MMM yyyy', { locale: th })
+  })))
 
   return (
     <>
-      <TopBar 
-        title="Export ข้อมูล" 
+      <TopBar
+        title="Export ข้อมูล"
         action={
           <Badge variant="secondary" className="bg-slate-100 text-slate-700 hover:bg-slate-200 px-3 py-1.5 text-sm font-medium border-slate-200">
             <Calendar className="w-4 h-4 mr-2" />
-            ค่าแรง {periodLabel}
+            งวด {periodLabel}
           </Badge>
         }
       />
@@ -72,18 +274,18 @@ export default function Export() {
         {/* ── Filter Bar ─────────────────────────────────────────── */}
         <div className="grid grid-cols-3 gap-6">
           <select className="h-12 rounded-xl border border-slate-200 px-4 text-base bg-white font-medium shadow-sm outline-none focus:border-[#1D9E75]">
-            {months.map(m => <option key={m} value={m}>{m}</option>)}
+            {uniqueMonths.map(m => <option key={m} value={m}>{m}</option>)}
           </select>
-          
-          <select 
+
+          <select
             className="h-12 rounded-xl border border-slate-200 px-4 text-base bg-white font-medium shadow-sm outline-none focus:border-[#1D9E75]"
             value={selectedPeriodId || ''}
             onChange={e => setSelectedPeriodId(e.target.value)}
           >
             {periods.map((p: any) => (
               <option key={p.id} value={p.id}>
-                {p.label || `${p.period_start} – ${p.period_end}`}
-                {p.status === 'approved' ? ' ✅' : ' (ร่าง)'}
+                {formatPeriodLabel(p.period_start, p.period_end)}
+                {p.status === 'approved' ? ' ✅' : ''}
               </option>
             ))}
           </select>
@@ -93,20 +295,26 @@ export default function Export() {
           </select>
         </div>
 
-        {/* ── 4 Cards Grid ────────────────────────────────────────── */}
-        <div className="grid grid-cols-2 gap-6">
-          
+        {/* ── 3 Cards Grid ────────────────────────────────────────── */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+
           {/* Card 1: Excel */}
           <div className="bg-white rounded-2xl border border-slate-200 p-8 shadow-sm flex flex-col items-start">
             <div className="w-12 h-12 rounded-xl bg-green-50 flex items-center justify-center mb-5">
               <Grid className="w-6 h-6 text-green-600" />
             </div>
-            <h3 className="text-lg font-bold text-slate-800 mb-2">Excel - ตาราง Payroll รวม</h3>
+            <h3 className="text-lg font-bold text-slate-800 mb-2">ตาราง Payroll รวม</h3>
             <p className="text-slate-500 text-sm mb-8 min-h-[40px]">
-              ดาวน์โหลดข้อมูล Payroll ทุกคนในรูปแบบ .xlsx เหมือน DB_FormPayroll ต้นฉบับ
+              ดาวน์โหลดข้อมูล Payroll ทุกคนในรูปแบบ .xlsx
             </p>
-            <Button variant="outline" className="mt-auto h-11 px-6 border-slate-200 text-slate-700 font-semibold hover:bg-slate-50" onClick={() => toast.info('ฟีเจอร์นี้กำลังพัฒนา')}>
-              <Download className="w-4 h-4 mr-2" /> Download Excel
+            <Button 
+              variant="outline" 
+              className="mt-auto h-11 px-6 border-slate-200 text-slate-700 font-semibold hover:bg-slate-50 disabled:opacity-50"
+              onClick={handleExportPayrollSummary}
+              disabled={isExportingPayroll || !selectedPeriodId}
+            >
+              {isExportingPayroll ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />} 
+              {isExportingPayroll ? 'กำลังสร้างไฟล์...' : 'Download Excel'}
             </Button>
           </div>
 
@@ -124,35 +332,25 @@ export default function Export() {
             </Button>
           </div>
 
-          {/* Card 3: Link */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-8 shadow-sm flex flex-col items-start">
-            <div className="w-12 h-12 rounded-xl bg-blue-50 flex items-center justify-center mb-5">
-              <Link2 className="w-6 h-6 text-blue-500" />
-            </div>
-            <h3 className="text-lg font-bold text-slate-800 mb-2">Shareable Link สำหรับพนักงาน</h3>
-            <p className="text-slate-500 text-sm mb-8 min-h-[40px]">
-              Generate ลิงก์ส่วนตัวให้พนักงานแต่ละคนเข้าดู Pay Slip ของตัวเอง
-            </p>
-            <Button 
-              variant="outline" 
-              className="mt-auto h-11 px-6 bg-blue-50 border-blue-100 text-blue-600 hover:bg-blue-100 hover:text-blue-700 font-semibold"
-              onClick={() => navigate('/share-links')}
-            >
-              ไปที่เมนูสร้างลิงก์ <ArrowRight className="w-4 h-4 ml-2" /> 
-            </Button>
-          </div>
+
 
           {/* Card 4: SSO */}
           <div className="bg-white rounded-2xl border border-slate-200 p-8 shadow-sm flex flex-col items-start">
             <div className="w-12 h-12 rounded-xl bg-amber-50 flex items-center justify-center mb-5">
               <FileText className="w-6 h-6 text-amber-600" />
             </div>
-            <h3 className="text-lg font-bold text-slate-800 mb-2">ฟอร์ม ปกส.</h3>
+            <h3 className="text-lg font-bold text-slate-800 mb-2">ฟอร์มประกันสังคม</h3>
             <p className="text-slate-500 text-sm mb-8 min-h-[40px]">
               Export ข้อมูลเลขบัตร + ยอดประกันสังคม สำหรับยื่น สปส. รายเดือน
             </p>
-            <Button variant="outline" className="mt-auto h-11 px-6 bg-amber-50 border-amber-100 text-amber-700 hover:bg-amber-100 hover:text-amber-800 font-semibold" onClick={() => toast.info('ฟีเจอร์นี้กำลังพัฒนา')}>
-              <Download className="w-4 h-4 mr-2" /> Download
+            <Button
+              variant="outline"
+              className="mt-auto h-11 px-6 bg-amber-50 border-amber-100 text-amber-700 hover:bg-amber-100 hover:text-amber-800 font-semibold disabled:opacity-50"
+              onClick={handleExportSSO}
+              disabled={isExportingSSO || !selectedPeriodId}
+            >
+              {isExportingSSO ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />}
+              {isExportingSSO ? 'กำลังสร้างไฟล์...' : 'Download'}
             </Button>
           </div>
 
@@ -165,7 +363,7 @@ export default function Export() {
             <h3 className="font-bold text-slate-800">การตั้งค่าระบบ</h3>
             <Badge variant="secondary" className="bg-blue-50 text-blue-600 hover:bg-blue-50 border-none px-2.5 py-0.5 rounded-full">
               <Lock className="w-3 h-3 mr-1 inline" />
-              SuperUser only
+              Admin only
             </Badge>
           </div>
           <div className="p-6 flex items-center justify-between">
