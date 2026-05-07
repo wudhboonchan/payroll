@@ -488,7 +488,7 @@ export default function Dashboard() {
                     }
                   </div>
                   <div>
-                    <p className="text-sm font-semibold text-slate-800">อนุมัติโดย SuperUser</p>
+                    <p className="text-sm font-semibold text-slate-800">อนุมัติโดย Admin</p>
                     <p className="text-xs text-slate-500 mt-0.5">
                       {isApproved ? 'อนุมัติแล้ว' : 'รอการอนุมัติ'}
                     </p>
