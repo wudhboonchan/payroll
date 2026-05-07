@@ -1,0 +1,76 @@
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { Toaster } from './components/ui/sonner'
+import { useAuth } from './hooks/useAuth'
+import Login from './pages/Login'
+import Dashboard from './pages/Dashboard'
+import Employees from './pages/Employees'
+import ShiftEntry from './pages/ShiftEntry'
+import PayrollEntry from './pages/PayrollEntry'
+import AdvancePaymentsList from './pages/AdvancePayments'
+import PaySlipPage from './pages/PaySlip'
+import ExportPage from './pages/Export'
+import ShareLinksPage from './pages/ShareLinks'
+import EmployeeSlipPage from './pages/EmployeeSlip'
+import { AppLayout, RequireAuth } from './components/layout/AppLayout'
+
+const Settings = () => <div className="p-8 text-slate-500">Settings (เร็วๆ นี้)</div>
+
+// Created once outside component to prevent re-instantiation on re-render
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 1000 * 60 * 5,
+      retry: 1,
+    }
+  }
+})
+
+function App() {
+  const { loading } = useAuth()
+
+  return (
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>
+        <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
+          {loading ? (
+            <div className="min-h-screen flex items-center justify-center bg-slate-50">
+              <div className="flex flex-col items-center gap-4">
+                <div className="w-10 h-10 border-4 border-[#1D9E75] border-t-transparent rounded-full animate-spin" />
+                <p className="text-slate-500 font-medium">กำลังโหลดระบบ...</p>
+              </div>
+            </div>
+          ) : (
+            <Routes>
+              <Route path="/login" element={<Login />} />
+              <Route path="/slip/:token" element={<EmployeeSlipPage />} />
+
+              <Route element={<AppLayout />}>
+                <Route element={<RequireAuth allowedRoles={['admin', 'superUser', 'normalUser']} />}>
+                  <Route path="/dashboard" element={<Dashboard />} />
+                  <Route path="/employees" element={<Employees />} />
+                  <Route path="/shifts" element={<ShiftEntry />} />
+                  <Route path="/payroll" element={<PayrollEntry />} />
+                  <Route path="/advances" element={<AdvancePaymentsList />} />
+                  <Route path="/payslip" element={<PaySlipPage />} />
+                  <Route path="/share-links" element={<ShareLinksPage />} />
+                  <Route path="/" element={<Navigate to="/dashboard" replace />} />
+                </Route>
+
+                <Route element={<RequireAuth allowedRoles={['admin', 'superUser']} />}>
+                  <Route path="/export" element={<ExportPage />} />
+                  <Route path="/settings" element={<Settings />} />
+                </Route>
+              </Route>
+
+              <Route path="*" element={<Navigate to="/login" replace />} />
+            </Routes>
+          )}
+        </div>
+        <Toaster position="top-center" richColors />
+      </BrowserRouter>
+    </QueryClientProvider>
+  )
+}
+
+export default App

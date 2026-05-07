@@ -1,0 +1,496 @@
+import { useState, useMemo, useEffect } from 'react'
+import { format, addDays, subDays } from 'date-fns'
+import { th } from 'date-fns/locale'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { supabase } from '../lib/supabase'
+import { useAppStore } from '../store/useAppStore'
+import { TopBar } from '../components/layout/TopBar'
+import { Button } from '../components/ui/button'
+import { Badge } from '../components/ui/badge'
+import { Input } from '../components/ui/input'
+import { toast } from 'sonner'
+import { 
+  ChevronLeft, 
+  ChevronRight, 
+  Save, 
+  Search, 
+  Sun, 
+  Sunset, 
+  Moon, 
+  X,
+  AlertCircle
+} from 'lucide-react'
+import { formatEmployeeName } from './EmployeeFormModal'
+
+
+
+type ShiftType = 'morning' | 'afternoon' | 'night'
+interface AssignedEmployee {
+  employee_id: string
+  code: string
+  name: string
+  shift: ShiftType
+  isNew: boolean
+  isHolidayOT: boolean
+}
+
+export default function ShiftEntry() {
+  const { user } = useAppStore()
+  const queryClient = useQueryClient()
+  const [currentDate, setCurrentDate] = useState<Date>(new Date())
+  const [isHolidayOT, setIsHolidayOT] = useState(false)
+  const [searchTerm, setSearchTerm] = useState('')
+  const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<string[]>([])
+  const [assignments, setAssignments] = useState<AssignedEmployee[]>([])
+
+  // Reset holiday flag automatically when navigating to a new day
+  const handleDateChange = (newDate: Date) => {
+    setCurrentDate(newDate)
+    setIsHolidayOT(false)
+    setSelectedEmployeeIds([])
+  }
+
+  const formattedDate = format(currentDate, 'd MMMM yyyy', { locale: th })
+  const workDateStr = format(currentDate, 'yyyy-MM-dd')
+
+  // Fetch all active employees for this factory
+  const { data: employees = [] } = useQuery({
+    queryKey: ['active-employees', user?.factory_id],
+    queryFn: async () => {
+      if (!user?.factory_id) return []
+      const { data, error } = await supabase
+        .from('employees')
+        .select('id, employee_code, first_name, last_name, prefix, nationality')
+        .eq('factory_id', user.factory_id)
+        .eq('status', 'active')
+      if (error) throw error
+      return data as any[]
+    },
+    enabled: !!user?.factory_id
+  })
+
+  // Fetch the target period (default to global selection or latest)
+  const { data: periods = [] } = useQuery({
+    queryKey: ['periods', user?.factory_id],
+    queryFn: async () => {
+      if (!user?.factory_id) return []
+      const { data, error } = await supabase
+        .from('payroll_periods')
+        .select('*')
+        .eq('factory_id', user.factory_id)
+        .order('period_start', { ascending: false })
+      if (error) throw error
+      return data
+    },
+    enabled: !!user?.factory_id
+  })
+
+  const currentPeriod = periods[0]
+
+  // Fetch existing assignments for the selected date
+  const { data: existingAssignments = [], isLoading: isLoadingAssignments } = useQuery({
+    queryKey: ['shifts-for-date', workDateStr, user?.factory_id],
+    queryFn: async () => {
+      if (!user?.factory_id || !currentPeriod?.id) return []
+      const { data, error } = await supabase
+        .from('shift_assignments')
+        .select(`
+          id, employee_id, shift_type, is_holiday_ot,
+          employee:employees(employee_code, first_name, last_name, prefix)
+        `)
+        .eq('work_date', workDateStr)
+        .eq('period_id', currentPeriod.id)
+      
+      if (error) throw error
+      return data as any[]
+    },
+  })
+
+  // Fetch shift progress for the bottom bar
+  const { data: progressData } = useQuery({
+    queryKey: ['period-progress', currentPeriod?.id],
+    queryFn: async () => {
+      if (!currentPeriod?.id) return []
+      const { data, error } = await supabase
+        .from('shift_assignments')
+        .select('work_date')
+        .eq('period_id', currentPeriod.id)
+      if (error) throw error
+      return data
+    },
+    enabled: !!currentPeriod?.id
+  })
+
+  const filledDaysSet = new Set(
+    progressData
+      ?.filter(d => d.work_date !== workDateStr)
+      .map(d => d.work_date) || []
+  )
+  
+  if (assignments.length > 0) {
+    filledDaysSet.add(workDateStr)
+  }
+
+  const daysFilled = filledDaysSet.size
+  const totalDaysInPeriod = 15 // Assuming 15-day cycle
+  const progressPercent = (daysFilled / totalDaysInPeriod) * 100
+
+  // Synchronize state with database
+  useEffect(() => {
+    if (existingAssignments && existingAssignments.length > 0) {
+      setAssignments(existingAssignments.map(a => ({
+        employee_id: a.employee_id,
+        code: a.employee.employee_code,
+        name: formatEmployeeName({
+          prefix: a.employee.prefix,
+          first_name: a.employee.first_name,
+          last_name: a.employee.last_name,
+          nationality: a.employee.nationality,
+        }),
+        shift: a.shift_type as ShiftType,
+        isNew: false,
+        isHolidayOT: a.is_holiday_ot
+      })))
+      setIsHolidayOT(existingAssignments[0].is_holiday_ot)
+    } else {
+      setAssignments([])
+      setIsHolidayOT(false)
+    }
+  }, [existingAssignments])
+
+  // Derived state: available pool (employees not in assignments)
+  const availablePool = useMemo(() => {
+    return employees.filter(emp => !assignments.some(a => a.employee_id === emp.id))
+      .filter(emp => 
+        emp.employee_code.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        emp.first_name.toLowerCase().includes(searchTerm.toLowerCase())
+      )
+  }, [employees, assignments, searchTerm])
+
+  const handleSelectEmployee = (id: string) => {
+    setSelectedEmployeeIds(prev => 
+      prev.includes(id) ? prev.filter(empId => empId !== id) : [...prev, id]
+    )
+  }
+
+  const handleAssignToShift = (shift: ShiftType) => {
+    if (selectedEmployeeIds.length === 0) return
+
+    const empsToAssign = employees.filter(e => selectedEmployeeIds.includes(e.id))
+    if (empsToAssign.length === 0) return
+
+    setAssignments(prev => [
+      ...prev,
+      ...empsToAssign.map(emp => ({
+        employee_id: emp.id,
+        code: emp.employee_code,
+        name: formatEmployeeName(emp),
+        shift,
+        isNew: true,
+        isHolidayOT: isHolidayOT
+      }))
+    ])
+    setSelectedEmployeeIds([])
+  }
+
+  const handleRemoveAssignment = (employeeId: string) => {
+    setAssignments(prev => prev.filter(a => a.employee_id !== employeeId))
+  }
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      if (!user?.factory_id || !currentPeriod?.id) throw new Error("กรุณาสร้างงวดการจ่ายเงินก่อน")
+
+      // Delete existing for this date and period to refresh
+      await supabase
+        .from('shift_assignments')
+        .delete()
+        .eq('work_date', workDateStr)
+        .eq('period_id', currentPeriod.id)
+
+      if (assignments.length === 0) return
+
+      const payload = assignments.map(a => ({
+        period_id: currentPeriod.id,
+        employee_id: a.employee_id,
+        work_date: workDateStr,
+        shift_type: a.shift,
+        is_holiday_ot: isHolidayOT,
+        entered_by: user?.id
+      }))
+
+      const { error } = await supabase
+        .from('shift_assignments')
+        .insert(payload)
+      
+      if (error) throw error
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['shifts-for-date'] })
+      queryClient.invalidateQueries({ queryKey: ['shifts'] })
+      queryClient.invalidateQueries({ queryKey: ['period-progress'] })
+      toast.success(`บันทึกข้อมูลวันที่ ${formattedDate} สำเร็จ`)
+    },
+    onError: (error: any) => {
+      toast.error('เกิดข้อผิดพลาดในการบันทึก', { description: error.message })
+    }
+  })
+
+  // Group assignments by shift
+  const morningShifts = assignments.filter(a => a.shift === 'morning')
+  const afternoonShifts = assignments.filter(a => a.shift === 'afternoon')
+  const nightShifts = assignments.filter(a => a.shift === 'night')
+
+  return (
+    <>
+      <TopBar 
+        title="ตารางลงกะการทำงาน" 
+        action={
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-lg">
+              <Button 
+                variant={isHolidayOT ? "ghost" : "default"}
+                size="sm"
+                className={!isHolidayOT ? "bg-white text-slate-800 shadow-sm hover:bg-white" : ""}
+                onClick={() => setIsHolidayOT(false)}
+              >
+                วันปกติ
+              </Button>
+              <Button 
+                variant={!isHolidayOT ? "ghost" : "default"}
+                size="sm"
+                className={isHolidayOT ? "bg-amber-100 text-amber-800 shadow-sm hover:bg-amber-200" : "text-slate-500"}
+                onClick={() => setIsHolidayOT(true)}
+              >
+                วันหยุดนักขัตฤกษ์
+              </Button>
+            </div>
+            
+            <Button 
+              className="bg-[#1D9E75] hover:bg-[#157a5a]"
+              onClick={() => saveMutation.mutate()}
+              disabled={saveMutation.isPending}
+            >
+              <Save className="w-4 h-4 mr-2" />
+              บันทึกวันนี้
+            </Button>
+          </div>
+        } 
+      />
+
+      <div className="flex flex-col h-[calc(100vh-64px)] overflow-hidden">
+        
+        {/* Date Navigator & Status */}
+        <div className={`px-8 py-4 border-b flex justify-between items-center transition-colors ${isHolidayOT ? 'bg-amber-50 border-amber-200' : 'bg-white'}`}>
+          <div className="flex items-center gap-4">
+            <Button variant="outline" size="icon" onClick={() => handleDateChange(subDays(currentDate, 1))}>
+              <ChevronLeft className="w-5 h-5" />
+            </Button>
+            <div className={`min-w-[220px] text-center px-5 py-2 rounded-xl font-bold text-xl transition-colors ${
+              isHolidayOT 
+                ? 'bg-amber-100 text-amber-800 ring-2 ring-amber-300' 
+                : 'bg-[#1D9E75]/10 text-[#1D9E75] ring-2 ring-[#1D9E75]/30'
+            }`}>
+              {formattedDate}
+            </div>
+            <Button variant="outline" size="icon" onClick={() => handleDateChange(addDays(currentDate, 1))}>
+              <ChevronRight className="w-5 h-5" />
+            </Button>
+          </div>
+
+          <div className="flex items-center gap-2 text-sm">
+            <span className="font-medium">งวดปัจจุบัน:</span>
+            <Badge variant="secondary">{currentPeriod?.label || 'ยังไม่ได้สร้างงวด'}</Badge>
+            {isHolidayOT && (
+              <Badge variant="outline" className="border-amber-400 text-amber-700 bg-amber-100/50 ml-2">
+                คิดเรท OT วันหยุด (x2)
+              </Badge>
+            )}
+          </div>
+        </div>
+
+        {/* Main Work Area */}
+        <div className="flex-1 flex overflow-hidden">
+          
+          {/* Left Panel: Employee Pool */}
+          <div className="w-80 border-r bg-white flex flex-col">
+            <div className="p-4 border-b">
+              <h3 className="font-semibold text-slate-800 mb-3">พนักงานที่ยังไม่ได้ลงกะ ({availablePool.length})</h3>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
+                <Input 
+                  placeholder="ค้นหาพนักงาน..." 
+                  className="pl-9 bg-slate-50"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
+              </div>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-4 space-y-2">
+              {availablePool.map(emp => (
+                <div 
+                  key={emp.id}
+                  onClick={() => handleSelectEmployee(emp.id)}
+                  className={`
+                    p-3 rounded-lg border cursor-pointer transition-all
+                    ${selectedEmployeeIds.includes(emp.id) 
+                      ? 'border-[#1D9E75] bg-[#1D9E75]/10 shadow-sm ring-1 ring-[#1D9E75]' 
+                      : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                    }
+                  `}
+                >
+                  <div className="flex justify-between items-center">
+                    <span className="font-medium text-slate-900">{emp.employee_code}</span>
+                  </div>
+                  <div className="text-sm text-slate-600 truncate mt-1">
+                    {formatEmployeeName(emp)}
+                  </div>
+                </div>
+              ))}
+              {availablePool.length === 0 && (
+                <div className="text-center py-8 text-slate-400 text-sm">
+                  ไม่มีพนักงานเหลือในรายชื่อ
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Right Panel: Shift Columns */}
+          <div className="flex-1 bg-slate-50/50 p-6">
+            
+            {selectedEmployeeIds.length > 0 && (
+              <div className="mb-4 bg-blue-50 border border-blue-200 text-blue-800 px-4 py-3 rounded-lg flex items-center shadow-sm animate-in fade-in slide-in-from-top-2">
+                <AlertCircle className="w-5 h-5 mr-3 text-blue-500" />
+                <span className="font-medium">เลือกพนักงาน {selectedEmployeeIds.length} คน — คลิกที่กล่องกะด้านล่างเพื่อเพิ่มพร้อมกัน</span>
+              </div>
+            )}
+
+            <div className="grid grid-cols-3 gap-6 h-full">
+              {/* Morning Shift */}
+              <ShiftColumn 
+                title="กะเช้า" 
+                time="06:00 - 18:00"
+                icon={<Sun className="w-5 h-5 text-amber-500" />}
+                assignments={morningShifts}
+                onAssign={() => handleAssignToShift('morning')}
+                onRemove={handleRemoveAssignment}
+                isSelecting={selectedEmployeeIds.length > 0}
+              />
+              
+              {/* Afternoon Shift */}
+              <ShiftColumn 
+                title="กะบ่าย" 
+                time="14:00 - 02:00"
+                icon={<Sunset className="w-5 h-5 text-orange-500" />}
+                assignments={afternoonShifts}
+                onAssign={() => handleAssignToShift('afternoon')}
+                onRemove={handleRemoveAssignment}
+                isSelecting={selectedEmployeeIds.length > 0}
+              />
+              
+              {/* Night Shift */}
+              <ShiftColumn 
+                title="กะดึก" 
+                time="22:00 - 10:00"
+                icon={<Moon className="w-5 h-5 text-indigo-500" />}
+                assignments={nightShifts}
+                onAssign={() => handleAssignToShift('night')}
+                onRemove={handleRemoveAssignment}
+                isSelecting={selectedEmployeeIds.length > 0}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Completeness Indicator Bottom Bar */}
+        <div className="h-14 bg-white border-t px-8 flex items-center justify-between shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.02)] z-10">
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-medium text-slate-600">ความคืบหน้างวดนี้:</span>
+            <div className="w-64 h-2.5 bg-slate-100 rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-[#1D9E75] transition-all duration-500 rounded-full" 
+                style={{ width: `${progressPercent}%` }}
+              ></div>
+            </div>
+            <span className="text-sm font-bold text-slate-800">{daysFilled} / {totalDaysInPeriod} วัน</span>
+          </div>
+          
+          <div className="flex gap-1.5">
+            {/* Real dots based on assignments in period */}
+            {Array.from({ length: totalDaysInPeriod }).map((_, i) => {
+              // This is simplified; in a full version we'd match the specific date index
+              const isFilled = i < daysFilled; 
+              return (
+                <div 
+                  key={i} 
+                  className={`w-2.5 h-2.5 rounded-full transition-colors ${isFilled ? 'bg-[#1D9E75]' : 'bg-slate-200'}`}
+                  title={`วันที่ ${i + 1}`}
+                />
+              )
+            })}
+          </div>
+        </div>
+
+      </div>
+    </>
+  )
+}
+
+function ShiftColumn({ title, time, icon, assignments, onAssign, onRemove, isSelecting }: any) {
+  return (
+    <div 
+      className={`
+        bg-white rounded-xl border flex flex-col overflow-hidden transition-all duration-200
+        ${isSelecting ? 'ring-2 ring-dashed ring-blue-300 hover:ring-blue-500 hover:bg-blue-50/30 cursor-pointer' : 'border-slate-200'}
+      `}
+      onClick={isSelecting ? onAssign : undefined}
+    >
+      <div className="p-4 border-b bg-slate-50/80 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-white rounded-lg shadow-sm border border-slate-100">
+            {icon}
+          </div>
+          <div>
+            <h3 className="font-bold text-slate-800">{title}</h3>
+            <p className="text-xs text-slate-500 font-mono mt-0.5">{time}</p>
+          </div>
+        </div>
+        <Badge variant="secondary" className="bg-slate-200/50 text-slate-600">{assignments.length} คน</Badge>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-3 space-y-2">
+        {assignments.map((emp: AssignedEmployee) => (
+          <div 
+            key={emp.employee_id} 
+            className="group flex items-center justify-between p-3 rounded-lg border border-slate-100 bg-white shadow-sm hover:shadow-md transition-shadow"
+            onClick={(e) => e.stopPropagation()} // Prevent column click when clicking a card
+          >
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-semibold text-slate-800">{emp.code}</span>
+                {emp.isNew && (
+                  <Badge className="bg-green-100 text-green-700 hover:bg-green-100 border-none text-[10px] px-1.5 py-0 h-4">ใหม่</Badge>
+                )}
+              </div>
+              <p className="text-sm text-slate-600 mt-1">{emp.name}</p>
+            </div>
+            
+            <button 
+              onClick={() => onRemove(emp.employee_id)}
+              className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-md opacity-0 group-hover:opacity-100 transition-all"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        ))}
+
+        {isSelecting && assignments.length === 0 && (
+          <div className="h-full min-h-[120px] flex items-center justify-center border-2 border-dashed border-blue-200 rounded-lg bg-blue-50/50">
+            <span className="text-sm font-medium text-blue-500">คลิกที่นี่เพื่อเพิ่มพนักงานเข้ากะ</span>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
