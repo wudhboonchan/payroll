@@ -55,7 +55,6 @@ export default function AdvancePayments() {
         .from('payroll_periods')
         .select('*')
         .eq('factory_id', user.factory_id)
-        .eq('status', 'draft')
         .order('period_start', { ascending: false })
         .limit(1)
         .single()
@@ -81,7 +80,7 @@ export default function AdvancePayments() {
           admin:profiles!entered_by(full_name)
         `)
         .eq('employees.factory_id', user.factory_id)
-        // .eq('period_id', period_id) // Add when period logic is fully integrated
+        .eq('period_id', period_id)
       
       if (error) throw error
       return data as any[]
