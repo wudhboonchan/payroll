@@ -317,52 +317,52 @@ export default function Dashboard() {
       <div className="p-8 space-y-6 max-w-6xl">
 
         {/* ── Row 1: 4 stat cards ─────────────────────────────────────────── */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
 
           {/* Card 1: Total Employees */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-            <p className="text-sm text-slate-500 mb-1">พนักงานทั้งหมด</p>
-            <p className="text-4xl font-bold text-slate-900 leading-none">
+          <div className="bg-white rounded-2xl border border-slate-200 p-4 md:p-5 shadow-sm overflow-hidden">
+            <p className="text-xs md:text-sm text-slate-500 mb-1 truncate">พนักงานทั้งหมด</p>
+            <p className="text-3xl md:text-4xl font-bold text-slate-900 leading-none truncate">
               {isLoading ? '—' : stats?.totalEmployees ?? 0}
             </p>
-            <p className="text-xs text-slate-400 mt-2 flex items-center gap-1">
-              <Users className="w-3 h-3" />
+            <p className="text-[10px] md:text-xs text-slate-400 mt-2 flex items-center gap-1 truncate">
+              <Users className="w-3 h-3 flex-shrink-0" />
               ที่มียอดงวดนี้
             </p>
           </div>
 
           {/* Card 2: Gross Pay */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-            <p className="text-sm text-slate-500 mb-1">ยอดจ่ายรวม (งวดนี้)</p>
-            <p className="text-3xl font-bold text-slate-900 leading-none">
+          <div className="bg-white rounded-2xl border border-slate-200 p-4 md:p-5 shadow-sm overflow-hidden">
+            <p className="text-xs md:text-sm text-slate-500 mb-1 truncate">ยอดจ่ายรวม (งวดนี้)</p>
+            <p className="text-xl sm:text-2xl md:text-3xl font-bold text-slate-900 leading-none truncate">
               {isLoading ? '—' : formatThaiCurrency(stats?.totalGrossPay ?? 0)}
             </p>
-            <p className="text-xs text-slate-400 mt-2 flex items-center gap-1">
-              <Wallet className="w-3 h-3" />
+            <p className="text-[10px] md:text-xs text-slate-400 mt-2 flex items-center gap-1 truncate">
+              <Wallet className="w-3 h-3 flex-shrink-0" />
               บาท
             </p>
           </div>
 
           {/* Card 3: Social Security */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-            <p className="text-sm text-slate-500 mb-1">รวมหักประกันสังคม</p>
-            <p className="text-3xl font-bold text-slate-900 leading-none">
+          <div className="bg-white rounded-2xl border border-slate-200 p-4 md:p-5 shadow-sm overflow-hidden">
+            <p className="text-xs md:text-sm text-slate-500 mb-1 truncate">รวมหักประกันสังคม</p>
+            <p className="text-xl sm:text-2xl md:text-3xl font-bold text-slate-900 leading-none truncate">
               {isLoading ? '—' : formatThaiCurrency(stats?.totalSocialSecurity ?? 0)}
             </p>
-            <p className="text-xs text-slate-400 mt-2 flex items-center gap-1">
-              <ShieldCheck className="w-3 h-3" />
+            <p className="text-[10px] md:text-xs text-slate-400 mt-2 flex items-center gap-1 truncate">
+              <ShieldCheck className="w-3 h-3 flex-shrink-0" />
               บาท (5%)
             </p>
           </div>
 
           {/* Card 4: Net Pay */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-            <p className="text-sm text-slate-500 mb-1">ยอดจ่ายสุทธิ</p>
-            <p className="text-3xl font-bold text-[#1D9E75] leading-none">
+          <div className="bg-white rounded-2xl border border-slate-200 p-4 md:p-5 shadow-sm overflow-hidden">
+            <p className="text-xs md:text-sm text-slate-500 mb-1 truncate">ยอดจ่ายสุทธิ</p>
+            <p className="text-xl sm:text-2xl md:text-3xl font-bold text-[#1D9E75] leading-none truncate">
               {isLoading ? '—' : formatThaiCurrency(stats?.totalNetPay ?? 0)}
             </p>
-            <p className="text-xs text-slate-400 mt-2 flex items-center gap-1">
-              <Banknote className="w-3 h-3" />
+            <p className="text-[10px] md:text-xs text-slate-400 mt-2 flex items-center gap-1 truncate">
+              <Banknote className="w-3 h-3 flex-shrink-0" />
               บาท
             </p>
           </div>
@@ -383,14 +383,14 @@ export default function Dashboard() {
             {/* Breakdown rows for last 4 periods */}
             <div className="space-y-2 mb-4">
               {recentBars.map(bar => (
-                <div key={bar.id} className="flex justify-between items-center text-sm">
-                  <span className={`${bar.id === activePeriod?.id ? 'font-semibold text-slate-800' : 'text-slate-500'}`}>
+                <div key={bar.id} className="flex justify-between items-center text-xs sm:text-sm">
+                  <span className={`${bar.id === activePeriod?.id ? 'font-semibold text-slate-800' : 'text-slate-500'} truncate mr-2`}>
                     {bar.label}
                     {bar.id === activePeriod?.id && (
                       <span className="ml-2 text-[10px] font-bold uppercase tracking-wide text-[#1D9E75] bg-[#1D9E75]/10 px-1.5 py-0.5 rounded">งวดนี้</span>
                     )}
                   </span>
-                  <span className={`font-semibold ${bar.id === activePeriod?.id ? 'text-[#1D9E75]' : 'text-slate-700'}`}>
+                  <span className={`font-semibold shrink-0 ${bar.id === activePeriod?.id ? 'text-[#1D9E75]' : 'text-slate-700'}`}>
                     {formatThaiCurrency(bar.value)} บาท
                   </span>
                 </div>

@@ -40,11 +40,11 @@ export function AppLayout({ children }: AppLayoutProps) {
         <header className="md:hidden bg-white border-b h-16 flex items-center px-4 sticky top-0 z-30">
           <button 
             onClick={() => setIsSidebarOpen(true)}
-            className="p-2 -ml-2 text-slate-600 hover:bg-slate-100 rounded-md"
+            className="p-2 -ml-2 text-slate-600 hover:bg-slate-100 rounded-md shrink-0"
           >
             <Menu className="h-6 w-6" />
           </button>
-          <div className="ml-4 font-bold text-slate-900">วิราญกร Payroll</div>
+          <div className="ml-4 font-bold text-slate-900 text-sm sm:text-base truncate">วิราญกร | ระบบจัดการค่าแรงพนักงาน</div>
         </header>
 
         <main className="flex-1 pb-8 w-full overflow-x-hidden">
