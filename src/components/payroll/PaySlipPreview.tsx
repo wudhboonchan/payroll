@@ -92,7 +92,7 @@ export const PaySlipPreview = forwardRef<HTMLDivElement, PaySlipPreviewProps>(({
       </div>
 
       {/* Employee Info */}
-      <div className="flex justify-between items-start mb-5 font-medium text-sm">
+      <div className="flex flex-col sm:flex-row justify-between sm:items-start mb-5 font-medium text-xs sm:text-sm gap-3 sm:gap-0">
         <div className="space-y-1">
           <p><span className="text-slate-500">รหัสพนักงาน:</span> {data.employee_code}</p>
           <p><span className="text-slate-500">ชื่อ - นามสกุล:</span> {data.first_name} {data.last_name}</p>
@@ -100,9 +100,9 @@ export const PaySlipPreview = forwardRef<HTMLDivElement, PaySlipPreviewProps>(({
             <p><span className="text-slate-500">หน่วยงาน:</span> {data.factory_name}</p>
           )}
         </div>
-        <div className="text-right space-y-1">
+        <div className="sm:text-right space-y-1 border-t sm:border-0 pt-2 sm:pt-0 border-slate-200">
           <p><span className="text-slate-500">งวดค่าแรง:</span> {periodLabel}</p>
-          <p className="text-xs text-slate-400 mt-1">จัดทำเมื่อ: {generatedAt}</p>
+          <p className="text-[10px] sm:text-xs text-slate-400 mt-1">จัดทำเมื่อ: {generatedAt}</p>
         </div>
       </div>
 
@@ -110,54 +110,57 @@ export const PaySlipPreview = forwardRef<HTMLDivElement, PaySlipPreviewProps>(({
       <div className="border-2 border-slate-800">
 
         {/* Table Header */}
-        <div className="grid grid-cols-12 border-b-2 border-slate-800 font-bold text-center divide-x-2 divide-slate-800">
-          <div className="col-span-5 p-2 text-sm">รายได้</div>
-          <div className="col-span-5 p-2 text-sm">รายการหัก</div>
-          <div className="col-span-2 p-2 text-sm">รวมสุทธิ</div>
+        <div className="grid grid-cols-[1fr_1fr_90px] sm:grid-cols-[1fr_1fr_120px] border-b-2 border-slate-800 font-bold text-center divide-x-2 divide-slate-800">
+          <div className="p-2 text-xs sm:text-sm">รายได้</div>
+          <div className="p-2 text-xs sm:text-sm">รายการหัก</div>
+          <div className="p-2 text-xs sm:text-sm">รวมสุทธิ</div>
         </div>
 
         {/* Table Rows */}
-        <div className="grid grid-cols-12 divide-x-2 divide-slate-800">
+        <div className="grid grid-cols-[1fr_1fr_90px] sm:grid-cols-[1fr_1fr_120px] divide-x-2 divide-slate-800">
 
           {/* Income Column */}
-          <div className="col-span-5 p-3 space-y-2">
+          <div className="p-2 sm:p-3 space-y-2">
             {incomeRows.map(r => <SlipRow key={r.label} label={r.label} value={r.value} />)}
-            {incomeRows.length === 0 && <p className="text-xs text-slate-400 text-center py-2">—</p>}
+            {incomeRows.length === 0 && <p className="text-[10px] sm:text-xs text-slate-400 text-center py-2">—</p>}
           </div>
 
           {/* Deductions Column */}
-          <div className="col-span-5 p-3 space-y-2">
+          <div className="p-2 sm:p-3 space-y-2">
             {deductRows.map(r => <SlipRow key={r.label} label={r.label} value={r.value} />)}
-            {deductRows.length === 0 && <p className="text-xs text-slate-400 text-center py-2">—</p>}
+            {deductRows.length === 0 && <p className="text-[10px] sm:text-xs text-slate-400 text-center py-2">—</p>}
           </div>
 
           {/* Net Column */}
-          <div className="col-span-2 flex flex-col items-center justify-center bg-yellow-100 p-2">
-            <span className="text-lg font-bold text-center leading-snug">
+          <div className="flex flex-col items-center justify-center bg-yellow-100 p-2 sm:p-3 overflow-hidden">
+            <span className="text-xs sm:text-lg font-bold text-center leading-snug tracking-tighter sm:tracking-normal whitespace-nowrap">
               {formatThaiCurrency(data.net_pay)}
             </span>
           </div>
         </div>
 
         {/* Footer Totals */}
-        <div className="grid grid-cols-12 border-t-2 border-slate-800 divide-x-2 divide-slate-800 font-bold bg-slate-50 text-sm">
-          <div className="col-span-5 p-2 flex justify-between">
-            <span>รวมรายได้</span>
-            <span>{formatThaiCurrency(data.total_income)}</span>
+        <div className="grid grid-cols-[1fr_1fr_90px] sm:grid-cols-[1fr_1fr_120px] border-t-2 border-slate-800 divide-x-2 divide-slate-800 font-bold bg-slate-50 text-xs sm:text-sm">
+          <div className="p-2 flex justify-between items-center">
+            <span className="truncate pr-1">รวมรายได้</span>
+            <span className="shrink-0">{formatThaiCurrency(data.total_income)}</span>
           </div>
-          <div className="col-span-5 p-2 flex justify-between">
-            <span>รวมรายการหัก</span>
-            <span>{formatThaiCurrency(data.total_deductions)}</span>
+          <div className="p-2 flex justify-between items-center">
+            <span className="truncate pr-1">รวมรายการหัก</span>
+            <span className="shrink-0">{formatThaiCurrency(data.total_deductions)}</span>
           </div>
-          <div className="col-span-2 bg-yellow-100" />
+          <div className="bg-yellow-100" />
         </div>
       </div>
 
       {/* Payment Info */}
-      <div className="mt-4 p-3 border-2 border-slate-800 space-y-1.5 text-sm font-medium">
+      <div className="mt-4 p-3 border-2 border-slate-800 space-y-1.5 text-xs sm:text-sm font-medium">
         <p>วิธีการรับเงิน: {data.payment_method === 'cash' ? 'เงินสด' : 'โอนบัญชีธนาคาร'}</p>
         {data.payment_method === 'bank_transfer' && (
-          <p>ธนาคาร: {data.bank_name || '—'} &nbsp; เลขที่บัญชี: {data.bank_account || '—'}</p>
+          <p className="flex flex-col sm:flex-row gap-1 sm:gap-4">
+            <span>ธนาคาร: {data.bank_name || '—'}</span>
+            <span>เลขที่บัญชี: {data.bank_account || '—'}</span>
+          </p>
         )}
       </div>
     </div>
@@ -168,9 +171,9 @@ PaySlipPreview.displayName = 'PaySlipPreview'
 
 function SlipRow({ label, value }: { label: string; value: number }) {
   return (
-    <div className="flex justify-between items-center text-sm">
-      <span>{label}</span>
-      <span className="font-medium tabular-nums">{formatThaiCurrency(value)}</span>
+    <div className="flex justify-between items-center text-[10px] sm:text-sm">
+      <span className="truncate pr-1">{label}</span>
+      <span className="font-medium tabular-nums text-right shrink-0">{formatThaiCurrency(value)}</span>
     </div>
   )
 }

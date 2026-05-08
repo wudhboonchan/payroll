@@ -288,12 +288,12 @@ export default function ShareLinks() {
     <>
       <TopBar title="สร้างลิงก์ดูสลิป" />
 
-      <div className="p-8 space-y-6 max-w-6xl mx-auto">
-        <div className="bg-white rounded-xl border p-5 flex flex-wrap gap-4 items-center justify-between shadow-sm">
-          <div className="flex items-center gap-3">
-            <label className="text-sm font-medium text-slate-600">งวด:</label>
+      <div className="p-4 md:p-8 space-y-4 md:space-y-6 max-w-6xl mx-auto">
+        <div className="bg-white rounded-xl border p-4 md:p-5 flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between shadow-sm">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 w-full sm:w-auto">
+            <label className="text-sm font-medium text-slate-600 shrink-0">งวด:</label>
             <select
-              className="h-9 rounded-md border border-input px-3 text-sm"
+              className="h-9 rounded-md border border-input px-3 text-sm w-full sm:w-auto"
               value={selectedPeriodId || ''}
               onChange={e => setSelectedPeriodId(e.target.value)}
             >
@@ -305,17 +305,17 @@ export default function ShareLinks() {
               ))}
             </select>
             {!isApproved && (
-              <span className="text-xs text-amber-600 bg-amber-50 border border-amber-200 px-2 py-1 rounded-md">
-                ⚠️ งวดนี้ยังไม่ได้อนุมัติ (ควรสร้างลิงก์เมื่ออนุมัติแล้วเท่านั้น)
+              <span className="text-xs text-amber-600 bg-amber-50 border border-amber-200 px-2 py-1 rounded-md mt-2 sm:mt-0 w-full sm:w-auto text-center">
+                ⚠️ งวดนี้ยังไม่ได้อนุมัติ
               </span>
             )}
           </div>
 
-          <div className="flex gap-2">
+          <div className="flex w-full sm:w-auto">
             <Button
               variant="outline"
               size="sm"
-              className="bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 hover:text-blue-800"
+              className="bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 hover:text-blue-800 w-full sm:w-auto"
               onClick={() => generateMutation.mutate()}
               disabled={!isApproved || generateMutation.isPending}
             >
@@ -343,14 +343,14 @@ export default function ShareLinks() {
         </div>
 
         <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
-          <div className="p-4 border-b flex flex-wrap gap-3 items-center justify-between bg-slate-50/60">
-            <div className="flex items-center gap-2 flex-wrap">
-              <div className="flex rounded-lg border border-slate-200 overflow-hidden text-sm">
+          <div className="p-4 border-b flex flex-col lg:flex-row gap-4 items-stretch lg:items-center justify-between bg-slate-50/60">
+            <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3">
+              <div className="flex rounded-lg border border-slate-200 overflow-hidden text-sm w-full md:w-auto">
                 {(['all', 'pending', 'confirmed', 'disputed'] as FilterStatus[]).map(s => (
                   <button
                     key={s}
                     onClick={() => setFilterStatus(s)}
-                    className={`px-3 py-1.5 transition-colors ${
+                    className={`px-2 md:px-3 py-1.5 transition-colors flex-1 md:flex-none text-xs md:text-sm ${
                       filterStatus === s ? 'bg-[#1D9E75] text-white' : 'text-slate-500 hover:bg-slate-100'
                     }`}
                   >
@@ -358,31 +358,33 @@ export default function ShareLinks() {
                   </button>
                 ))}
               </div>
-              <select
-                className="h-8 text-sm rounded-md border border-slate-200 px-2"
-                value={sortBy}
-                onChange={e => setSortBy(e.target.value as any)}
-              >
-                <option value="code">เรียงตามรหัส</option>
-                <option value="name">เรียงตามชื่อ</option>
-                <option value="status">เรียงตามสถานะ</option>
-              </select>
-              <div className="relative">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 w-3.5 h-3.5" />
-                <Input
-                  placeholder="ค้นหา..."
-                  className="h-8 pl-8 text-sm w-48"
-                  value={search}
-                  onChange={e => setSearch(e.target.value)}
-                />
+              <div className="flex gap-2 w-full md:w-auto">
+                <select
+                  className="h-9 text-sm rounded-md border border-slate-200 px-2 flex-1 md:w-auto"
+                  value={sortBy}
+                  onChange={e => setSortBy(e.target.value as any)}
+                >
+                  <option value="code">เรียงตามรหัส</option>
+                  <option value="name">เรียงตามชื่อ</option>
+                  <option value="status">เรียงตามสถานะ</option>
+                </select>
+                <div className="relative flex-1 md:w-auto">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 w-3.5 h-3.5" />
+                  <Input
+                    placeholder="ค้นหา..."
+                    className="h-9 pl-8 text-sm w-full md:w-48"
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                  />
+                </div>
               </div>
             </div>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={handleExportTxt} disabled={filtered.length === 0}>
+            <div className="flex gap-2 w-full lg:w-auto mt-2 lg:mt-0">
+              <Button variant="outline" size="sm" className="flex-1 lg:flex-none h-9" onClick={handleExportTxt} disabled={filtered.length === 0}>
                 <FileDown className="w-4 h-4 mr-1.5" />
                 Export .txt
               </Button>
-              <Button size="sm" className="bg-[#00B900] hover:bg-[#009900]" onClick={handleCopyAll} disabled={filtered.length === 0}>
+              <Button size="sm" className="bg-[#00B900] hover:bg-[#009900] flex-1 lg:flex-none h-9" onClick={handleCopyAll} disabled={filtered.length === 0}>
                 <Copy className="w-4 h-4 mr-1.5" />
                 คัดลอกลิงก์ทั้งหมด
               </Button>
@@ -396,59 +398,64 @@ export default function ShareLinks() {
               <p className="text-sm mt-1">กดปุ่ม "สร้าง / อัปเดตลิงก์" ด้านบนเพื่อเริ่มต้น</p>
             </div>
           ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-slate-500 border-b">
-                  <th className="px-4 py-3 font-medium w-24">รหัส</th>
-                  <th className="px-4 py-3 font-medium">ชื่อ - ลิงก์</th>
-                  <th className="px-4 py-3 font-medium w-40">สถานะ</th>
-                  <th className="px-4 py-3 font-medium w-28 text-right">จัดการ</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {filtered.map(t => {
-                  const emp = t.employees
-                  const slipUrl = `${window.location.origin}/slip/${t.token}`
-                  const copyText = `${emp?.employee_code} ${formatEmployeeName(emp || { first_name: '' })}\n${slipUrl}`
-                  const isExpired = new Date(t.expires_at) < new Date()
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[800px]">
+                <thead>
+                  <tr className="text-left text-slate-500 border-b bg-slate-50/30">
+                    <th className="px-4 py-3 font-medium w-24 whitespace-nowrap">รหัส</th>
+                    <th className="px-4 py-3 font-medium">ชื่อ - ลิงก์</th>
+                    <th className="px-4 py-3 font-medium w-36 whitespace-nowrap">สถานะ</th>
+                    <th className="px-4 py-3 font-medium w-52 text-right whitespace-nowrap">จัดการ</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filtered.map(t => {
+                    const emp = t.employees
+                    const slipUrl = `${window.location.origin}/slip/${t.token}`
+                    const copyText = `${emp?.employee_code} ${formatEmployeeName(emp || { first_name: '' })}\n${slipUrl}`
+                    const isExpired = new Date(t.expires_at) < new Date()
 
-                  const messageText = `ใบแจ้งค่าแรง: ${formatEmployeeName(emp || { first_name: '' })}\nคลิกเพื่อดูสลิป: ${slipUrl}`
+                    const messageText = `ใบแจ้งค่าแรง: ${formatEmployeeName(emp || { first_name: '' })}\nคลิกเพื่อดูสลิป: ${slipUrl}`
 
-                  return (
-                    <tr key={t.id} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="px-4 py-3 font-mono text-slate-700 font-semibold">{emp?.employee_code}</td>
-                      <td className="px-4 py-3">
-                        <p className="font-medium text-slate-800">{formatEmployeeName(emp || { first_name: '' })}</p>
-                        <p className="text-xs text-slate-400 font-mono mt-0.5 truncate max-w-sm">{slipUrl}</p>
-                        {t.employee_status === 'disputed' && t.dispute_reason && (
-                          <p className="text-xs text-red-600 mt-1 bg-red-50 px-2 py-1 rounded">⚠️ {t.dispute_reason}</p>
-                        )}
-                        {isExpired && <p className="text-xs text-amber-600 mt-1">⏰ ลิงก์หมดอายุแล้ว</p>}
-                      </td>
-                      <td className="px-4 py-3"><StatusBadge status={t.employee_status} /></td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="flex justify-end gap-1.5">
-                          <CopyButton text={slipUrl} label="ลิงก์" icon={<Link2 className="w-3 h-3" />} />
-                          <CopyButton text={messageText} label="ข้อความ" />
-                          <button
-                            onClick={() => {
-                              if (window.confirm('ยืนยันการสร้างลิงก์ใหม่?\n(ลิงก์เก่าจะถูกยกเลิกและไม่สามารถเข้าดูได้อีก)')) {
-                                regenMutation.mutate(t.id)
-                              }
-                            }}
-                            className="text-xs px-2 py-1 rounded-md border border-slate-200 bg-white text-slate-500 hover:border-amber-300 hover:text-amber-700 hover:bg-amber-50 flex items-center gap-1 transition-colors"
-                            title="สร้างลิงก์ใหม่ (ลิงก์เก่าจะถูกยกเลิก)"
-                          >
-                            <RotateCcw className="w-3 h-3" />
-                            รีเซ็ต
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+                    return (
+                      <tr key={t.id} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="px-4 py-3 font-mono text-slate-700 font-semibold align-top pt-4">{emp?.employee_code}</td>
+                        <td className="px-4 py-3 align-top">
+                          <p className="font-medium text-slate-800">{formatEmployeeName(emp || { first_name: '' })}</p>
+                          <p className="text-xs text-slate-400 font-mono mt-0.5 truncate max-w-[200px] md:max-w-md lg:max-w-lg" title={slipUrl}>{slipUrl}</p>
+                          {t.employee_status === 'disputed' && t.dispute_reason && (
+                            <div className="mt-1.5 inline-flex items-start bg-red-50 text-red-700 px-2.5 py-1.5 rounded-md text-xs border border-red-100 w-full max-w-sm">
+                              <AlertCircle className="w-3.5 h-3.5 mr-1.5 shrink-0 mt-0.5" />
+                              <span className="whitespace-pre-wrap leading-relaxed">{t.dispute_reason}</span>
+                            </div>
+                          )}
+                          {isExpired && <p className="text-xs text-amber-600 mt-1">⏰ ลิงก์หมดอายุแล้ว</p>}
+                        </td>
+                        <td className="px-4 py-3 align-top pt-4"><StatusBadge status={t.employee_status} /></td>
+                        <td className="px-4 py-3 text-right align-top pt-3">
+                          <div className="flex justify-end gap-1.5 flex-wrap w-[180px] ml-auto">
+                            <CopyButton text={slipUrl} label="ลิงก์" icon={<Link2 className="w-3 h-3" />} />
+                            <CopyButton text={messageText} label="ข้อความ" />
+                            <button
+                              onClick={() => {
+                                if (window.confirm('ยืนยันการสร้างลิงก์ใหม่?\n(ลิงก์เก่าจะถูกยกเลิกและไม่สามารถเข้าดูได้อีก)')) {
+                                  regenMutation.mutate(t.id)
+                                }
+                              }}
+                              className="text-xs px-2 py-1 rounded-md border border-slate-200 bg-white text-slate-500 hover:border-amber-300 hover:text-amber-700 hover:bg-amber-50 flex items-center gap-1 transition-colors"
+                              title="สร้างลิงก์ใหม่ (ลิงก์เก่าจะถูกยกเลิก)"
+                            >
+                              <RotateCcw className="w-3 h-3" />
+                              รีเซ็ต
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       </div>

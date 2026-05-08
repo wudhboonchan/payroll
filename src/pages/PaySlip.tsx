@@ -165,11 +165,11 @@ export default function PaySlipPage() {
         }
       />
 
-      <div className="flex h-[calc(100vh-64px)]">
+      <div className="flex flex-col md:flex-row min-h-[calc(100vh-64px)] md:h-[calc(100vh-64px)]">
 
         {/* Left: Employee List */}
-        <div className="w-80 border-r bg-white flex flex-col">
-          <div className="p-4 border-b space-y-3">
+        <div className="w-full md:w-80 border-b md:border-b-0 md:border-r bg-white flex flex-col h-[40vh] md:h-auto shrink-0">
+          <div className="p-4 border-b space-y-3 shrink-0">
             <Label className="text-sm font-semibold text-slate-700">รายชื่อพนักงาน</Label>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
@@ -225,9 +225,9 @@ export default function PaySlipPage() {
         </div>
 
         {/* Right: Preview */}
-        <div className="flex-1 bg-slate-100 overflow-y-auto p-8 print:p-0 print:bg-white flex justify-center items-start">
+        <div className="flex-1 bg-slate-100 overflow-y-auto p-4 md:p-8 print:p-0 print:bg-white flex justify-center items-start">
           {slipData ? (
-            <div className="shadow-lg print:shadow-none">
+            <div className="shadow-lg print:shadow-none max-w-full overflow-x-auto">
               <PaySlipPreview data={slipData} />
             </div>
           ) : (

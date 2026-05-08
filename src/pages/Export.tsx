@@ -22,18 +22,73 @@ import {
 import { formatPeriodLabel } from '../lib/formatters'
 import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
+import PayslipExportModal from '../components/payroll/PayslipExportModal'
 
 export default function Export() {
   const { user } = useAppStore()
   const navigate = useNavigate()
 
   const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(null)
+  const [exportType, setExportType] = useState<'month' | 'period'>('month')
+  const [selectedMonth, setSelectedMonth] = useState<string>('')
   const [isExportingSSO, setIsExportingSSO] = useState(false)
   const [isExportingPayroll, setIsExportingPayroll] = useState(false)
+  const [isPayslipModalOpen, setIsPayslipModalOpen] = useState(false)
+
+  // Fetch periods first so we know what is available
+  const { data: periods = [] } = useQuery({
+    queryKey: ['periods', user?.factory_id],
+    queryFn: async () => {
+      if (!user?.factory_id) return []
+      const { data, error } = await supabase
+        .from('payroll_periods')
+        .select('*')
+        .eq('factory_id', user.factory_id)
+        .order('period_start', { ascending: false })
+      if (error) throw error
+      return data as any[]
+    },
+    enabled: !!user?.factory_id,
+  })
+
+  // Extract unique months from periods
+  const uniqueMonths = Array.from(new Set(periods.map((p: any) => {
+    return format(new Date(p.period_start), 'MMM yyyy', { locale: th })
+  })))
+
+  useEffect(() => {
+    if (!selectedPeriodId && periods.length > 0) {
+      const approved = periods.find((p: any) => p.status === 'approved')
+      setSelectedPeriodId(approved?.id || periods[0].id)
+    }
+    if (!selectedMonth && uniqueMonths.length > 0) {
+      setSelectedMonth(uniqueMonths[0])
+    }
+  }, [periods, selectedPeriodId, uniqueMonths, selectedMonth])
+
+  const getPeriodsToExport = () => {
+    if (exportType === 'period') {
+      return selectedPeriodId ? [selectedPeriodId] : []
+    } else {
+      return periods
+        .filter((p: any) => format(new Date(p.period_start), 'MMM yyyy', { locale: th }) === selectedMonth)
+        .map((p: any) => p.id)
+    }
+  }
+
+  const getExportLabel = () => {
+    if (exportType === 'period') {
+      const p = periods.find((p: any) => p.id === selectedPeriodId)
+      return p ? formatPeriodLabel(p.period_start, p.period_end) : '—'
+    } else {
+      return `เดือน_${selectedMonth}`
+    }
+  }
 
   const handleExportSSO = async () => {
-    if (!selectedPeriodId) {
-      toast.error('กรุณาเลือกงวดการจ่ายเงิน')
+    const periodIds = getPeriodsToExport()
+    if (periodIds.length === 0) {
+      toast.error('กรุณาเลือกช่วงเวลาที่ต้องการส่งออก')
       return
     }
 
@@ -54,32 +109,51 @@ export default function Export() {
             nationality
           )
         `)
-        .eq('period_id', selectedPeriodId)
+        .in('period_id', periodIds)
 
       if (error) throw error
 
       if (!data || data.length === 0) {
-        toast.error('ไม่พบข้อมูลการจ่ายเงินในงวดนี้')
+        toast.error('ไม่พบข้อมูลการจ่ายเงินในช่วงเวลานี้')
         return
       }
 
-      const groupedData: Record<string, any[]> = {}
+      const ssoMap: Record<string, any> = {}
 
       data.filter((row: any) => row.employee).forEach((row: any) => {
         const emp = row.employee
         const nat = emp.nationality || 'ไทย'
+        const code = emp.national_id || emp.first_name // fallback identifier
 
+        const key = `${nat}_${code}`
+
+        if (!ssoMap[key]) {
+          ssoMap[key] = {
+            nat,
+            emp,
+            amount_normal: 0,
+            deduct_social_security: 0
+          }
+        }
+
+        ssoMap[key].amount_normal += (row.amount_normal || 0)
+        ssoMap[key].deduct_social_security += (row.deduct_social_security || 0)
+      })
+
+      const groupedData: Record<string, any[]> = {}
+      
+      Object.values(ssoMap).forEach((item: any) => {
+        const { nat, emp, amount_normal, deduct_social_security } = item
         if (!groupedData[nat]) {
           groupedData[nat] = []
         }
-
         groupedData[nat].push({
           'เลขบัตรประชาชน': emp.national_id || '',
           'คำนำหน้า': emp.prefix || '',
           'ชื่อ': emp.first_name || '',
           'สกุล': emp.last_name || '',
-          'ค่าจ้าง': row.amount_normal || 0,
-          'เงินสมทบ': row.deduct_social_security || 0
+          'ค่าจ้าง': amount_normal,
+          'เงินสมทบ': Math.abs(deduct_social_security)
         })
       })
 
@@ -99,7 +173,8 @@ export default function Export() {
         XLSX.utils.book_append_sheet(workbook, worksheet, safeSheetName)
       }
 
-      const filename = `SSO_${periodLabel.replace(/\\s+/g, '_')}.xlsx`
+      const exportLabel = getExportLabel()
+      const filename = `SSO_${exportLabel.replace(/[\s/\*?:\[\]]/g, '_')}.xlsx`
       XLSX.writeFile(workbook, filename)
 
       toast.success('ดาวน์โหลดฟอร์มประกันสังคมสำเร็จ')
@@ -112,8 +187,9 @@ export default function Export() {
   }
 
   const handleExportPayrollSummary = async () => {
-    if (!selectedPeriodId) {
-      toast.error('กรุณาเลือกงวดการจ่ายเงิน')
+    const periodIds = getPeriodsToExport()
+    if (periodIds.length === 0) {
+      toast.error('กรุณาเลือกช่วงเวลาที่ต้องการส่งออก')
       return
     }
     
@@ -142,56 +218,82 @@ export default function Export() {
             last_name
           )
         `)
-        .eq('period_id', selectedPeriodId)
+        .in('period_id', periodIds)
 
       if (error) throw error
 
       if (!data || data.length === 0) {
-        toast.error('ไม่พบข้อมูลการจ่ายเงินในงวดนี้')
+        toast.error('ไม่พบข้อมูลการจ่ายเงินในช่วงเวลานี้')
         return
       }
 
-      const exportData = data
-        .filter((row: any) => row.employee) 
-        .map((row: any) => {
-          const emp = row.employee
+      const exportDataMap: Record<string, any> = {}
 
-          // Get values or default to 0
-          const normal = row.amount_normal || 0
-          const shift = row.amount_shift || 0
-          const ot = row.amount_ot || 0
-          const wood = row.amount_wood_excess || 0
-          const film = row.amount_film || 0
-          const special = row.amount_special || 0
-          const diligence = row.amount_diligence || 0
-          const position = row.amount_position || 0
+      data.filter((row: any) => row.employee).forEach((row: any) => {
+        const emp = row.employee
+        const code = emp.employee_code
 
-          const socSec = Math.abs(row.deduct_social_security || 0)
-          const advance = Math.abs(row.deduct_advance || 0)
-          const safety = Math.abs(row.deduct_safety_equipment || 0)
-          const uniform = Math.abs(row.deduct_uniform || 0)
+        const normal = row.amount_normal || 0
+        const shift = row.amount_shift || 0
+        const ot = row.amount_ot || 0
+        const wood = row.amount_wood_excess || 0
+        const film = row.amount_film || 0
+        const special = row.amount_special || 0
+        const diligence = row.amount_diligence || 0
+        const position = row.amount_position || 0
 
-          const wageTotal = normal + shift
-          const incomeTotal = wageTotal + ot + wood + film + special + diligence + position
-          const deductionTotal = socSec + advance + safety + uniform
+        const socSec = Math.abs(row.deduct_social_security || 0)
+        const advance = Math.abs(row.deduct_advance || 0)
+        const safety = Math.abs(row.deduct_safety_equipment || 0)
+        const uniform = Math.abs(row.deduct_uniform || 0)
+
+        if (!exportDataMap[code]) {
+          exportDataMap[code] = {
+            emp,
+            normal: 0, shift: 0, ot: 0, wood: 0, film: 0, special: 0, diligence: 0, position: 0,
+            socSec: 0, advance: 0, safety: 0, uniform: 0
+          }
+        }
+
+        exportDataMap[code].normal += normal
+        exportDataMap[code].shift += shift
+        exportDataMap[code].ot += ot
+        exportDataMap[code].wood += wood
+        exportDataMap[code].film += film
+        exportDataMap[code].special += special
+        exportDataMap[code].diligence += diligence
+        exportDataMap[code].position += position
+        exportDataMap[code].socSec += socSec
+        exportDataMap[code].advance += advance
+        exportDataMap[code].safety += safety
+        exportDataMap[code].uniform += uniform
+      })
+
+      const exportData = Object.values(exportDataMap)
+        .map((item: any) => {
+          const emp = item.emp
+
+          const wageTotal = item.normal + item.shift
+          const incomeTotal = wageTotal + item.ot + item.wood + item.film + item.special + item.diligence + item.position
+          const deductionTotal = item.socSec + item.advance + item.safety + item.uniform
           const netTotal = incomeTotal - deductionTotal
 
           return {
             'รหัสพนักงาน': emp.employee_code || '',
             'ชื่อ-นามสกุล': `${emp.first_name || ''} ${emp.last_name || ''}`.trim(),
             'ค่าจ้างรวม': wageTotal,
-            'ค่าจ้างปกติ': normal,
-            'ค่ากะ': shift,
-            'OT': ot,
-            'ค่าไม้เกิน': wood,
-            'ค่าฟิล์ม': film,
-            'ค่าพิเศษ': special,
-            'เบี้ยขยัน': diligence,
-            'ค่าตำแหน่ง': position,
-            'ประกันสังคม': socSec,
-            'เบิกล่วงหน้า': advance,
-            'ค่าอุปกรณ์ความปลอดภัย': safety,
-            'ค่าเสื้อพนักงาน': uniform,
+            'ค่าจ้างปกติ': item.normal,
+            'ค่ากะ': item.shift,
+            'OT': item.ot,
+            'ค่าไม้เกิน': item.wood,
+            'ค่าฟิล์ม': item.film,
+            'ค่าพิเศษ': item.special,
+            'เบี้ยขยัน': item.diligence,
+            'ค่าตำแหน่ง': item.position,
+            'ประกันสังคม': item.socSec,
+            'เบิกล่วงหน้า': item.advance,
+            'ค่าอุปกรณ์ความปลอดภัย': item.safety,
+            'ค่าเสื้อพนักงาน': item.uniform,
             'รวม': netTotal
           }
         })
@@ -207,13 +309,14 @@ export default function Export() {
       })
 
       // Start JSON data at row 2 so we can add a title on row 1
+      const exportLabel = getExportLabel()
       const worksheet = XLSX.utils.json_to_sheet(exportData, { origin: 'A2' })
-      XLSX.utils.sheet_add_aoa(worksheet, [[`ค่าแรง ${periodLabel}`]], { origin: 'A1' })
+      XLSX.utils.sheet_add_aoa(worksheet, [[`ค่าแรง ${exportLabel}`]], { origin: 'A1' })
 
       const workbook = XLSX.utils.book_new()
       XLSX.utils.book_append_sheet(workbook, worksheet, 'Payroll Summary')
 
-      const filename = `Payroll_Summary_${periodLabel.replace(/[\\s/\\*?:[\]]/g, '_')}.xlsx`
+      const filename = `Payroll_Summary_${exportLabel.replace(/[\s/\*?:\[\]]/g, '_')}.xlsx`
       XLSX.writeFile(workbook, filename)
 
       toast.success('ดาวน์โหลดตาราง Payroll รวมสำเร็จ')
@@ -225,37 +328,7 @@ export default function Export() {
     }
   }
 
-  const { data: periods = [] } = useQuery({
-    queryKey: ['periods', user?.factory_id],
-    queryFn: async () => {
-      if (!user?.factory_id) return []
-      const { data, error } = await supabase
-        .from('payroll_periods')
-        .select('*')
-        .eq('factory_id', user.factory_id)
-        .order('period_start', { ascending: false })
-      if (error) throw error
-      return data as any[]
-    },
-    enabled: !!user?.factory_id,
-  })
-
-  useEffect(() => {
-    if (!selectedPeriodId && periods.length > 0) {
-      const approved = periods.find((p: any) => p.status === 'approved')
-      setSelectedPeriodId(approved?.id || periods[0].id)
-    }
-  }, [periods, selectedPeriodId])
-
-  const selectedPeriod = periods.find((p: any) => p.id === selectedPeriodId)
-  const periodLabel = selectedPeriod
-    ? formatPeriodLabel(selectedPeriod.period_start, selectedPeriod.period_end)
-    : '—'
-
-  // Extract unique months from periods
-  const uniqueMonths = Array.from(new Set(periods.map((p: any) => {
-    return format(new Date(p.period_start), 'MMM yyyy', { locale: th })
-  })))
+  const displayLabel = getExportLabel()
 
   return (
     <>
@@ -264,35 +337,46 @@ export default function Export() {
         action={
           <Badge variant="secondary" className="bg-slate-100 text-slate-700 hover:bg-slate-200 px-3 py-1.5 text-sm font-medium border-slate-200">
             <Calendar className="w-4 h-4 mr-2" />
-            งวด {periodLabel}
+            {exportType === 'month' ? 'รายเดือน' : 'รายงวด'}: {displayLabel.replace('เดือน_', '')}
           </Badge>
         }
       />
 
-      <div className="p-8 space-y-8 max-w-5xl mx-auto">
+      <div className="p-4 md:p-8 space-y-6 md:space-y-8 max-w-5xl mx-auto">
 
         {/* ── Filter Bar ─────────────────────────────────────────── */}
-        <div className="grid grid-cols-3 gap-6">
-          <select className="h-12 rounded-xl border border-slate-200 px-4 text-base bg-white font-medium shadow-sm outline-none focus:border-[#1D9E75]">
-            {uniqueMonths.map(m => <option key={m} value={m}>{m}</option>)}
-          </select>
-
-          <select
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+          <select 
             className="h-12 rounded-xl border border-slate-200 px-4 text-base bg-white font-medium shadow-sm outline-none focus:border-[#1D9E75]"
-            value={selectedPeriodId || ''}
-            onChange={e => setSelectedPeriodId(e.target.value)}
+            value={exportType}
+            onChange={e => setExportType(e.target.value as 'month' | 'period')}
           >
-            {periods.map((p: any) => (
-              <option key={p.id} value={p.id}>
-                {formatPeriodLabel(p.period_start, p.period_end)}
-                {p.status === 'approved' ? ' ✅' : ''}
-              </option>
-            ))}
+            <option value="month">ส่งออกแบบรายเดือน</option>
+            <option value="period">ส่งออกแบบรายงวด</option>
           </select>
 
-          <select className="h-12 rounded-xl border border-slate-200 px-4 text-base bg-white font-medium shadow-sm outline-none focus:border-[#1D9E75]">
-            <option>พนักงานทุกคน</option>
-          </select>
+          {exportType === 'month' ? (
+            <select
+              className="h-12 rounded-xl border border-slate-200 px-4 text-base bg-white font-medium shadow-sm outline-none focus:border-[#1D9E75]"
+              value={selectedMonth || ''}
+              onChange={e => setSelectedMonth(e.target.value)}
+            >
+              {uniqueMonths.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+          ) : (
+            <select
+              className="h-12 rounded-xl border border-slate-200 px-4 text-base bg-white font-medium shadow-sm outline-none focus:border-[#1D9E75]"
+              value={selectedPeriodId || ''}
+              onChange={e => setSelectedPeriodId(e.target.value)}
+            >
+              {periods.map((p: any) => (
+                <option key={p.id} value={p.id}>
+                  {formatPeriodLabel(p.period_start, p.period_end)}
+                  {p.status === 'approved' ? ' ✅' : ''}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
 
         {/* ── 3 Cards Grid ────────────────────────────────────────── */}
@@ -309,9 +393,9 @@ export default function Export() {
             </p>
             <Button 
               variant="outline" 
-              className="mt-auto h-11 px-6 border-slate-200 text-slate-700 font-semibold hover:bg-slate-50 disabled:opacity-50"
+              className="mt-auto h-11 px-6 bg-green-50 border-green-100 text-green-700 hover:bg-green-100 hover:text-green-800 font-semibold disabled:opacity-50"
               onClick={handleExportPayrollSummary}
-              disabled={isExportingPayroll || !selectedPeriodId}
+              disabled={isExportingPayroll || (exportType === 'period' && !selectedPeriodId)}
             >
               {isExportingPayroll ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />} 
               {isExportingPayroll ? 'กำลังสร้างไฟล์...' : 'Download Excel'}
@@ -325,9 +409,13 @@ export default function Export() {
             </div>
             <h3 className="text-lg font-bold text-slate-800 mb-2">PDF - Pay Slip รายบุคคล</h3>
             <p className="text-slate-500 text-sm mb-8 min-h-[40px]">
-              สร้างไฟล์ PDF Pay Slip แยกตามรายชื่อพนักงาน หรือรวมเป็นไฟล์เดียว
+              สร้างไฟล์ PDF Pay Slip แยกตามรายชื่อพนักงาน หรือพิมพ์ทั้งบริษัท
             </p>
-            <Button variant="outline" className="mt-auto h-11 px-6 bg-red-50 border-red-100 text-red-600 hover:bg-red-100 hover:text-red-700 font-semibold" onClick={() => toast.info('ฟีเจอร์นี้กำลังพัฒนา')}>
+            <Button 
+              variant="outline" 
+              className="mt-auto h-11 px-6 bg-red-50 border-red-100 text-red-600 hover:bg-red-100 hover:text-red-700 font-semibold" 
+              onClick={() => setIsPayslipModalOpen(true)}
+            >
               <Download className="w-4 h-4 mr-2" /> Download PDF
             </Button>
           </div>
@@ -337,7 +425,7 @@ export default function Export() {
           {/* Card 4: SSO */}
           <div className="bg-white rounded-2xl border border-slate-200 p-8 shadow-sm flex flex-col items-start">
             <div className="w-12 h-12 rounded-xl bg-amber-50 flex items-center justify-center mb-5">
-              <FileText className="w-6 h-6 text-amber-600" />
+              <Grid className="w-6 h-6 text-amber-600" />
             </div>
             <h3 className="text-lg font-bold text-slate-800 mb-2">ฟอร์มประกันสังคม</h3>
             <p className="text-slate-500 text-sm mb-8 min-h-[40px]">
@@ -347,10 +435,10 @@ export default function Export() {
               variant="outline"
               className="mt-auto h-11 px-6 bg-amber-50 border-amber-100 text-amber-700 hover:bg-amber-100 hover:text-amber-800 font-semibold disabled:opacity-50"
               onClick={handleExportSSO}
-              disabled={isExportingSSO || !selectedPeriodId}
+              disabled={isExportingSSO || (exportType === 'period' && !selectedPeriodId)}
             >
               {isExportingSSO ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />}
-              {isExportingSSO ? 'กำลังสร้างไฟล์...' : 'Download'}
+              {isExportingSSO ? 'กำลังสร้างไฟล์...' : 'Download Excel'}
             </Button>
           </div>
 
@@ -358,30 +446,36 @@ export default function Export() {
 
         {/* ── Settings ────────────────────────────────────────────── */}
         <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-          <div className="px-6 py-4 border-b border-slate-100 flex items-center gap-3 bg-slate-50/50">
-            <Settings className="w-5 h-5 text-slate-600" />
-            <h3 className="font-bold text-slate-800">การตั้งค่าระบบ</h3>
-            <Badge variant="secondary" className="bg-blue-50 text-blue-600 hover:bg-blue-50 border-none px-2.5 py-0.5 rounded-full">
+          <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-3 bg-slate-50/50">
+            <Settings className="w-5 h-5 text-slate-600 flex-shrink-0" />
+            <h3 className="font-bold text-slate-800 flex-1 truncate">การตั้งค่าระบบ</h3>
+            <Badge variant="secondary" className="bg-blue-50 text-blue-600 hover:bg-blue-50 border-none px-2.5 py-0.5 rounded-full flex-shrink-0">
               <Lock className="w-3 h-3 mr-1 inline" />
-              Admin only
+              Admin
             </Badge>
           </div>
-          <div className="p-6 flex items-center justify-between">
+          <div className="p-5 md:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <h4 className="text-base font-bold text-slate-800">อัตราประกันสังคม (ฝั่งลูกจ้าง)</h4>
-              <p className="text-sm text-slate-500 mt-1">คำนวณจากคอลัมน์ "ปกติ" (ค่าจ้างปกติ)</p>
+              <p className="text-xs sm:text-sm text-slate-500 mt-1">คำนวณจากคอลัมน์ "ปกติ" (ค่าจ้างปกติ)</p>
             </div>
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3 self-start sm:self-auto">
               <div className="relative">
-                <Input defaultValue="5" className="w-24 text-center pr-8 h-12 text-lg font-bold border-slate-200 focus:border-[#1D9E75]" />
-                <span className="absolute right-4 top-1/2 -translate-y-1/2 font-bold text-slate-400">%</span>
+                <Input defaultValue="5" className="w-20 sm:w-24 text-center pr-8 h-10 sm:h-12 text-base sm:text-lg font-bold border-slate-200 focus:border-[#1D9E75]" />
+                <span className="absolute right-3 sm:right-4 top-1/2 -translate-y-1/2 font-bold text-slate-400">%</span>
               </div>
-              <Lock className="w-5 h-5 text-blue-400" />
+              <Lock className="w-4 h-4 sm:w-5 sm:h-5 text-blue-400" />
             </div>
           </div>
         </div>
 
       </div>
+
+      <PayslipExportModal 
+        isOpen={isPayslipModalOpen} 
+        onClose={() => setIsPayslipModalOpen(false)} 
+        uniqueMonths={uniqueMonths}
+      />
     </>
   )
 }

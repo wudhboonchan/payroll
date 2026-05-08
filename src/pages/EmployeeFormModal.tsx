@@ -93,7 +93,7 @@ interface Props {
 }
 
 const SELECT_CLASS =
-  'flex h-12 w-full rounded-lg border-2 border-slate-100 bg-slate-50 px-4 py-2 text-base transition-all focus:border-[#1D9E75] outline-none'
+  'flex h-10 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50'
 
 export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props) {
   const { user } = useAppStore()
@@ -221,15 +221,15 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-4xl p-0 overflow-hidden border-none shadow-2xl max-h-[92vh] flex flex-col">
+      <DialogContent className="max-w-md md:max-w-4xl p-0 overflow-hidden border-none shadow-2xl max-h-[90vh] flex flex-col">
         {/* ── Green Header ── */}
-        <div className="bg-[#1D9E75] p-6 text-white flex-shrink-0">
+        <div className="bg-[#1D9E75] p-5 md:p-6 text-white flex-shrink-0">
           <DialogHeader>
-            <DialogTitle className="text-2xl font-bold flex items-center gap-3">
-              <UserPlus className="w-7 h-7" />
+            <DialogTitle className="text-xl md:text-2xl font-bold flex items-center gap-2 md:gap-3">
+              <UserPlus className="w-6 h-6 md:w-7 md:h-7" />
               {employeeId ? 'แก้ไขข้อมูลพนักงาน' : 'เพิ่มพนักงานใหม่'}
             </DialogTitle>
-            <p className="text-emerald-100 mt-1 text-sm">
+            <p className="text-emerald-100 mt-1 text-xs md:text-sm">
               {employeeId
                 ? 'แก้ไขข้อมูลพนักงานและบันทึกการเปลี่ยนแปลง'
                 : 'กรอกข้อมูลพนักงานใหม่ให้ครบถ้วน'}
@@ -242,23 +242,23 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
           onSubmit={handleSubmit(onSubmit as any)}
           className="flex-1 overflow-y-auto"
         >
-          <div className="p-8 bg-white space-y-7">
+          <div className="p-5 md:p-8 bg-white space-y-6">
 
             {/* Row 1: Employee Code + Nationality */}
-            <div className="grid grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
               <div className="space-y-2">
-                <Label className="text-base font-bold text-slate-800">รหัสพนักงาน *</Label>
+                <Label className="text-sm font-semibold text-slate-700">รหัสพนักงาน *</Label>
                 <Input
                   {...register('employee_code')}
                   placeholder="เช่น 001"
-                  className="h-12 text-base border-2 border-slate-100 bg-slate-50 focus:border-[#1D9E75]"
+                  className="w-full"
                 />
                 {errors.employee_code && (
                   <p className="text-xs text-red-500">{errors.employee_code.message}</p>
                 )}
               </div>
               <div className="space-y-2">
-                <Label className="text-base font-bold text-slate-800">สัญชาติ *</Label>
+                <Label className="text-sm font-semibold text-slate-700">สัญชาติ *</Label>
                 <select {...register('nationality')} className={SELECT_CLASS}>
                   {NATIONALITIES.map((n) => (
                     <option key={n.value} value={n.value}>
@@ -270,9 +270,9 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
             </div>
 
             {/* Row 2: Prefix + First Name + Last Name */}
-            <div className="grid grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
               <div className="space-y-2">
-                <Label className="text-base font-bold text-slate-800">คำนำหน้า</Label>
+                <Label className="text-sm font-semibold text-slate-700">คำนำหน้า</Label>
                 <select {...register('prefix')} className={SELECT_CLASS}>
                   <option value="">เลือก</option>
                   <option value="นาย">นาย</option>
@@ -281,28 +281,28 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
                 </select>
               </div>
               <div className="space-y-2">
-                <Label className="text-base font-bold text-slate-800">ชื่อ *</Label>
+                <Label className="text-sm font-semibold text-slate-700">ชื่อ *</Label>
                 <Input
                   {...register('first_name')}
-                  className="h-12 text-base border-2 border-slate-100 bg-slate-50 focus:border-[#1D9E75]"
+                  className="w-full"
                 />
                 {errors.first_name && (
                   <p className="text-xs text-red-500">{errors.first_name.message}</p>
                 )}
               </div>
               <div className="space-y-2">
-                <Label className="text-base font-bold text-slate-800">
+                <Label className="text-sm font-semibold text-slate-700">
                   นามสกุล{isThai ? ' *' : ' (ไม่บังคับ)'}
                 </Label>
                 <Input
                   {...register('last_name')}
-                  className="h-12 text-base border-2 border-slate-100 bg-slate-50 focus:border-[#1D9E75]"
+                  className="w-full"
                 />
                 {errors.last_name && (
                   <p className="text-xs text-red-500">{errors.last_name.message}</p>
                 )}
                 {!isThai && (
-                  <p className="text-xs text-slate-400">
+                  <p className="text-[10px] sm:text-xs text-slate-400">
                     พนักงานต่างชาติไม่บังคับกรอกนามสกุล
                   </p>
                 )}
@@ -310,29 +310,29 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
             </div>
 
             {/* Row 3: National ID + Wage */}
-            <div className="grid grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
               <div className="space-y-2">
-                <Label className="text-base font-bold text-slate-800">
+                <Label className="text-sm font-semibold text-slate-700">
                   เลขบัตรประชาชน / Passport
                 </Label>
                 <Input
                   {...register('national_id')}
-                  className="h-12 text-base border-2 border-slate-100 bg-slate-50 focus:border-[#1D9E75]"
+                  className="w-full"
                 />
               </div>
               <div className="space-y-2">
-                <Label className="text-base font-bold text-slate-800">
+                <Label className="text-sm font-semibold text-slate-700">
                   อัตราค่าจ้างรายวัน (บาท) *
                 </Label>
                 <div className="relative group">
-                  <span className="absolute left-4 top-1/2 -translate-y-1/2 font-bold text-slate-400 group-focus-within:text-[#1D9E75]">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 font-medium text-slate-400 group-focus-within:text-[#1D9E75] text-sm">
                     ฿
                   </span>
                   <Input
                     type="number"
                     step="0.01"
                     {...register('rate_per_12h')}
-                    className="pl-8 h-12 text-base border-2 border-slate-100 bg-slate-50 focus:border-[#1D9E75]"
+                    className="pl-8 w-full"
                   />
                 </div>
                 {errors.rate_per_12h && (
@@ -342,11 +342,11 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
             </div>
 
             {/* Row 4: Payment Method */}
-            <div className="space-y-4 p-5 border-2 border-slate-100 rounded-xl bg-slate-50">
+            <div className="space-y-4 p-4 md:p-5 border border-slate-200 rounded-xl bg-slate-50">
               <div className="space-y-3">
-                <Label className="text-base font-bold text-slate-800">วิธีการรับเงิน</Label>
-                <div className="flex gap-8">
-                  <label className="flex items-center gap-2 text-base cursor-pointer">
+                <Label className="text-sm font-semibold text-slate-700">วิธีการรับเงิน</Label>
+                <div className="flex flex-wrap gap-4 md:gap-8">
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
                     <input
                       type="radio"
                       value="bank_transfer"
@@ -355,7 +355,7 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
                     />
                     โอนผ่านบัญชี
                   </label>
-                  <label className="flex items-center gap-2 text-base cursor-pointer">
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
                     <input
                       type="radio"
                       value="cash"
@@ -368,9 +368,9 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
               </div>
 
               {paymentMethod === 'bank_transfer' && (
-                <div className="grid grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
                   <div className="space-y-2">
-                    <Label className="text-base font-bold text-slate-800">ธนาคาร *</Label>
+                    <Label className="text-sm font-semibold text-slate-700">ธนาคาร *</Label>
                     <select {...register('bank_name')} className={SELECT_CLASS}>
                       <option value="">เลือกธนาคาร...</option>
                       <option value="กสิกรไทย">กสิกรไทย (KBANK)</option>
@@ -387,11 +387,11 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
                     )}
                   </div>
                   <div className="space-y-2">
-                    <Label className="text-base font-bold text-slate-800">เลขที่บัญชี *</Label>
+                    <Label className="text-sm font-semibold text-slate-700">เลขที่บัญชี *</Label>
                     <Input
                       {...register('bank_account')}
                       placeholder="XXXXXXXXXX"
-                      className="h-12 text-base border-2 border-slate-100 bg-white focus:border-[#1D9E75]"
+                      className="w-full bg-white"
                     />
                     {errors.bank_account && (
                       <p className="text-xs text-red-500">{errors.bank_account.message}</p>
@@ -402,32 +402,32 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
             </div>
 
             {/* Row 5: Status + Notes */}
-            <div className="grid grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
               <div className="space-y-2">
-                <Label className="text-base font-bold text-slate-800">สถานะ</Label>
+                <Label className="text-sm font-semibold text-slate-700">สถานะ</Label>
                 <select {...register('status')} className={SELECT_CLASS}>
                   <option value="active">พนักงานปัจจุบัน</option>
                   <option value="inactive">พ้นสภาพพนักงาน</option>
                 </select>
               </div>
               <div className="space-y-2">
-                <Label className="text-base font-bold text-slate-800">หมายเหตุ</Label>
+                <Label className="text-sm font-semibold text-slate-700">หมายเหตุ</Label>
                 <Input
                   {...register('notes')}
-                  className="h-12 text-base border-2 border-slate-100 bg-slate-50 focus:border-[#1D9E75]"
+                  className="w-full"
                 />
               </div>
             </div>
 
             {/* Data Complete Checkbox */}
-            <div className={`flex items-start gap-4 p-5 rounded-xl border-2 transition-all ${dataComplete
+            <div className={`flex items-start gap-3 p-4 md:p-5 rounded-xl border transition-all ${dataComplete
               ? 'border-[#1D9E75] bg-[#1D9E75]/5'
               : 'border-amber-200 bg-amber-50'
               }`}>
               <button
                 type="button"
                 onClick={() => setValue('data_complete', !dataComplete, { shouldDirty: true })}
-                className={`mt-0.5 w-6 h-6 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-all ${dataComplete
+                className={`mt-0.5 w-5 h-5 rounded border flex items-center justify-center flex-shrink-0 transition-all ${dataComplete
                   ? 'bg-[#1D9E75] border-[#1D9E75]'
                   : 'border-amber-400 bg-white'
                   }`}
@@ -439,11 +439,11 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
                 )}
               </button>
               <div className="flex-1">
-                <p className={`font-bold text-base ${dataComplete ? 'text-[#1D9E75]' : 'text-amber-800'
+                <p className={`font-semibold text-sm ${dataComplete ? 'text-[#1D9E75]' : 'text-amber-800'
                   }`}>
                   {dataComplete ? '✅ ข้อมูลสมบูรณ์' : '⚠️ ข้อมูลยังไม่สมบูรณ์ (Pending)'}
                 </p>
-                <p className={`text-sm mt-0.5 ${dataComplete ? 'text-emerald-700' : 'text-amber-700'
+                <p className={`text-[10px] sm:text-xs mt-0.5 ${dataComplete ? 'text-emerald-700' : 'text-amber-700'
                   }`}>
                   {dataComplete
                     ? 'ข้อมูลพนักงานได้รับการตรวจสอบและยืนยันความถูกต้องแล้ว'
@@ -455,20 +455,18 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
           </div>
 
           {/* Footer */}
-          <div className="flex justify-end gap-4 px-8 py-5 border-t border-slate-100 bg-white">
+          <div className="flex justify-end gap-3 p-4 md:px-8 md:py-5 border-t border-slate-100 bg-white sticky bottom-0 z-10">
             <Button
               type="button"
               variant="outline"
-              size="lg"
               onClick={onClose}
-              className="h-12 px-10 text-base font-bold border-2"
+              className="flex-1 md:flex-none"
             >
               ยกเลิก
             </Button>
             <Button
               type="submit"
-              size="lg"
-              className="h-12 px-12 text-base font-bold bg-[#1D9E75] hover:bg-[#157a5a] shadow-lg shadow-[#1D9E75]/20"
+              className="bg-[#1D9E75] hover:bg-[#157a5a] flex-1 md:flex-none"
               disabled={mutation.isPending}
             >
               {mutation.isPending ? 'กำลังบันทึก...' : 'บันทึกข้อมูล'}

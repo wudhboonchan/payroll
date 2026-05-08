@@ -95,10 +95,10 @@ export default function Employees() {
         } 
       />
       
-      <div className="p-8">
-        <div className="flex justify-between items-center mb-6">
-          <div className="flex items-center gap-4">
-            <div className="relative w-80">
+      <div className="p-4 md:p-8">
+        <div className="flex flex-col mb-4 md:mb-6">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full">
+            <div className="relative flex-1 sm:max-w-xs">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
               <Input 
                 placeholder="ค้นหารหัส หรือชื่อพนักงาน..." 
@@ -127,7 +127,8 @@ export default function Employees() {
         </div>
 
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-          <Table>
+          <div className="overflow-x-auto">
+            <Table className="min-w-[800px]">
             <TableHeader className="bg-slate-50">
               <TableRow>
                 <TableHead>รหัส</TableHead>
@@ -206,6 +207,7 @@ export default function Employees() {
               )}
             </TableBody>
           </Table>
+          </div>
         </div>
       </div>
 

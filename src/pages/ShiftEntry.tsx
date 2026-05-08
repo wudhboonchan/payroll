@@ -278,10 +278,10 @@ export default function ShiftEntry() {
         } 
       />
 
-      <div className="flex flex-col h-[calc(100vh-64px)] overflow-hidden">
+      <div className="flex flex-col min-h-[calc(100vh-64px)] md:h-[calc(100vh-64px)] md:overflow-hidden">
         
         {/* Date Navigator & Status */}
-        <div className={`px-8 py-4 border-b flex justify-between items-center transition-colors ${isHolidayOT ? 'bg-amber-50 border-amber-200' : 'bg-white'}`}>
+        <div className={`px-4 md:px-8 py-3 md:py-4 border-b flex flex-col sm:flex-row justify-between items-center gap-3 transition-colors ${isHolidayOT ? 'bg-amber-50 border-amber-200' : 'bg-white'}`}>
           <div className="flex items-center gap-4">
             <Button variant="outline" size="icon" onClick={() => handleDateChange(subDays(currentDate, 1))}>
               <ChevronLeft className="w-5 h-5" />
@@ -298,11 +298,11 @@ export default function ShiftEntry() {
             </Button>
           </div>
 
-          <div className="flex items-center gap-2 text-sm">
-            <span className="font-medium">งวดปัจจุบัน:</span>
-            <Badge variant="secondary">{currentPeriod?.label || 'ยังไม่ได้สร้างงวด'}</Badge>
+          <div className="flex flex-wrap justify-center items-center gap-2 text-sm">
+            <span className="font-medium whitespace-nowrap">งวดปัจจุบัน:</span>
+            <Badge variant="secondary" className="whitespace-nowrap">{currentPeriod?.label || 'ยังไม่ได้สร้างงวด'}</Badge>
             {isHolidayOT && (
-              <Badge variant="outline" className="border-amber-400 text-amber-700 bg-amber-100/50 ml-2">
+              <Badge variant="outline" className="border-amber-400 text-amber-700 bg-amber-100/50 whitespace-nowrap">
                 คิดเรท OT วันหยุด (x2)
               </Badge>
             )}
@@ -310,11 +310,11 @@ export default function ShiftEntry() {
         </div>
 
         {/* Main Work Area */}
-        <div className="flex-1 flex overflow-hidden">
+        <div className="flex-1 flex flex-col md:flex-row md:overflow-hidden">
           
           {/* Left Panel: Employee Pool */}
-          <div className="w-80 border-r bg-white flex flex-col">
-            <div className="p-4 border-b">
+          <div className="w-full md:w-80 border-b md:border-b-0 md:border-r bg-white flex flex-col h-[40vh] md:h-auto shrink-0">
+            <div className="p-4 border-b shrink-0">
               <h3 className="font-semibold text-slate-800 mb-3">พนักงานที่ยังไม่ได้ลงกะ ({availablePool.length})</h3>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
@@ -357,16 +357,16 @@ export default function ShiftEntry() {
           </div>
 
           {/* Right Panel: Shift Columns */}
-          <div className="flex-1 bg-slate-50/50 p-6">
+          <div className="flex-1 bg-slate-50/50 p-4 md:p-6 overflow-y-auto">
             
             {selectedEmployeeIds.length > 0 && (
-              <div className="mb-4 bg-blue-50 border border-blue-200 text-blue-800 px-4 py-3 rounded-lg flex items-center shadow-sm animate-in fade-in slide-in-from-top-2">
-                <AlertCircle className="w-5 h-5 mr-3 text-blue-500" />
-                <span className="font-medium">เลือกพนักงาน {selectedEmployeeIds.length} คน — คลิกที่กล่องกะด้านล่างเพื่อเพิ่มพร้อมกัน</span>
+              <div className="mb-4 bg-blue-50 border border-blue-200 text-blue-800 px-3 md:px-4 py-3 rounded-lg flex items-start md:items-center shadow-sm animate-in fade-in slide-in-from-top-2">
+                <AlertCircle className="w-5 h-5 mr-3 text-blue-500 shrink-0 mt-0.5 md:mt-0" />
+                <span className="font-medium text-sm md:text-base">เลือกพนักงาน {selectedEmployeeIds.length} คน — คลิกที่กล่องกะด้านล่างเพื่อเพิ่มพร้อมกัน</span>
               </div>
             )}
 
-            <div className="grid grid-cols-3 gap-6 h-full">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 md:h-full">
               {/* Morning Shift */}
               <ShiftColumn 
                 title="กะเช้า" 
@@ -404,19 +404,19 @@ export default function ShiftEntry() {
         </div>
 
         {/* Completeness Indicator Bottom Bar */}
-        <div className="h-14 bg-white border-t px-8 flex items-center justify-between shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.02)] z-10">
-          <div className="flex items-center gap-3">
-            <span className="text-sm font-medium text-slate-600">ความคืบหน้างวดนี้:</span>
-            <div className="w-64 h-2.5 bg-slate-100 rounded-full overflow-hidden">
+        <div className="h-auto md:h-14 bg-white border-t px-4 md:px-8 py-3 md:py-0 flex flex-col md:flex-row items-center justify-between shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.02)] z-10 gap-3 md:gap-0 shrink-0">
+          <div className="flex items-center gap-3 w-full md:w-auto justify-between md:justify-start">
+            <span className="text-xs md:text-sm font-medium text-slate-600">ความคืบหน้างวดนี้:</span>
+            <div className="flex-1 md:w-64 h-2.5 bg-slate-100 rounded-full overflow-hidden mx-2 md:mx-0">
               <div 
                 className="h-full bg-[#1D9E75] transition-all duration-500 rounded-full" 
                 style={{ width: `${progressPercent}%` }}
               ></div>
             </div>
-            <span className="text-sm font-bold text-slate-800">{daysFilled} / {totalDaysInPeriod} วัน</span>
+            <span className="text-xs md:text-sm font-bold text-slate-800 shrink-0">{daysFilled} / {totalDaysInPeriod} วัน</span>
           </div>
           
-          <div className="flex gap-1.5">
+          <div className="flex gap-1 md:gap-1.5 flex-wrap justify-center hidden sm:flex">
             {/* Real dots based on assignments in period */}
             {Array.from({ length: totalDaysInPeriod }).map((_, i) => {
               // This is simplified; in a full version we'd match the specific date index
@@ -424,7 +424,7 @@ export default function ShiftEntry() {
               return (
                 <div 
                   key={i} 
-                  className={`w-2.5 h-2.5 rounded-full transition-colors ${isFilled ? 'bg-[#1D9E75]' : 'bg-slate-200'}`}
+                  className={`w-2 md:w-2.5 h-2 md:h-2.5 rounded-full transition-colors ${isFilled ? 'bg-[#1D9E75]' : 'bg-slate-200'}`}
                   title={`วันที่ ${i + 1}`}
                 />
               )

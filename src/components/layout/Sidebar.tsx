@@ -1,4 +1,5 @@
 import { Link, useLocation } from 'react-router-dom'
+import { useState, useEffect } from 'react'
 import { useAppStore } from '../../store/useAppStore'
 import {
   LayoutDashboard,
@@ -11,14 +12,53 @@ import {
   LogOut,
   Building2,
   Settings,
-  Link2
+  Link2,
+  X
 } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { supabase } from '../../lib/supabase'
 
-export function Sidebar() {
+interface SidebarProps {
+  isOpen: boolean
+  setIsOpen: (isOpen: boolean) => void
+}
+
+export function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
   const { user, companyContext, setUser, setCompanyContext } = useAppStore()
   const location = useLocation()
+  const [factories, setFactories] = useState<any[]>([])
+
+  useEffect(() => {
+    if (user?.role === 'admin' || user?.role === 'superUser') {
+      const fetchFactories = async () => {
+        const { data } = await supabase
+          .from('factories')
+          .select('id, name, companies(id, name, short_name, company_type)')
+          .order('name')
+        if (data) setFactories(data)
+      }
+      fetchFactories()
+    }
+  }, [user?.role])
+
+  const handleFactoryChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newFactoryId = e.target.value
+    const selectedFactory = factories.find(f => f.id === newFactoryId)
+    
+    if (selectedFactory && user) {
+      const company = Array.isArray(selectedFactory.companies) 
+        ? selectedFactory.companies[0] 
+        : selectedFactory.companies;
+
+      setUser({ ...user, factory_id: newFactoryId })
+      setCompanyContext({
+        id: company?.id || companyContext?.id,
+        name: company?.name || companyContext?.name,
+        type: company?.company_type || companyContext?.type,
+        factoryName: selectedFactory.name
+      })
+    }
+  }
 
   const handleSignOut = async () => {
     await supabase.auth.signOut()
@@ -88,22 +128,57 @@ export function Sidebar() {
   )
 
   return (
-    <div className="w-64 border-r bg-white h-screen flex flex-col fixed left-0 top-0">
-      <div className="px-5 py-6 border-b border-slate-100">
-        <div className="flex items-center gap-3">
-          <div className="h-10 w-10 bg-[#1D9E75] rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm">
-            <Building2 className="text-white h-6 w-6" />
+    <>
+      {/* Mobile Overlay */}
+      {isOpen && (
+        <div 
+          className="fixed inset-0 bg-slate-900/50 z-40 md:hidden transition-opacity"
+          onClick={() => setIsOpen(false)}
+        />
+      )}
+
+      {/* Sidebar Container */}
+      <div className={cn(
+        "fixed inset-y-0 left-0 z-50 w-64 bg-white border-r flex flex-col transform transition-transform duration-200 ease-in-out md:translate-x-0",
+        isOpen ? "translate-x-0" : "-translate-x-full"
+      )}>
+        <div className="px-5 py-6 border-b border-slate-100 flex justify-between items-start">
+          <div>
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 bg-[#1D9E75] rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm">
+                <Building2 className="text-white h-6 w-6" />
+              </div>
+              <div className="min-w-0">
+                <p className="font-black text-xl text-slate-900 leading-none tracking-tight">หจก. วิราญกร</p>
+                <p className="text-[10px] text-slate-400 mt-1 font-medium">ระบบจัดการค่าแรงพนักงาน</p>
+              </div>
+            </div>
+            <div className="mt-5 bg-slate-50 rounded-lg p-3 border border-slate-100">
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">โรงงาน / สาขา</p>
+              {(user?.role === 'admin' || user?.role === 'superUser') ? (
+                <select
+                  value={user?.factory_id || ''}
+                  onChange={handleFactoryChange}
+                  className="w-full text-sm font-bold text-[#1D9E75] bg-transparent border-none p-0 focus:ring-0 cursor-pointer"
+                >
+                  <option value="" disabled>เลือกโรงงาน</option>
+                  {factories.map(f => (
+                    <option key={f.id} value={f.id}>{f.name}</option>
+                  ))}
+                </select>
+              ) : (
+                <p className="text-sm font-bold text-[#1D9E75]">{companyContext?.factoryName || 'ไม่พบข้อมูลโรงงาน'}</p>
+              )}
+            </div>
           </div>
-          <div className="min-w-0">
-            <p className="font-black text-xl text-slate-900 leading-none tracking-tight">หจก. วิราญกร</p>
-            <p className="text-[10px] text-slate-400 mt-1 font-medium">ระบบจัดการค่าแรงพนักงาน</p>
-          </div>
+          
+          <button 
+            className="md:hidden text-slate-400 hover:text-slate-600 bg-slate-100 p-1.5 rounded-md"
+            onClick={() => setIsOpen(false)}
+          >
+            <X className="h-5 w-5" />
+          </button>
         </div>
-        <div className="mt-5 bg-slate-50 rounded-lg p-3 border border-slate-100">
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">โรงงาน</p>
-          <p className="text-sm font-bold text-[#1D9E75] mt-0.5">ผลิตภัณฑ์ตราเพชร</p>
-        </div>
-      </div>
 
       <nav className="flex-1 overflow-y-auto px-4 space-y-1">
         {filteredNav.map((item) => {
@@ -114,6 +189,7 @@ export function Sidebar() {
             <Link
               key={item.href}
               to={item.href}
+              onClick={() => setIsOpen(false)}
               className={cn(
                 "flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors",
                 isActive
@@ -151,5 +227,6 @@ export function Sidebar() {
         </button>
       </div>
     </div>
+    </>
   )
 }

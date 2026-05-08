@@ -246,10 +246,10 @@ export default function PayrollEntry() {
         } 
       />
 
-      <div className="flex h-[calc(100vh-64px)]">
+      <div className="flex flex-col md:flex-row min-h-[calc(100vh-64px)] md:h-[calc(100vh-64px)]">
         {/* Left Sidebar: Employee List */}
-        <div className="w-80 border-r bg-white flex flex-col">
-          <div className="p-4 border-b space-y-3">
+        <div className="w-full md:w-80 border-b md:border-b-0 md:border-r bg-white flex flex-col h-[40vh] md:h-auto shrink-0">
+          <div className="p-4 border-b space-y-3 shrink-0">
             <Badge variant="outline" className="w-full justify-center py-1.5 bg-slate-50">
               งวด: {currentPeriod?.label || 'ยังไม่ได้สร้างงวด'}
             </Badge>
@@ -315,7 +315,7 @@ export default function PayrollEntry() {
         </div>
 
         {/* Right Area: Form */}
-        <div className="flex-1 bg-slate-50/50 p-8 overflow-y-auto">
+        <div className="flex-1 bg-slate-50/50 p-4 md:p-8 overflow-y-auto">
           {!selectedEmployeeId ? (
             <div className="h-full flex flex-col items-center justify-center text-slate-400">
               <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4">
@@ -327,12 +327,12 @@ export default function PayrollEntry() {
             <div className="max-w-5xl mx-auto space-y-6">
               
               {/* Header Info */}
-              <div className="flex justify-between items-end">
+              <div className="flex flex-col md:flex-row md:justify-between md:items-end gap-3">
                 <div>
-                  <h2 className="text-2xl font-bold text-slate-800">
+                  <h2 className="text-xl md:text-2xl font-bold text-slate-800">
                     {formatEmployeeName(selectedEmployee || { first_name: '', prefix: undefined, last_name: undefined, nationality: undefined })}
                   </h2>
-                  <div className="flex items-center gap-4 mt-2 text-sm text-slate-500">
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-2 text-sm text-slate-500">
                     <span>รหัสพนักงาน: <strong className="text-slate-700">{selectedEmployee?.employee_code}</strong></span>
                     <span>อัตราค่าจ้าง: <strong className="text-slate-700">{formatThaiCurrency(selectedEmployee?.rate_per_12h)} ฿/วัน</strong></span>
                     <span>การรับเงิน: <strong className="text-slate-700">{selectedEmployee?.payment_method === 'bank_transfer' ? 'โอนบัญชี' : 'เงินสด'}</strong></span>
@@ -340,7 +340,7 @@ export default function PayrollEntry() {
                 </div>
 
                 {isApproved && (
-                  <Badge className="bg-amber-100 text-amber-800 border-none px-4 py-1.5 flex items-center">
+                  <Badge className="bg-amber-100 text-amber-800 border-none px-4 py-1.5 flex items-center w-fit">
                     <Lock className="w-4 h-4 mr-2" />
                     งวดถูกอนุมัติแล้ว ไม่สามารถแก้ไขได้
                   </Badge>
