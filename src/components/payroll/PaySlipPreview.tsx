@@ -120,19 +120,19 @@ export const PaySlipPreview = forwardRef<HTMLDivElement, PaySlipPreviewProps>(({
         <div className="grid grid-cols-[1fr_1fr_90px] sm:grid-cols-[1fr_1fr_120px] divide-x-2 divide-slate-800">
 
           {/* Income Column */}
-          <div className="p-2 sm:p-3 space-y-2">
+          <div className="p-2 sm:p-3 space-y-2 min-w-0">
             {incomeRows.map(r => <SlipRow key={r.label} label={r.label} value={r.value} />)}
             {incomeRows.length === 0 && <p className="text-[10px] sm:text-xs text-slate-400 text-center py-2">—</p>}
           </div>
 
           {/* Deductions Column */}
-          <div className="p-2 sm:p-3 space-y-2">
+          <div className="p-2 sm:p-3 space-y-2 min-w-0">
             {deductRows.map(r => <SlipRow key={r.label} label={r.label} value={r.value} />)}
             {deductRows.length === 0 && <p className="text-[10px] sm:text-xs text-slate-400 text-center py-2">—</p>}
           </div>
 
           {/* Net Column */}
-          <div className="flex flex-col items-center justify-center bg-yellow-100 p-2 sm:p-3 overflow-hidden">
+          <div className="flex flex-col items-center justify-center bg-yellow-100 p-2 sm:p-3 overflow-hidden min-w-0">
             <span className="text-xs sm:text-lg font-bold text-center leading-snug tracking-tighter sm:tracking-normal whitespace-nowrap">
               {formatThaiCurrency(data.net_pay)}
             </span>
@@ -141,11 +141,11 @@ export const PaySlipPreview = forwardRef<HTMLDivElement, PaySlipPreviewProps>(({
 
         {/* Footer Totals */}
         <div className="grid grid-cols-[1fr_1fr_90px] sm:grid-cols-[1fr_1fr_120px] border-t-2 border-slate-800 divide-x-2 divide-slate-800 font-bold bg-slate-50 text-xs sm:text-sm">
-          <div className="p-2 flex justify-between items-center">
+          <div className="p-2 flex justify-between items-center min-w-0 gap-1">
             <span className="truncate pr-1">รวมรายได้</span>
             <span className="shrink-0">{formatThaiCurrency(data.total_income)}</span>
           </div>
-          <div className="p-2 flex justify-between items-center">
+          <div className="p-2 flex justify-between items-center min-w-0 gap-1">
             <span className="truncate pr-1">รวมรายการหัก</span>
             <span className="shrink-0">{formatThaiCurrency(data.total_deductions)}</span>
           </div>
@@ -171,8 +171,8 @@ PaySlipPreview.displayName = 'PaySlipPreview'
 
 function SlipRow({ label, value }: { label: string; value: number }) {
   return (
-    <div className="flex justify-between items-center text-[10px] sm:text-sm">
-      <span className="truncate pr-1">{label}</span>
+    <div className="flex justify-between items-center text-[10px] sm:text-sm gap-1 min-w-0">
+      <span className="truncate pr-1 min-w-0">{label}</span>
       <span className="font-medium tabular-nums text-right shrink-0">{formatThaiCurrency(value)}</span>
     </div>
   )

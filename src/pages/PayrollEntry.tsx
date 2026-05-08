@@ -536,9 +536,9 @@ export default function PayrollEntry() {
                           <span className="font-medium">รวมรายการหัก</span>
                           <span className="text-lg font-bold">{formatThaiCurrency(calc.total_deductions)}</span>
                         </div>
-                        <div className="pt-3 border-t border-[#1D9E75]/20 flex justify-between items-center text-[#1D9E75]">
+                        <div className="pt-3 border-t border-[#1D9E75]/20 flex flex-col sm:flex-row sm:justify-between sm:items-center text-[#1D9E75] gap-1">
                           <span className="font-bold text-lg">รวมสุทธิ (Net Pay)</span>
-                          <span className="text-3xl font-black">{formatThaiCurrency(calc.net_pay)} ฿</span>
+                          <span className="text-2xl sm:text-3xl font-black whitespace-nowrap">{formatThaiCurrency(calc.net_pay)} ฿</span>
                         </div>
                       </div>
                     </CardContent>
@@ -548,17 +548,16 @@ export default function PayrollEntry() {
               </div>
 
               {/* Save Button at bottom */}
-              <div className="flex justify-end pt-2">
-                <div className="flex gap-3">
-                  <Button 
-                    onClick={() => saveMutation.mutate()} 
-                    className="bg-[#1D9E75] hover:bg-[#157a5a]"
-                    disabled={saveMutation.isPending || !selectedEmployeeId || isApproved}
-                  >
-                    <Save className="w-4 h-4 mr-2" />
-                    {saveMutation.isPending ? 'กำลังบันทึก...' : 'บันทึกข้อมูล'}
-                  </Button>
-                </div>
+              <div className="pt-4 pb-8">
+                <Button 
+                  onClick={() => saveMutation.mutate()} 
+                  className="w-full md:w-auto md:min-w-[240px] md:float-right h-14 md:h-12 text-base md:text-lg font-bold bg-[#1D9E75] hover:bg-[#157a5a] shadow-md rounded-xl transition-all active:scale-[0.98]"
+                  disabled={saveMutation.isPending || !selectedEmployeeId || isApproved}
+                >
+                  <Save className="w-5 h-5 mr-2 md:w-6 md:h-6" />
+                  {saveMutation.isPending ? 'กำลังบันทึก...' : 'บันทึกข้อมูลค่าจ้าง'}
+                </Button>
+                <div className="clear-both"></div>
               </div>
 
             </div>

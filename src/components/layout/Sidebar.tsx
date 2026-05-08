@@ -11,12 +11,20 @@ import {
   Download,
   LogOut,
   Building2,
-  Settings,
+  KeyRound,
   Link2,
+  ChevronDown,
   X
 } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { supabase } from '../../lib/supabase'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '../ui/dropdown-menu'
 
 interface SidebarProps {
   isOpen: boolean
@@ -114,12 +122,6 @@ export function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
       href: '/export',
       icon: Download,
       roles: ['admin', 'superUser']
-    },
-    {
-      title: 'ตั้งค่าระบบ',
-      href: '/settings',
-      icon: Settings,
-      roles: ['admin', 'superUser']
     }
   ]
 
@@ -205,26 +207,40 @@ export function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
       </nav>
 
       <div className="p-4 border-t border-slate-100">
-        <div className="flex items-center gap-3 px-3 py-2 mb-2">
-          <div className="h-8 w-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 font-medium text-sm">
-            {user?.full_name?.charAt(0) || 'U'}
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-slate-900 truncate">
-              {user?.full_name || 'ผู้ใช้งาน'}
-            </p>
-            <p className="text-xs text-slate-500 truncate capitalize">
-              {user?.role === 'superUser' ? 'SuperAdmin' : user?.role === 'normalUser' ? 'User' : user?.role}
-            </p>
-          </div>
-        </div>
-        <button
-          onClick={handleSignOut}
-          className="flex items-center w-full gap-3 px-3 py-2.5 rounded-md text-sm font-medium text-slate-600 hover:bg-red-50 hover:text-red-600 transition-colors"
-        >
-          <LogOut className="h-5 w-5 text-slate-400 group-hover:text-red-600" />
-          ออกจากระบบ
-        </button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button className="w-full flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-slate-100 transition-colors group">
+              <div className="h-8 w-8 rounded-full bg-[#1D9E75]/10 flex items-center justify-center text-[#1D9E75] font-bold text-sm flex-shrink-0">
+                {user?.full_name?.charAt(0) || 'U'}
+              </div>
+              <div className="flex-1 min-w-0 text-left">
+                <p className="text-sm font-semibold text-slate-900 truncate">
+                  {user?.full_name || 'ผู้ใช้งาน'}
+                </p>
+                <p className="text-xs text-slate-500 truncate capitalize">
+                  {user?.role === 'superUser' ? 'SuperAdmin' : user?.role === 'normalUser' ? 'User' : user?.role}
+                </p>
+              </div>
+              <ChevronDown className="w-4 h-4 text-slate-400 group-hover:text-slate-600 flex-shrink-0" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" side="top" className="w-52 mb-1">
+            <DropdownMenuItem asChild>
+              <Link to="/settings" onClick={() => setIsOpen(false)} className="flex items-center gap-2 cursor-pointer">
+                <KeyRound className="w-4 h-4 text-slate-400" />
+                เปลี่ยนรหัสผ่าน
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onClick={handleSignOut}
+              className="flex items-center gap-2 text-red-600 focus:text-red-600 focus:bg-red-50 cursor-pointer"
+            >
+              <LogOut className="w-4 h-4" />
+              ออกจากระบบ
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </div>
     </>

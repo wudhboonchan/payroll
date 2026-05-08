@@ -12,9 +12,8 @@ import PaySlipPage from './pages/PaySlip'
 import ExportPage from './pages/Export'
 import ShareLinksPage from './pages/ShareLinks'
 import EmployeeSlipPage from './pages/EmployeeSlip'
+import SettingsPage from './pages/Settings'
 import { AppLayout, RequireAuth } from './components/layout/AppLayout'
-
-const Settings = () => <div className="p-8 text-slate-500">Settings (เร็วๆ นี้)</div>
 
 // Created once outside component to prevent re-instantiation on re-render
 const queryClient = new QueryClient({
@@ -54,12 +53,12 @@ function App() {
                   <Route path="/advances" element={<AdvancePaymentsList />} />
                   <Route path="/payslip" element={<PaySlipPage />} />
                   <Route path="/share-links" element={<ShareLinksPage />} />
+                  <Route path="/settings" element={<SettingsPage />} />
                   <Route path="/" element={<Navigate to="/dashboard" replace />} />
                 </Route>
 
                 <Route element={<RequireAuth allowedRoles={['admin', 'superUser']} />}>
                   <Route path="/export" element={<ExportPage />} />
-                  <Route path="/settings" element={<Settings />} />
                 </Route>
               </Route>
 
