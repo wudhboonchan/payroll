@@ -8,7 +8,7 @@ import { Badge } from '../components/ui/badge'
 import {
   Users, Wallet, ShieldCheck, Banknote,
   CheckCircle2, Clock, XCircle, ChevronDown,
-  Loader2, Calendar, AlertCircle, Link2
+  Loader2, Calendar, AlertCircle, Link2, RotateCcw
 } from 'lucide-react'
 import { formatThaiCurrency, formatPeriodLabel } from '../lib/formatters'
 import { supabase } from '../lib/supabase'
@@ -202,7 +202,7 @@ export default function Dashboard() {
       if (!activePeriod?.id) throw new Error('ไม่พบงวดที่จะอนุมัติ')
       const { error } = await supabase
         .from('payroll_periods')
-        .update({ status: 'approved' })
+        .update({ status: 'approved', approved_by: user?.id, approved_at: new Date().toISOString() })
         .eq('id', activePeriod.id)
       if (error) throw error
     },
@@ -212,6 +212,24 @@ export default function Dashboard() {
       toast.success('อนุมัติงวดเรียบร้อยแล้ว')
     },
     onError: (err: any) => toast.error('ไม่สามารถอนุมัติงวดได้', { description: err.message })
+  })
+
+  // ── Unapprove mutation ───────────────────────────────────────────────────
+  const unapproveMutation = useMutation({
+    mutationFn: async () => {
+      if (!activePeriod?.id) throw new Error('ไม่พบงวดที่จะยกเลิก')
+      const { error } = await supabase
+        .from('payroll_periods')
+        .update({ status: 'draft', approved_by: null, approved_at: null })
+        .eq('id', activePeriod.id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['periods'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard-stats', activePeriod?.id] })
+      toast.success('ยกเลิกการอนุมัติงวดเรียบร้อยแล้ว')
+    },
+    onError: (err: any) => toast.error('ไม่สามารถยกเลิกการอนุมัติได้', { description: err.message })
   })
 
   // ── User Link Stats ──────────────────────────────────────────────────────
@@ -511,9 +529,9 @@ export default function Dashboard() {
               </Link>
             </div>
 
-            {/* Approve button */}
+            {/* Approve / Unapprove buttons */}
             {(user?.role === 'superUser' || user?.role === 'admin') && (
-              <div className="mt-6 pt-5 border-t border-slate-100">
+              <div className="mt-6 pt-5 border-t border-slate-100 space-y-2">
                 <Button
                   className="w-full bg-[#1D9E75] hover:bg-[#157a5a] rounded-xl h-10 font-semibold"
                   disabled={!canApprove || approveMutation.isPending}
@@ -527,6 +545,25 @@ export default function Dashboard() {
                     <><CheckCircle2 className="w-4 h-4 mr-2" />อนุมัติงวดนี้</>
                   )}
                 </Button>
+                {/* Unapprove — only visible when period is already approved */}
+                {isApproved && (
+                  <Button
+                    variant="outline"
+                    className="w-full rounded-xl h-9 font-medium text-rose-600 border-rose-200 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-300"
+                    disabled={unapproveMutation.isPending}
+                    onClick={() => {
+                      if (window.confirm('ยืนยันการยกเลิกการอนุมัติงวดนี้?\n\nงวดจะกลับสู่สถานะ Draft และพนักงานจะสามารถดูสลิปได้ต่อไปตามลิงก์เดิม')) {
+                        unapproveMutation.mutate()
+                      }
+                    }}
+                  >
+                    {unapproveMutation.isPending ? (
+                      <><Loader2 className="w-4 h-4 mr-2 animate-spin" />กำลังยกเลิก...</>
+                    ) : (
+                      <><RotateCcw className="w-4 h-4 mr-2" />ยกเลิกการอนุมัติ</>
+                    )}
+                  </Button>
+                )}
               </div>
             )}
           </div>

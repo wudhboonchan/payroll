@@ -48,6 +48,8 @@ const employeeSchema = z
     last_name: z.string().optional(),
     national_id: z.string().optional(),
     nationality: z.string().default('ไทย'),
+    position: z.enum(['worker', 'clerk']).default('worker'),
+    wage_type: z.enum(['daily', 'monthly']).default('daily'),
     payment_method: z.enum(['cash', 'bank_transfer']),
     bank_name: z.string().optional(),
     bank_account: z.string().optional(),
@@ -119,6 +121,8 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
   const paymentMethod = watch('payment_method')
   const nationality = watch('nationality')
   const dataComplete = watch('data_complete')
+  const wageType = watch('wage_type')
+  const position = watch('position')
   const isThai = !nationality || nationality === 'ไทย'
 
   // Fetch single employee if editing
@@ -147,6 +151,8 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
         last_name: employeeData.last_name || '',
         national_id: employeeData.national_id || '',
         nationality: employeeData.nationality || 'ไทย',
+        position: employeeData.position || 'worker',
+        wage_type: employeeData.wage_type || 'daily',
         payment_method: employeeData.payment_method || 'bank_transfer',
         bank_name: employeeData.bank_name || '',
         bank_account: employeeData.bank_account || '',
@@ -163,6 +169,8 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
         last_name: '',
         national_id: '',
         nationality: 'ไทย',
+        position: 'worker',
+        wage_type: 'daily',
         payment_method: 'bank_transfer',
         bank_name: '',
         bank_account: '',
@@ -269,6 +277,45 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
               </div>
             </div>
 
+            {/* Row 1b: Position + Wage Type */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold text-slate-700">ตำแหน่งงาน *</Label>
+                <select {...register('position')} className={SELECT_CLASS}>
+                  <option value="worker">👷 พนักงาน (ทั่วไป)</option>
+                  <option value="clerk">🖊️ เสมียน</option>
+                </select>
+                {position === 'clerk' && (
+                  <p className="text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded border border-amber-200">
+                    ⚠️ เสมียน: คิดค่าแรงแบบรายเดือน / OT ชั่วโมงละ 1.5 เท่า
+                  </p>
+                )}
+              </div>
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold text-slate-700">ประเภทค่าจ้าง *</Label>
+                <div className="flex gap-4 pt-2">
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type="radio"
+                      value="daily"
+                      {...register('wage_type')}
+                      className="w-4 h-4 accent-[#1D9E75]"
+                    />
+                    รายวัน (บาท/วัน)
+                  </label>
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type="radio"
+                      value="monthly"
+                      {...register('wage_type')}
+                      className="w-4 h-4 accent-[#1D9E75]"
+                    />
+                    รายเดือน (บาท/เดือน)
+                  </label>
+                </div>
+              </div>
+            </div>
+
             {/* Row 2: Prefix + First Name + Last Name */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
               <div className="space-y-2">
@@ -309,7 +356,7 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
               </div>
             </div>
 
-            {/* Row 3: National ID + Wage */}
+            {/* Row 3: National ID + Wage Rate */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
               <div className="space-y-2">
                 <Label className="text-sm font-semibold text-slate-700">
@@ -322,7 +369,9 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
               </div>
               <div className="space-y-2">
                 <Label className="text-sm font-semibold text-slate-700">
-                  อัตราค่าจ้างรายวัน (บาท) *
+                  {wageType === 'monthly'
+                    ? 'เงินเดือน (บาท/เดือน) *'
+                    : 'อัตราค่าจ้างรายวัน (บาท) *'}
                 </Label>
                 <div className="relative group">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 font-medium text-slate-400 group-focus-within:text-[#1D9E75] text-sm">
@@ -333,8 +382,14 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
                     step="0.01"
                     {...register('rate_per_12h')}
                     className="pl-8 w-full"
+                    placeholder={wageType === 'monthly' ? 'เช่น 15000' : 'เช่น 350'}
                   />
                 </div>
+                {wageType === 'monthly' && (
+                  <p className="text-xs text-slate-400">
+                    ระบบจะคำนวณ OT อัตโนมัติจากเงินเดือน ÷ 30 ÷ 8 × 1.5
+                  </p>
+                )}
                 {errors.rate_per_12h && (
                   <p className="text-xs text-red-500">{errors.rate_per_12h.message}</p>
                 )}

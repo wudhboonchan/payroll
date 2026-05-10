@@ -94,15 +94,15 @@ export function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
       roles: ['admin', 'superUser', 'normalUser']
     },
     {
-      title: 'กรอกค่าจ้าง',
-      href: '/payroll',
-      icon: Calculator,
-      roles: ['admin', 'superUser', 'normalUser']
-    },
-    {
       title: 'เบิกล่วงหน้า',
       href: '/advances',
       icon: CreditCard,
+      roles: ['admin', 'superUser', 'normalUser']
+    },
+    {
+      title: 'กรอกค่าจ้าง',
+      href: '/payroll',
+      icon: Calculator,
       roles: ['admin', 'superUser', 'normalUser']
     },
     {

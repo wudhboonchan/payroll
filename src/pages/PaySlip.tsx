@@ -23,7 +23,7 @@ export default function PaySlipPage() {
       if (!user?.factory_id) return []
       const { data, error } = await supabase
         .from('employees')
-        .select('id, employee_code, first_name, last_name, prefix, nationality, status, payment_method, bank_name, bank_account')
+        .select('id, employee_code, first_name, last_name, prefix, nationality, status, payment_method, bank_name, bank_account, position')
         .eq('factory_id', user.factory_id)
         .order('employee_code')
       if (error) throw error
@@ -85,6 +85,33 @@ export default function PaySlipPage() {
 
   const totalAdvance = advances.reduce((sum: number, adv: any) => sum + Number(adv.amount), 0)
 
+  // Fetch shifts for day count display on slip
+  const { data: slipShifts = [] } = useQuery({
+    queryKey: ['shifts-for-slip', selectedId, currentPeriod?.id],
+    queryFn: async () => {
+      if (!selectedId || !currentPeriod?.id) return []
+      const { data, error } = await supabase
+        .from('shift_assignments')
+        .select('is_holiday_ot, is_half_shift, ot_hours')
+        .eq('employee_id', selectedId)
+        .eq('period_id', currentPeriod.id)
+      if (error) throw error
+      return data as any[]
+    },
+    enabled: !!selectedId && !!currentPeriod?.id
+  })
+
+  const selectedEmpForSlip = employees.find((e: any) => e.id === selectedId) as any
+  const isClerkSlip = selectedEmpForSlip?.position === 'clerk'
+
+  const normalShiftsForSlip = slipShifts.filter((s: any) => !s.is_holiday_ot)
+  const days_normal = normalShiftsForSlip.length
+  const days_shift = normalShiftsForSlip.filter((s: any) => !s.is_half_shift).length
+  // Workers: count holiday OT days; Clerks: sum ot_hours
+  const days_ot = isClerkSlip
+    ? slipShifts.reduce((sum: number, s: any) => sum + Number(s.ot_hours || 0), 0)
+    : slipShifts.filter((s: any) => s.is_holiday_ot).length
+
   const isSearching = search.trim().length > 0
 
   const visibleEmployees = employees.filter((emp: any) => {
@@ -112,6 +139,7 @@ export default function PaySlipPage() {
         period_start: currentPeriod.period_start,
         period_end: currentPeriod.period_end,
         generated_at: new Date().toISOString(),
+        position: selectedEmp.position || 'worker',
         amount_normal: Number(payrollEntry?.amount_normal || 0),
         amount_shift: Number(payrollEntry?.amount_shift || 0),
         amount_ot: Number(payrollEntry?.amount_ot || 0),
@@ -120,11 +148,14 @@ export default function PaySlipPage() {
         amount_special: Number(payrollEntry?.amount_special || 0),
         amount_diligence: Number(payrollEntry?.amount_diligence || 0),
         amount_position: Number(payrollEntry?.amount_position || 0),
+        days_normal: slipShifts.length > 0 ? days_normal : undefined,
+        days_shift: slipShifts.length > 0 ? days_shift : undefined,
+        days_ot: slipShifts.length > 0 && days_ot > 0 ? days_ot : undefined,
         deduct_social_security: Number(payrollEntry?.deduct_social_security || 0),
         deduct_advance: totalAdvance,
         deduct_safety_equipment: Number(payrollEntry?.deduct_safety_equipment || 0),
         deduct_uniform: Number(payrollEntry?.deduct_uniform || 0),
-        total_income: 0, // Will be calculated by UI or logic
+        total_income: 0,
         total_deductions: 0,
         net_pay: 0,
         payment_method: selectedEmp.payment_method || 'cash',
@@ -227,7 +258,7 @@ export default function PaySlipPage() {
         {/* Right: Preview */}
         <div className="flex-1 bg-slate-100 overflow-y-auto p-4 md:p-8 print:p-0 print:bg-white flex justify-center items-start">
           {slipData ? (
-            <div className="shadow-lg print:shadow-none max-w-full overflow-x-auto">
+            <div className="print-area w-full shadow-lg print:shadow-none overflow-x-auto">
               <PaySlipPreview data={slipData} />
             </div>
           ) : (

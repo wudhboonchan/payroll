@@ -38,6 +38,41 @@ export default function EmployeeSlip() {
   // Extract the structured data
   const tokenData = typeof rawData === 'string' ? JSON.parse(rawData)?.token_data : rawData?.token_data
 
+  // Fetch shifts for day counts
+  const { data: slipShifts = [] } = useQuery({
+    queryKey: ['shifts-for-slip-public', tokenData?.employee_id, tokenData?.period_id],
+    queryFn: async () => {
+      if (!tokenData?.employee_id || !tokenData?.period_id) return []
+      const { data, error } = await supabase
+        .from('shift_assignments')
+        .select('is_holiday_ot, is_half_shift, ot_hours')
+        .eq('employee_id', tokenData.employee_id)
+        .eq('period_id', tokenData.period_id)
+      if (error) throw error
+      return data as any[]
+    },
+    enabled: !!tokenData?.employee_id && !!tokenData?.period_id
+  })
+
+  // Fetch position just to be safe if RPC didn't include it
+  const { data: empPosition = 'worker' } = useQuery({
+    queryKey: ['emp-pos', tokenData?.employee_id],
+    queryFn: async () => {
+      if (!tokenData?.employee_id) return 'worker'
+      const { data } = await supabase.from('employees').select('position').eq('id', tokenData.employee_id).single()
+      return data?.position || 'worker'
+    },
+    enabled: !!tokenData?.employee_id
+  })
+
+  const isClerkSlip = empPosition === 'clerk'
+  const normalShiftsForSlip = slipShifts.filter((s: any) => !s.is_holiday_ot)
+  const days_normal = normalShiftsForSlip.length
+  const days_shift = normalShiftsForSlip.filter((s: any) => !s.is_half_shift).length
+  const days_ot = isClerkSlip
+    ? slipShifts.reduce((sum: number, s: any) => sum + Number(s.ot_hours || 0), 0)
+    : slipShifts.filter((s: any) => s.is_holiday_ot).length
+
   const slipData = useMemo(() => {
     if (!rawData) return null
     
@@ -78,6 +113,10 @@ export default function EmployeeSlip() {
       amount_special: entry.amount_special || 0,
       amount_diligence: entry.amount_diligence || 0,
       amount_position: entry.amount_position || 0,
+      days_normal: slipShifts.length > 0 ? days_normal : undefined,
+      days_shift: slipShifts.length > 0 ? days_shift : undefined,
+      days_ot: slipShifts.length > 0 && days_ot > 0 ? days_ot : undefined,
+      position: empPosition,
       deduct_social_security: entry.deduct_social_security || 0,
       deduct_advance: entry.deduct_advance || 0,
       deduct_safety_equipment: entry.deduct_safety_equipment || 0,
@@ -89,7 +128,7 @@ export default function EmployeeSlip() {
       bank_name: e.bank_name,
       bank_account: e.bank_account_no || e.bank_account, 
     } as PaySlipData
-  }, [rawData])
+  }, [rawData, slipShifts, days_normal, days_shift, days_ot, empPosition])
 
   // Sync local status when data loads
   useEffect(() => {
@@ -190,7 +229,7 @@ export default function EmployeeSlip() {
         </div>
       )}
 
-      <div className="w-full max-w-[600px] shadow-lg rounded-xl overflow-hidden bg-white">
+      <div className="w-full max-w-[600px] shadow-lg rounded-xl overflow-x-auto bg-white">
         <PaySlipPreview data={slipData} />
       </div>
 

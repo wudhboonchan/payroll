@@ -8,6 +8,7 @@ import { TopBar } from '../components/layout/TopBar'
 import { Button } from '../components/ui/button'
 import { Badge } from '../components/ui/badge'
 import { Input } from '../components/ui/input'
+import { Label } from '../components/ui/label'
 import { toast } from 'sonner'
 import { 
   ChevronLeft, 
@@ -18,11 +19,11 @@ import {
   Sunset, 
   Moon, 
   X,
-  AlertCircle
+  AlertCircle,
+  Clock,
+  Clock4
 } from 'lucide-react'
 import { formatEmployeeName } from './EmployeeFormModal'
-
-
 
 type ShiftType = 'morning' | 'afternoon' | 'night'
 interface AssignedEmployee {
@@ -32,16 +33,29 @@ interface AssignedEmployee {
   shift: ShiftType
   isNew: boolean
   isHolidayOT: boolean
+  isHalfShift: boolean
+  woodExcess: number
+  filmAmount: number
+  otHours: number       // clerk: OT hours beyond 8h (stored per day)
+  isClerk: boolean      // derived from employee.position
 }
 
 export default function ShiftEntry() {
-  const { user } = useAppStore()
+  const { user, companyContext } = useAppStore()
   const queryClient = useQueryClient()
   const [currentDate, setCurrentDate] = useState<Date>(new Date())
   const [isHolidayOT, setIsHolidayOT] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<string[]>([])
   const [assignments, setAssignments] = useState<AssignedEmployee[]>([])
+  // Employee detail modal (item 7 & 8)
+  const [detailModalEmp, setDetailModalEmp] = useState<AssignedEmployee | null>(null)
+  // Tra Phet has only 2 shifts — hide night shift (item 3)
+  // factoryName = "ผลิตภัณฑ์ตราเพชร", type = "Headquarters" (not useful for filtering)
+  const isTraPhet = 
+    companyContext?.factoryName?.includes('ตราเพชร') ||
+    companyContext?.factoryName?.toLowerCase().includes('diamond') ||
+    companyContext?.name?.includes('ตราเพชร')
 
   // Reset holiday flag automatically when navigating to a new day
   const handleDateChange = (newDate: Date) => {
@@ -60,7 +74,7 @@ export default function ShiftEntry() {
       if (!user?.factory_id) return []
       const { data, error } = await supabase
         .from('employees')
-        .select('id, employee_code, first_name, last_name, prefix, nationality')
+        .select('id, employee_code, first_name, last_name, prefix, nationality, position')
         .eq('factory_id', user.factory_id)
         .eq('status', 'active')
       if (error) throw error
@@ -96,6 +110,7 @@ export default function ShiftEntry() {
         .from('shift_assignments')
         .select(`
           id, employee_id, shift_type, is_holiday_ot,
+          is_half_shift, wood_excess, film_amount,
           employee:employees(employee_code, first_name, last_name, prefix, nationality)
         `)
         .eq('work_date', workDateStr)
@@ -135,28 +150,48 @@ export default function ShiftEntry() {
   const totalDaysInPeriod = 15 // Assuming 15-day cycle
   const progressPercent = (daysFilled / totalDaysInPeriod) * 100
 
-  // Synchronize state with database
+  // Synchronize state with database (guard against infinite loops from React Query re-renders)
   useEffect(() => {
+    const mapped = (existingAssignments && existingAssignments.length > 0)
+      ? existingAssignments.map((a: any) => {
+          const emp = employees.find(e => e.id === a.employee_id)
+          return {
+            employee_id: a.employee_id,
+            code: a.employee.employee_code,
+            name: formatEmployeeName({
+              prefix: a.employee.prefix,
+              first_name: a.employee.first_name,
+              last_name: a.employee.last_name,
+              nationality: a.employee.nationality,
+            }),
+            shift: a.shift_type as ShiftType,
+            isNew: false,
+            isHolidayOT: a.is_holiday_ot,
+            isHalfShift: a.is_half_shift ?? false,
+            woodExcess: Number(a.wood_excess ?? 0),
+            filmAmount: Number(a.film_amount ?? 0),
+            otHours: Number(a.ot_hours ?? 0),
+            isClerk: emp?.position === 'clerk',
+          }
+        })
+      : []
+
+    setAssignments(prev => {
+      // Only update if the data actually changed
+      if (JSON.stringify(prev.map(p => p.employee_id + p.shift + p.isHalfShift)) ===
+          JSON.stringify(mapped.map((m: any) => m.employee_id + m.shift + m.isHalfShift))) {
+        return prev
+      }
+      return mapped
+    })
+
     if (existingAssignments && existingAssignments.length > 0) {
-      setAssignments(existingAssignments.map(a => ({
-        employee_id: a.employee_id,
-        code: a.employee.employee_code,
-        name: formatEmployeeName({
-          prefix: a.employee.prefix,
-          first_name: a.employee.first_name,
-          last_name: a.employee.last_name,
-          nationality: a.employee.nationality,
-        }),
-        shift: a.shift_type as ShiftType,
-        isNew: false,
-        isHolidayOT: a.is_holiday_ot
-      })))
       setIsHolidayOT(existingAssignments[0].is_holiday_ot)
     } else {
-      setAssignments([])
       setIsHolidayOT(false)
     }
-  }, [existingAssignments])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workDateStr, existingAssignments?.length])
 
   // Derived state: available pool (employees not in assignments)
   const availablePool = useMemo(() => {
@@ -181,14 +216,22 @@ export default function ShiftEntry() {
 
     setAssignments(prev => [
       ...prev,
-      ...empsToAssign.map(emp => ({
-        employee_id: emp.id,
-        code: emp.employee_code,
-        name: formatEmployeeName(emp),
-        shift,
-        isNew: true,
-        isHolidayOT: isHolidayOT
-      }))
+      ...empsToAssign.map(emp => {
+        const isClerk = emp.position === 'clerk'
+        return {
+          employee_id: emp.id,
+          code: emp.employee_code,
+          name: formatEmployeeName(emp),
+          shift,
+          isNew: true,
+          isHolidayOT: isHolidayOT,
+          isHalfShift: isClerk ? true : false,  // clerks always 8h
+          woodExcess: 0,
+          filmAmount: 0,
+          otHours: 0,
+          isClerk,
+        }
+      })
     ])
     setSelectedEmployeeIds([])
   }
@@ -216,6 +259,10 @@ export default function ShiftEntry() {
         work_date: workDateStr,
         shift_type: a.shift,
         is_holiday_ot: isHolidayOT,
+        is_half_shift: a.isHalfShift,
+        wood_excess: a.isClerk ? 0 : a.woodExcess,
+        film_amount: a.isClerk ? 0 : a.filmAmount,
+        ot_hours: a.isClerk ? a.otHours : 0,
         entered_by: user?.id
       }))
 
@@ -240,6 +287,12 @@ export default function ShiftEntry() {
   const morningShifts = assignments.filter(a => a.shift === 'morning')
   const afternoonShifts = assignments.filter(a => a.shift === 'afternoon')
   const nightShifts = assignments.filter(a => a.shift === 'night')
+
+  // Update a specific assignment field
+  const updateAssignment = (empId: string, patch: Partial<AssignedEmployee>) => {
+    setAssignments(prev => prev.map(a => a.employee_id === empId ? { ...a, ...patch } : a))
+    setDetailModalEmp(prev => prev?.employee_id === empId ? { ...prev, ...patch } : prev)
+  }
 
   return (
     <>
@@ -366,39 +419,46 @@ export default function ShiftEntry() {
               </div>
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 md:h-full">
+            <div className={`grid grid-cols-1 gap-4 md:gap-6 md:h-full ${
+              isTraPhet ? 'md:grid-cols-2' : 'md:grid-cols-3'
+            }`}>
               {/* Morning Shift */}
               <ShiftColumn 
                 title="กะเช้า" 
-                time="06:00 - 18:00"
+                time={isTraPhet ? '08:00 - 20:00' : '06:00 - 18:00'}
                 icon={<Sun className="w-5 h-5 text-amber-500" />}
                 assignments={morningShifts}
                 onAssign={() => handleAssignToShift('morning')}
                 onRemove={handleRemoveAssignment}
+                onClickEmployee={(emp: AssignedEmployee) => setDetailModalEmp(emp)}
                 isSelecting={selectedEmployeeIds.length > 0}
               />
               
               {/* Afternoon Shift */}
               <ShiftColumn 
                 title="กะบ่าย" 
-                time="14:00 - 02:00"
+                time={isTraPhet ? '20:00 - 08:00' : '14:00 - 02:00'}
                 icon={<Sunset className="w-5 h-5 text-orange-500" />}
                 assignments={afternoonShifts}
                 onAssign={() => handleAssignToShift('afternoon')}
                 onRemove={handleRemoveAssignment}
+                onClickEmployee={(emp: AssignedEmployee) => setDetailModalEmp(emp)}
                 isSelecting={selectedEmployeeIds.length > 0}
               />
               
-              {/* Night Shift */}
-              <ShiftColumn 
-                title="กะดึก" 
-                time="22:00 - 10:00"
-                icon={<Moon className="w-5 h-5 text-indigo-500" />}
-                assignments={nightShifts}
-                onAssign={() => handleAssignToShift('night')}
-                onRemove={handleRemoveAssignment}
-                isSelecting={selectedEmployeeIds.length > 0}
-              />
+              {/* Night Shift — hidden for Tra Phet */}
+              {!isTraPhet && (
+                <ShiftColumn 
+                  title="กะดึก" 
+                  time="22:00 - 10:00"
+                  icon={<Moon className="w-5 h-5 text-indigo-500" />}
+                  assignments={nightShifts}
+                  onAssign={() => handleAssignToShift('night')}
+                  onRemove={handleRemoveAssignment}
+                  onClickEmployee={(emp: AssignedEmployee) => setDetailModalEmp(emp)}
+                  isSelecting={selectedEmployeeIds.length > 0}
+                />
+              )}
             </div>
           </div>
         </div>
@@ -433,11 +493,132 @@ export default function ShiftEntry() {
         </div>
 
       </div>
+
+      {/* Employee Detail Modal */}
+      {detailModalEmp && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+          onClick={() => setDetailModalEmp(null)}
+        >
+          <div 
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-5"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex justify-between items-start">
+              <div>
+                <p className="font-bold text-slate-900 text-lg">
+                  {detailModalEmp.isClerk ? '🖊️ ' : ''}{detailModalEmp.code}
+                </p>
+                <p className="text-sm text-slate-500 mt-0.5">{detailModalEmp.name}</p>
+                {detailModalEmp.isClerk && (
+                  <span className="text-xs bg-red-100 text-red-600 font-bold px-2 py-0.5 rounded mt-1 inline-block">เสมียน</span>
+                )}
+              </div>
+              <button onClick={() => setDetailModalEmp(null)} className="text-slate-400 hover:text-slate-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {detailModalEmp.isClerk ? (
+              /* ── Clerk Modal: OT hours only ── */
+              <>
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-700">
+                  🖊️ เสมียนทำงาน <strong>8 ชม./วัน</strong> โดยอัตโนมัติ ไม่มีค่ากะ<br/>
+                  ชั่วโมงเกิน 8 ชม. คิดเป็น OT 1.5 เท่า
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-sm font-semibold text-slate-700">ชั่วโมง OT วันนี้ (เกิน 8 ชม.)</Label>
+                  <div className="flex items-center gap-3">
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.5"
+                      max="16"
+                      value={detailModalEmp.otHours || ''}
+                      onChange={e => updateAssignment(detailModalEmp.employee_id, { otHours: Number(e.target.value) || 0 })}
+                      placeholder="0"
+                      className="w-28 h-10 text-center text-lg font-bold"
+                    />
+                    <span className="text-slate-500 text-sm">ชั่วโมง</span>
+                  </div>
+                </div>
+              </>
+            ) : (
+              /* ── Worker Modal: 8/12h toggle + wood/film ── */
+              <>
+                <div className="space-y-2">
+                  <Label className="text-sm font-semibold text-slate-700">ชั่วโมงทำงาน</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => updateAssignment(detailModalEmp.employee_id, { isHalfShift: false })}
+                      className={`flex flex-col items-center gap-1 p-3 rounded-xl border-2 transition-all ${
+                        !detailModalEmp.isHalfShift
+                          ? 'border-[#1D9E75] bg-[#1D9E75]/10 text-[#1D9E75]'
+                          : 'border-slate-200 text-slate-500 hover:border-slate-300'
+                      }`}
+                    >
+                      <Clock className="w-5 h-5" />
+                      <span className="text-xs font-bold">12 ชม. (เต็ม)</span>
+                      <span className="text-[10px]">ปกติ + ค่ากะ</span>
+                    </button>
+                    <button
+                      onClick={() => updateAssignment(detailModalEmp.employee_id, { isHalfShift: true })}
+                      className={`flex flex-col items-center gap-1 p-3 rounded-xl border-2 transition-all ${
+                        detailModalEmp.isHalfShift
+                          ? 'border-amber-500 bg-amber-50 text-amber-700'
+                          : 'border-slate-200 text-slate-500 hover:border-slate-300'
+                      }`}
+                    >
+                      <Clock4 className="w-5 h-5" />
+                      <span className="text-xs font-bold">8 ชม. เท่านั้น</span>
+                      <span className="text-[10px]">ค่าปกติ (ไม่มีค่ากะ)</span>
+                    </button>
+                  </div>
+                  {detailModalEmp.isHalfShift && (
+                    <p className="text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded">
+                      ⚠️ วันนี้จะไม่ถูกนับค่ากะ (4 ชม.)
+                    </p>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-semibold text-slate-700">ค่าไม้ส่วนเกิน (บาท)</Label>
+                    <Input
+                      type="number" min="0"
+                      value={detailModalEmp.woodExcess || ''}
+                      onChange={e => updateAssignment(detailModalEmp.employee_id, { woodExcess: Number(e.target.value) || 0 })}
+                      placeholder="0" className="h-9"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-semibold text-slate-700">ค่าฟิล์ม (บาท)</Label>
+                    <Input
+                      type="number" min="0"
+                      value={detailModalEmp.filmAmount || ''}
+                      onChange={e => updateAssignment(detailModalEmp.employee_id, { filmAmount: Number(e.target.value) || 0 })}
+                      placeholder="0" className="h-9"
+                    />
+                  </div>
+                </div>
+              </>
+            )}
+
+            <Button
+              className="w-full bg-[#1D9E75] hover:bg-[#157a5a]"
+              onClick={() => setDetailModalEmp(null)}
+            >
+              บันทึก
+            </Button>
+          </div>
+        </div>
+      )}
     </>
   )
 }
 
-function ShiftColumn({ title, time, icon, assignments, onAssign, onRemove, isSelecting }: any) {
+function ShiftColumn({ title, time, icon, assignments, onAssign, onRemove, onClickEmployee, isSelecting }: any) {
   return (
     <div 
       className={`
@@ -464,21 +645,39 @@ function ShiftColumn({ title, time, icon, assignments, onAssign, onRemove, isSel
           <div 
             key={emp.employee_id} 
             className="group flex items-center justify-between p-3 rounded-lg border border-slate-100 bg-white shadow-sm hover:shadow-md transition-shadow"
-            onClick={(e) => e.stopPropagation()} // Prevent column click when clicking a card
+            onClick={(e) => e.stopPropagation()}
           >
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="font-semibold text-slate-800">{emp.code}</span>
+            <button
+              className="flex-1 text-left"
+              onClick={() => onClickEmployee(emp)}
+              title={emp.isClerk ? 'คลิกเพื่อกรอก OT ชั่วโมง' : 'คลิกเพื่อตั้งค่าชั่วโมงทำงาน / ค่าไม้ / ค่าฟิล์ม'}
+            >
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-semibold text-slate-800">
+                  {emp.isClerk ? '🖊️ ' : ''}{emp.code}
+                </span>
                 {emp.isNew && (
                   <Badge className="bg-green-100 text-green-700 hover:bg-green-100 border-none text-[10px] px-1.5 py-0 h-4">ใหม่</Badge>
                 )}
+                {emp.isClerk && (
+                  <Badge className="bg-red-100 text-red-600 hover:bg-red-100 border-none text-[10px] px-1.5 py-0 h-4">เสมียน</Badge>
+                )}
+                {!emp.isClerk && emp.isHalfShift && (
+                  <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100 border-none text-[10px] px-1.5 py-0 h-4">8ชม.</Badge>
+                )}
+                {emp.isClerk && emp.otHours > 0 && (
+                  <Badge className="bg-purple-100 text-purple-700 hover:bg-purple-100 border-none text-[10px] px-1.5 py-0 h-4">OT {emp.otHours}ชม.</Badge>
+                )}
+                {!emp.isClerk && (emp.woodExcess > 0 || emp.filmAmount > 0) && (
+                  <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 border-none text-[10px] px-1.5 py-0 h-4">+extra</Badge>
+                )}
               </div>
               <p className="text-sm text-slate-600 mt-1">{emp.name}</p>
-            </div>
+            </button>
             
             <button 
               onClick={() => onRemove(emp.employee_id)}
-              className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-md opacity-0 group-hover:opacity-100 transition-all"
+              className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-md opacity-0 group-hover:opacity-100 transition-all ml-2 flex-shrink-0"
             >
               <X className="w-4 h-4" />
             </button>

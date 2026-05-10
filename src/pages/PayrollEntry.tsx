@@ -11,7 +11,7 @@ import { Badge } from '../components/ui/badge'
 import { Search, Save, Lock, Edit2, AlertCircle, CheckCircle2, UserX } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatThaiCurrency } from '../lib/formatters'
-import { calculateTraPhetPayroll } from '../lib/payrollCalc'
+import { calculatePayroll } from '../lib/payrollCalc'
 import type { PayrollCalculationInput } from '../lib/payrollCalc'
 import { formatEmployeeName } from './EmployeeFormModal'
 
@@ -28,6 +28,13 @@ export default function PayrollEntry() {
   const [overrideNormal, setOverrideNormal] = useState<number | null>(null)
   const [isEditingNormal, setIsEditingNormal] = useState(false)
   const [overrideReason, setOverrideReason] = useState('')
+  // clerk OT hours override
+  const [clerkOtHours, setClerkOtHours] = useState<number>(0)
+  // wood/film overrides (null = use auto-calculated sum from shifts)
+  const [overrideWood, setOverrideWood] = useState<number | null>(null)
+  const [overrideFilm, setOverrideFilm] = useState<number | null>(null)
+  const [isEditingWood, setIsEditingWood] = useState(false)
+  const [isEditingFilm, setIsEditingFilm] = useState(false)
 
   // Form states for manual entries
   const [manualEntries, setManualEntries] = useState({
@@ -84,7 +91,7 @@ export default function PayrollEntry() {
         .eq('employee_id', selectedEmployeeId)
         .eq('period_id', currentPeriod.id)
       if (error) throw error
-      return data
+      return data as any[]
     },
     enabled: !!selectedEmployeeId && !!currentPeriod?.id
   })
@@ -148,26 +155,53 @@ export default function PayrollEntry() {
       })
       setOverrideNormal(null)
       setOverrideReason('')
+      setOverrideWood(null)
+      setOverrideFilm(null)
     }
   }, [existingEntry, selectedEmployeeId])
 
   const selectedEmployee = employees.find(e => e.id === selectedEmployeeId)
+  const isClerk = selectedEmployee?.position === 'clerk'
 
-  const totalAdvance = advances.reduce((sum, adv) => sum + Number(adv.amount), 0)
-  const normalDays = shifts.filter(s => !s.is_holiday_ot).length
-  const holidayOtDays = shifts.filter(s => s.is_holiday_ot).length
+  const totalAdvance = advances.reduce((sum: number, adv: any) => sum + Number(adv.amount), 0)
+  const normalShifts = shifts.filter((s: any) => !s.is_holiday_ot)
+  // For worker: full 12h days only (half shift counted separately)
+  const normalDays = normalShifts.filter((s: any) => !s.is_half_shift).length
+  const halfShiftDays = normalShifts.filter((s: any) => s.is_half_shift).length
+  const holidayOtDays = shifts.filter((s: any) => s.is_holiday_ot).length
+  // For clerk: ALL non-OT shifts count as normal days (clerks are always 8h)
+  const clerkNormalDays = normalShifts.length
+
+  // Auto-sum wood/film from daily shift entries (item 8)
+  const autoWood = shifts.reduce((sum: number, s: any) => sum + Number(s.wood_excess || 0), 0)
+  const autoFilm = shifts.reduce((sum: number, s: any) => sum + Number(s.film_amount || 0), 0)
+  const effectiveWood = overrideWood !== null ? overrideWood : autoWood
+  const effectiveFilm = overrideFilm !== null ? overrideFilm : autoFilm
+
+  // Clerk OT: auto-sum from shift_assignments.ot_hours (read-only, no manual input)
+  const autoClerkOtHours = shifts.reduce((sum: number, s: any) => sum + Number(s.ot_hours || 0), 0)
 
   const payrollInput: PayrollCalculationInput = {
+    position: selectedEmployee?.position || 'worker',
+    wage_type: selectedEmployee?.wage_type || 'daily',
     rate_per_12h: selectedEmployee?.rate_per_12h || 0,
-    normal_days: normalDays,
+    normal_days: isClerk ? clerkNormalDays : normalDays,
+    half_shift_days: isClerk ? 0 : halfShiftDays,
     holiday_ot_days: holidayOtDays,
+    clerk_ot_hours: autoClerkOtHours,   // always from shifts, never from user input
     override_normal: overrideNormal,
     social_security_rate: socialSecurityRate,
     deduct_advance: totalAdvance,
-    ...manualEntries
+    amount_wood_excess: isClerk ? 0 : effectiveWood,
+    amount_film: isClerk ? 0 : effectiveFilm,
+    amount_special: manualEntries.amount_special,
+    amount_diligence: manualEntries.amount_diligence,
+    amount_position: manualEntries.amount_position,
+    deduct_safety_equipment: manualEntries.deduct_safety_equipment,
+    deduct_uniform: manualEntries.deduct_uniform,
   }
 
-  const calc = calculateTraPhetPayroll(payrollInput)
+  const calc = calculatePayroll(payrollInput)
 
   // Check if underlying shift or advance data changed since last save
   const isOutdated = useMemo(() => {
@@ -303,6 +337,9 @@ export default function PayrollEntry() {
                       <span className="text-sm flex items-center gap-2">
                         {emp.employee_code} — {formatEmployeeName(emp)}
                         {isInactive && <UserX className="w-3 h-3 text-rose-500" />}
+                        {emp.position === 'clerk' && (
+                          <span className="text-[10px] font-bold bg-red-100 text-red-600 px-1.5 py-0.5 rounded">เสมียน</span>
+                        )}
                       </span>
                     </div>
                     {!isInactive && (
@@ -334,7 +371,8 @@ export default function PayrollEntry() {
                   </h2>
                   <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-2 text-sm text-slate-500">
                     <span>รหัสพนักงาน: <strong className="text-slate-700">{selectedEmployee?.employee_code}</strong></span>
-                    <span>อัตราค่าจ้าง: <strong className="text-slate-700">{formatThaiCurrency(selectedEmployee?.rate_per_12h)} ฿/วัน</strong></span>
+                    <span>อัตราค่าจ้าง: <strong className="text-slate-700">{formatThaiCurrency(selectedEmployee?.rate_per_12h)} บาท/{selectedEmployee?.wage_type === 'monthly' ? 'เดือน' : 'วัน'}</strong></span>
+                    <span>ตำแหน่ง: <strong className={isClerk ? 'text-red-600' : 'text-slate-700'}>{isClerk ? 'เสมียน' : 'พนักงาน'}</strong></span>
                     <span>การรับเงิน: <strong className="text-slate-700">{selectedEmployee?.payment_method === 'bank_transfer' ? 'โอนบัญชี' : 'เงินสด'}</strong></span>
                   </div>
                 </div>
@@ -383,8 +421,13 @@ export default function PayrollEntry() {
                     {/* Auto Calculated normal pay */}
                     <div className="space-y-2">
                       <div className="flex justify-between items-center">
-                        <Label className="text-slate-700 font-semibold">ค่าจ้างปกติ (เรท 8 ชม.)</Label>
-                        <span className="text-xs text-slate-500">คำนวณอัตโนมัติ: {normalDays} วัน</span>
+                        <Label className="text-slate-700 font-semibold">
+                          {isClerk ? 'ค่าจ้าง (เสมียน 8 ชม./วัน)' : 'ค่าจ้างปกติ (เรท 8 ชม.)'}
+                        </Label>
+                        <span className="text-xs text-slate-500">
+                          คำนวณอัตโนมัติ: {normalDays + halfShiftDays} วัน
+                          {halfShiftDays > 0 && <span className="text-amber-600 ml-1">({halfShiftDays} วัน 8ชม.)</span>}
+                        </span>
                       </div>
                       
                       {isEditingNormal ? (
@@ -434,46 +477,170 @@ export default function PayrollEntry() {
                       )}
                     </div>
 
-                    <div className="space-y-2">
-                      <div className="flex justify-between items-center">
-                        <Label className="text-slate-700 font-semibold">ค่ากะ (เรท 4 ชม.)</Label>
-                        <span className="text-xs text-slate-500">คำนวณอัตโนมัติ: {normalDays} วัน</span>
+                    {/* Shift pay - hidden for clerk */}
+                    {!isClerk && (
+                      <div className="space-y-2">
+                        <div className="flex justify-between items-center">
+                          <Label className="text-slate-700 font-semibold">ค่ากะ (เรท 4 ชม.)</Label>
+                          <span className="text-xs text-slate-500">คำนวณอัตโนมัติ: {normalDays} วัน</span>
+                        </div>
+                        <Input className="bg-slate-50" readOnly value={formatThaiCurrency(calc.amount_shift)} />
                       </div>
-                      <Input className="bg-slate-50" readOnly value={formatThaiCurrency(calc.amount_shift)} />
-                    </div>
+                    )}
 
-                    <div className="space-y-2">
-                      <div className="flex justify-between items-center">
-                        <Label className="text-slate-700 font-semibold">OT วันหยุด</Label>
-                        <span className="text-xs text-slate-500">คำนวณอัตโนมัติ: {holidayOtDays} วัน</span>
+                    {/* Clerk OT — read-only, pulled from shift entries (item 4) */}
+                    {isClerk && (
+                      <div className="space-y-2">
+                        <div className="flex justify-between items-center">
+                          <Label className="text-slate-700 font-semibold">ค่าล่วงเวลา OT (1.5เท่า)</Label>
+                          <span className="text-xs text-slate-500">
+                            อัตรา: {formatThaiCurrency((selectedEmployee?.rate_per_12h/30/8*1.5))} บาท/ชม.
+                          </span>
+                        </div>
+                        <div className="flex gap-2 items-center">
+                          <div className="w-28 h-9 bg-slate-50 border border-slate-200 rounded-md flex items-center justify-center text-slate-700 font-semibold text-sm">
+                            {autoClerkOtHours} ชม.
+                          </div>
+                          <span className="text-xs text-slate-400">(จากหน้ากะ)</span>
+                          <Input className="bg-slate-50 flex-1" readOnly value={formatThaiCurrency(calc.amount_ot)} />
+                        </div>
+                        {autoClerkOtHours === 0 && (
+                          <p className="text-xs text-slate-400">ยังไม่มีการกรอก OT ในหน้ากะ</p>
+                        )}
                       </div>
-                      <Input className="bg-slate-50" readOnly value={formatThaiCurrency(calc.amount_ot)} />
-                    </div>
+                    )}
+
+                    {/* OT holiday for workers */}
+                    {!isClerk && (
+                      <div className="space-y-2">
+                        <div className="flex justify-between items-center">
+                          <Label className="text-slate-700 font-semibold">OT วันหยุด</Label>
+                          <span className="text-xs text-slate-500">คำนวณอัตโนมัติ: {holidayOtDays} วัน</span>
+                        </div>
+                        <Input className="bg-slate-50" readOnly value={formatThaiCurrency(calc.amount_ot)} />
+                      </div>
+                    )}
 
                     <hr className="my-4" />
 
-                    <div className="grid grid-cols-1 gap-3">
-                      <div className="space-y-1.5">
-                        <Label>ค่าไม้ส่วนเกิน</Label>
-                        <Input type="number" name="amount_wood_excess" className="w-full" value={manualEntries.amount_wood_excess || ''} onChange={handleInputChange} disabled={isApproved} placeholder="0" />
+                    {/* Wood/Film — hidden for clerk, pencil override for worker (item 8) */}
+                    {!isClerk ? (
+                      <div className="grid grid-cols-1 gap-3">
+                        {/* Wood excess — pencil+reason override (item 8) */}
+                        <div className="space-y-1.5">
+                          <div className="flex justify-between items-center">
+                            <Label>ค่าไม้ส่วนเกิน</Label>
+                            <span className="text-xs text-slate-400">รวมจากกะ: {formatThaiCurrency(autoWood)}</span>
+                          </div>
+                          {isEditingWood ? (
+                            <div className="space-y-2">
+                              <Input
+                                type="number"
+                                value={overrideWood ?? autoWood}
+                                onChange={e => setOverrideWood(Number(e.target.value) || 0)}
+                                className="border-amber-300 bg-amber-50"
+                                autoFocus
+                                disabled={isApproved}
+                              />
+                              <Input
+                                placeholder="เหตุผลที่แก้ไข..."
+                                value={overrideReason}
+                                onChange={e => setOverrideReason(e.target.value)}
+                                className="text-sm"
+                                disabled={isApproved}
+                              />
+                              <div className="flex gap-2">
+                                <Button size="sm" className="bg-[#1D9E75] hover:bg-[#157a5a]" onClick={() => setIsEditingWood(false)}>ยืนยัน</Button>
+                                <Button size="sm" variant="ghost" onClick={() => { setOverrideWood(null); setIsEditingWood(false) }}>รีเซ็ต</Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="relative">
+                              <Input
+                                className={`pr-10 ${overrideWood !== null ? 'border-amber-300 bg-amber-50 text-amber-800' : 'bg-emerald-50 border-emerald-200'}`}
+                                readOnly
+                                value={formatThaiCurrency(effectiveWood)}
+                              />
+                              {!isApproved && (
+                                <button
+                                  onClick={() => { setOverrideWood(overrideWood ?? autoWood); setIsEditingWood(true) }}
+                                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-[#1D9E75] p-1"
+                                >
+                                  <Edit2 className="w-4 h-4" />
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        {/* Film — pencil+reason override */}
+                        <div className="space-y-1.5">
+                          <div className="flex justify-between items-center">
+                            <Label>ค่าฟิล์ม</Label>
+                            <span className="text-xs text-slate-400">รวมจากกะ: {formatThaiCurrency(autoFilm)}</span>
+                          </div>
+                          {isEditingFilm ? (
+                            <div className="space-y-2">
+                              <Input
+                                type="number"
+                                value={overrideFilm ?? autoFilm}
+                                onChange={e => setOverrideFilm(Number(e.target.value) || 0)}
+                                className="border-amber-300 bg-amber-50"
+                                autoFocus
+                                disabled={isApproved}
+                              />
+                              <div className="flex gap-2">
+                                <Button size="sm" className="bg-[#1D9E75] hover:bg-[#157a5a]" onClick={() => setIsEditingFilm(false)}>ยืนยัน</Button>
+                                <Button size="sm" variant="ghost" onClick={() => { setOverrideFilm(null); setIsEditingFilm(false) }}>รีเซ็ต</Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="relative">
+                              <Input
+                                className={`pr-10 ${overrideFilm !== null ? 'border-amber-300 bg-amber-50 text-amber-800' : 'bg-emerald-50 border-emerald-200'}`}
+                                readOnly
+                                value={formatThaiCurrency(effectiveFilm)}
+                              />
+                              {!isApproved && (
+                                <button
+                                  onClick={() => { setOverrideFilm(overrideFilm ?? autoFilm); setIsEditingFilm(true) }}
+                                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-[#1D9E75] p-1"
+                                >
+                                  <Edit2 className="w-4 h-4" />
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label>เงินพิเศษ</Label>
+                          <Input type="number" name="amount_special" className="w-full" value={manualEntries.amount_special || ''} onChange={handleInputChange} disabled={isApproved} placeholder="0" />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label>เบี้ยขยัน</Label>
+                          <Input type="number" name="amount_diligence" className="w-full" value={manualEntries.amount_diligence || ''} onChange={handleInputChange} disabled={isApproved} placeholder="0" />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label>ค่าตำแหน่ง</Label>
+                          <Input type="number" name="amount_position" className="w-full" value={manualEntries.amount_position || ''} onChange={handleInputChange} disabled={isApproved} placeholder="0" />
+                        </div>
                       </div>
-                      <div className="space-y-1.5">
-                        <Label>ค่าฟิล์ม</Label>
-                        <Input type="number" name="amount_film" className="w-full" value={manualEntries.amount_film || ''} onChange={handleInputChange} disabled={isApproved} placeholder="0" />
+                    ) : (
+                      /* Clerk: only special/diligence/position bonuses */
+                      <div className="grid grid-cols-1 gap-3">
+                        <div className="space-y-1.5">
+                          <Label>เงินพิเศษ</Label>
+                          <Input type="number" name="amount_special" className="w-full" value={manualEntries.amount_special || ''} onChange={handleInputChange} disabled={isApproved} placeholder="0" />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label>เบี้ยขยัน</Label>
+                          <Input type="number" name="amount_diligence" className="w-full" value={manualEntries.amount_diligence || ''} onChange={handleInputChange} disabled={isApproved} placeholder="0" />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label>ค่าตำแหน่ง</Label>
+                          <Input type="number" name="amount_position" className="w-full" value={manualEntries.amount_position || ''} onChange={handleInputChange} disabled={isApproved} placeholder="0" />
+                        </div>
                       </div>
-                      <div className="space-y-1.5">
-                        <Label>เงินพิเศษ</Label>
-                        <Input type="number" name="amount_special" className="w-full" value={manualEntries.amount_special || ''} onChange={handleInputChange} disabled={isApproved} placeholder="0" />
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label>เบี้ยขยัน</Label>
-                        <Input type="number" name="amount_diligence" className="w-full" value={manualEntries.amount_diligence || ''} onChange={handleInputChange} disabled={isApproved} placeholder="0" />
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label>ค่าตำแหน่ง</Label>
-                        <Input type="number" name="amount_position" className="w-full" value={manualEntries.amount_position || ''} onChange={handleInputChange} disabled={isApproved} placeholder="0" />
-                      </div>
-                    </div>
+                    )}
                   </CardContent>
                 </Card>
 

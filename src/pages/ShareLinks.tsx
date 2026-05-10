@@ -436,18 +436,21 @@ export default function ShareLinks() {
                           <div className="flex justify-end gap-1.5 flex-wrap w-[180px] ml-auto">
                             <CopyButton text={slipUrl} label="ลิงก์" icon={<Link2 className="w-3 h-3" />} />
                             <CopyButton text={messageText} label="ข้อความ" />
-                            <button
-                              onClick={() => {
-                                if (window.confirm('ยืนยันการสร้างลิงก์ใหม่?\n(ลิงก์เก่าจะถูกยกเลิกและไม่สามารถเข้าดูได้อีก)')) {
-                                  regenMutation.mutate(t.id)
-                                }
-                              }}
-                              className="text-xs px-2 py-1 rounded-md border border-slate-200 bg-white text-slate-500 hover:border-amber-300 hover:text-amber-700 hover:bg-amber-50 flex items-center gap-1 transition-colors"
-                              title="สร้างลิงก์ใหม่ (ลิงก์เก่าจะถูกยกเลิก)"
-                            >
-                              <RotateCcw className="w-3 h-3" />
-                              รีเซ็ต
-                            </button>
+                            {/* Only admin/superUser can reset links — normalUser cannot */}
+                            {(user?.role === 'admin' || user?.role === 'superUser') && (
+                              <button
+                                onClick={() => {
+                                  if (window.confirm('ยืนยันการสร้างลิงก์ใหม่?\n(ลิงก์เก่าจะถูกยกเลิกและไม่สามารถเข้าดูได้อีก)')) {
+                                    regenMutation.mutate(t.id)
+                                  }
+                                }}
+                                className="text-xs px-2 py-1 rounded-md border border-slate-200 bg-white text-slate-500 hover:border-amber-300 hover:text-amber-700 hover:bg-amber-50 flex items-center gap-1 transition-colors"
+                                title="สร้างลิงก์ใหม่ (ลิงก์เก่าจะถูกยกเลิก)"
+                              >
+                                <RotateCcw className="w-3 h-3" />
+                                รีเซ็ต
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>

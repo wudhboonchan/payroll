@@ -106,6 +106,8 @@ export interface Database {
           last_name: string
           national_id: string | null
           nationality: string | null
+          position: 'worker' | 'clerk' | null
+          wage_type: 'daily' | 'monthly' | null
           payment_method: 'cash' | 'bank_transfer' | null
           bank_name: string | null
           bank_account: string | null
@@ -124,6 +126,8 @@ export interface Database {
           last_name: string
           national_id?: string | null
           nationality?: string | null
+          position?: 'worker' | 'clerk' | null
+          wage_type?: 'daily' | 'monthly' | null
           payment_method?: 'cash' | 'bank_transfer' | null
           bank_name?: string | null
           bank_account?: string | null
@@ -142,6 +146,8 @@ export interface Database {
           last_name?: string
           national_id?: string | null
           nationality?: string | null
+          position?: 'worker' | 'clerk' | null
+          wage_type?: 'daily' | 'monthly' | null
           payment_method?: 'cash' | 'bank_transfer' | null
           bank_name?: string | null
           bank_account?: string | null
@@ -198,6 +204,9 @@ export interface Database {
           work_date: string
           shift_type: 'morning' | 'afternoon' | 'night' | null
           is_holiday_ot: boolean | null
+          is_half_shift: boolean | null
+          wood_excess: number | null
+          film_amount: number | null
           entered_by: string | null
           created_at: string
         }
@@ -208,6 +217,9 @@ export interface Database {
           work_date: string
           shift_type?: 'morning' | 'afternoon' | 'night' | null
           is_holiday_ot?: boolean | null
+          is_half_shift?: boolean | null
+          wood_excess?: number | null
+          film_amount?: number | null
           entered_by?: string | null
           created_at?: string
         }
@@ -218,6 +230,9 @@ export interface Database {
           work_date?: string
           shift_type?: 'morning' | 'afternoon' | 'night' | null
           is_holiday_ot?: boolean | null
+          is_half_shift?: boolean | null
+          wood_excess?: number | null
+          film_amount?: number | null
           entered_by?: string | null
           created_at?: string
         }

@@ -109,3 +109,43 @@
     @apply font-sans;
   }
 }
+/* ============================================================
+   PRINT STYLES
+   ============================================================ */
+@media print {
+  /* ซ่อนการแสดงผลของทุกอย่าง */
+  body * {
+    visibility: hidden;
+  }
+  
+  /* แสดงเฉพาะเนื้อหาใน print-area */
+  .print-area,
+  .print-area * {
+    visibility: visible;
+  }
+
+  /* ดึง print-area ออกจาก flow ปกติและวางไว้บนสุด */
+  .print-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+  }
+
+  /* ตั้งค่าหน้ากระดาษ */
+  @page {
+    size: A4 portrait;
+    margin: 10mm;
+  }
+
+  /* ทำลาย height ของ body และ #root ที่อาจถูกดันโดย visibility: hidden */
+  html, body, #root {
+    height: 0 !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+}
