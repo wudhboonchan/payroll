@@ -103,6 +103,7 @@ export default function EmployeeSlip() {
       employee_code: e.employee_code,
       first_name: e.first_name,
       last_name: e.last_name,
+      factory_name: parsedData.factory?.name || 'บริษัท ผลิตภัณฑ์ตราเพชร จำกัด (มหาชน)',
       period_start: p.period_start,
       period_end: p.period_end,
       amount_normal: entry.amount_normal || 0,
