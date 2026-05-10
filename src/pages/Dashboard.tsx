@@ -340,7 +340,7 @@ export default function Dashboard() {
     if (!activePeriod?.id) return
 
     const channel = supabase
-      .channel(`dash-tokens-${activePeriod.id}`)
+      .channel(`dash-tokens-realtime-${activePeriod.id}`)
       .on(
         'postgres_changes',
         {
@@ -348,8 +348,11 @@ export default function Dashboard() {
           schema: 'public',
           table: 'payslip_tokens'
         },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ['dashboard-link-stats', activePeriod.id] })
+        (payload) => {
+          console.log('Dashboard: Realtime token update received', payload)
+          // Refetch both the stats and the link-specific stats to be sure
+          queryClient.invalidateQueries({ queryKey: ['dashboard-link-stats'] })
+          queryClient.refetchQueries({ queryKey: ['dashboard-link-stats'], type: 'active' })
         }
       )
       .subscribe()
@@ -357,7 +360,35 @@ export default function Dashboard() {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [activePeriod?.id, user?.role, queryClient])
+  }, [activePeriod?.id, queryClient])
+
+  // Realtime subscription for general dashboard stats
+  React.useEffect(() => {
+    if (!activePeriod?.id) return
+
+    const channel = supabase
+      .channel(`dash-general-realtime-${activePeriod.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'payroll_entries', filter: `period_id=eq.${activePeriod.id}` },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ['dashboard-stats', activePeriod.id] })
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'payroll_periods', filter: `id=eq.${activePeriod.id}` },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ['periods'] })
+          queryClient.invalidateQueries({ queryKey: ['dashboard-stats', activePeriod.id] })
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [activePeriod?.id, queryClient])
 
   // ── Derived values ────────────────────────────────────────────────────────
   const isApproved = activePeriod?.status === 'approved'

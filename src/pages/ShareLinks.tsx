@@ -143,7 +143,7 @@ export default function ShareLinks() {
     if (!selectedPeriodId) return
 
     const channel = supabase
-      .channel(`tokens-${selectedPeriodId}`)
+      .channel(`tokens-realtime-${selectedPeriodId}`)
       .on(
         'postgres_changes',
         {
@@ -151,9 +151,15 @@ export default function ShareLinks() {
           schema: 'public',
           table: 'payslip_tokens'
         },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ['payslip_tokens', selectedPeriodId] })
-          queryClient.invalidateQueries({ queryKey: ['dashboard-link-stats', selectedPeriodId] })
+        (payload) => {
+          console.log('Realtime token update received', payload)
+          // Invalidate and refetch everything related to link status
+          queryClient.invalidateQueries({ queryKey: ['payslip_tokens'] })
+          queryClient.invalidateQueries({ queryKey: ['dashboard-link-stats'] })
+          
+          // Force active queries to refetch immediately
+          queryClient.refetchQueries({ queryKey: ['payslip_tokens'], type: 'active' })
+          queryClient.refetchQueries({ queryKey: ['dashboard-link-stats'], type: 'active' })
         }
       )
       .subscribe()
