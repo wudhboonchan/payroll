@@ -261,8 +261,8 @@ export default function ShareLinks() {
       `ใบแจ้งค่าแรง ${periodLabel} — ห้างหุ้นส่วนจำกัด วิราญกร`,
       '',
       ...lines.flatMap(l => [l, '']),
-      'กรุณาตรวจสอบและกดยืนยันภายใน 48 ชั่วโมง',
-      'หากยอดไม่ถูกต้อง กรุณากดแจ้งในลิงค์ดังกล่าว',
+      '*กรุณาตรวจสอบและยืนยันภายใน 24 ชม.*',
+      'หากพ้นกำหนด ระบบจะถือว่าท่านตรวจสอบความถูกต้องแล้วโดยอัตโนมัติค่ะ',
     ].join('\n')
   }
 
@@ -415,7 +415,7 @@ export default function ShareLinks() {
                     const copyText = `${emp?.employee_code} ${formatEmployeeName(emp || { first_name: '' })}\n${slipUrl}`
                     const isExpired = new Date(t.expires_at) < new Date()
 
-                    const messageText = `ใบแจ้งค่าแรง: ${formatEmployeeName(emp || { first_name: '' })}\nคลิกเพื่อดูสลิป: ${slipUrl}`
+                    const messageText = `ใบแจ้งค่าแรง: ${formatEmployeeName(emp || { first_name: '' })}\nคลิกเพื่อดูสลิป: ${slipUrl}\n\n*กรุณาตรวจสอบและยืนยันภายใน 24 ชม.*\n(หากพ้นกำหนด ระบบจะยืนยันความถูกต้องให้อัตโนมัติค่ะ)`
 
                     return (
                       <tr key={t.id} className="hover:bg-slate-50/50 transition-colors">
@@ -433,7 +433,7 @@ export default function ShareLinks() {
                         </td>
                         <td className="px-4 py-3 align-top pt-4"><StatusBadge status={t.employee_status} /></td>
                         <td className="px-4 py-3 text-right align-top pt-3">
-                          <div className="flex justify-end gap-1.5 flex-wrap w-[180px] ml-auto">
+                          <div className="flex justify-end gap-2 whitespace-nowrap ml-auto">
                             <CopyButton text={slipUrl} label="ลิงก์" icon={<Link2 className="w-3 h-3" />} />
                             <CopyButton text={messageText} label="ข้อความ" />
                             {/* Only admin/superUser can reset links — normalUser cannot */}

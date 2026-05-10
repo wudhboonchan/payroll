@@ -69,23 +69,95 @@ function StepBadge({ status }: { status: 'done' | 'pending' | 'todo' }) {
 // ─── Bar chart ───────────────────────────────────────────────────────────────
 
 function BarChart({ bars, activePeriodId }: { bars: { id: string; label: string; value: number }[]; activePeriodId?: string }) {
-  const max = Math.max(...bars.map(b => b.value), 1)
+  if (bars.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-80 mt-4 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+        <span className="text-xs text-slate-400 font-medium">ยังไม่มีข้อมูลการเงินในงวดที่เลือก</span>
+      </div>
+    )
+  }
+
+  // Calculate a nice max value for the Y-axis
+  const rawMax = Math.max(...bars.map(b => b.value), 1000)
+  const step = rawMax > 10000 ? 5000 : 1000
+  const yAxisMax = Math.ceil(rawMax / step) * step
+  const gridLines = [yAxisMax, yAxisMax * 0.75, yAxisMax * 0.5, yAxisMax * 0.25, 0]
+
   return (
-    <div className="flex items-end gap-3 h-28 mt-4">
-      {bars.map(bar => {
-        const pct = Math.max((bar.value / max) * 100, 4)
-        const isActive = bar.id === activePeriodId
-        return (
-          <div key={bar.id} className="flex-1 flex flex-col items-center gap-1.5">
-            <div
-              className={`w-full rounded-t-md transition-all duration-500 ${isActive ? 'bg-[#1D9E75]' : 'bg-[#1D9E75]/25'}`}
-              style={{ height: `${pct}%` }}
-              title={`${formatThaiCurrency(bar.value)} บาท`}
-            />
-            <span className="text-[11px] text-slate-500 whitespace-nowrap">{bar.label}</span>
+    <div className="mt-4 flex flex-col flex-1">
+      <div className="flex h-80">
+        {/* Y-Axis labels */}
+        <div className="flex flex-col justify-between text-[10px] text-slate-400 w-12 pb-10 border-r border-slate-100">
+          {gridLines.map((val, i) => (
+            <span key={i} className="text-right pr-2">
+              {val >= 1000 ? `${(val / 1000).toFixed(val % 1000 === 0 ? 0 : 1)}k` : val}
+            </span>
+          ))}
+        </div>
+
+        {/* Chart area */}
+        <div className="flex-1 relative ml-2">
+          {/* Horizontal Grid Lines */}
+          <div className="absolute inset-0 flex flex-col justify-between pointer-events-none pb-10">
+            {gridLines.map((_, i) => (
+              <div 
+                key={i} 
+                className={`w-full border-t ${i === gridLines.length - 1 ? 'border-slate-300' : 'border-slate-100 border-dashed'}`} 
+              />
+            ))}
           </div>
-        )
-      })}
+
+          {/* Bars Container */}
+          <div className={`absolute inset-0 flex items-end gap-4 px-2 pb-10 ${bars.length === 1 ? 'justify-center' : 'justify-around'}`}>
+            {bars.map(bar => {
+              const heightPct = (bar.value / yAxisMax) * 100
+              const isActive = bar.id === activePeriodId
+              return (
+                <div 
+                  key={bar.id} 
+                  className="relative flex flex-col items-center group h-full justify-end"
+                  style={{ width: bars.length === 1 ? '100px' : '18%' }}
+                >
+                  {/* Data Label on Top */}
+                  <div className={`absolute mb-2 transition-all duration-700`} style={{ bottom: `${Math.max(heightPct, 5)}%` }}>
+                    <span className={`text-[10px] font-bold whitespace-nowrap px-1.5 py-0.5 rounded shadow-sm ${
+                      isActive ? 'bg-[#1D9E75] text-white' : 'bg-slate-100 text-slate-600'
+                    }`}>
+                      {formatThaiCurrency(bar.value)}
+                    </span>
+                  </div>
+                  
+                  {/* The Bar */}
+                  <div
+                    className={`w-full rounded-t-md transition-all duration-700 shadow-sm ${
+                      isActive ? 'bg-[#1D9E75] shadow-[0_-4px_12px_rgba(29,158,117,0.15)]' : 'bg-slate-200 opacity-60'
+                    }`}
+                    style={{ height: `${Math.max(heightPct, 1)}%` }}
+                  />
+                  
+                  {/* X-Axis Label */}
+                  <div className="absolute top-full mt-3 w-max text-center">
+                    <span className={`text-[10px] sm:text-[11px] block transition-colors ${
+                      isActive ? 'font-bold text-slate-900' : 'text-slate-500'
+                    }`}>
+                      {bar.label.split(' ')[0]}
+                    </span>
+                    <span className="text-[9px] text-slate-400 block">
+                      {bar.label.split(' ').slice(1).join(' ')}
+                    </span>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Footer Axis Description */}
+      <div className="flex justify-between items-center mt-6 px-2 text-[9px] font-bold text-slate-400 uppercase tracking-widest border-t border-slate-50 pt-3">
+        <span>← งวดการทำงาน (Payroll Period)</span>
+        <span>ยอดเงินสุทธิคงเหลือ (THB) ↑</span>
+      </div>
     </div>
   )
 }
@@ -183,15 +255,26 @@ export default function Dashboard() {
     queryKey: ['recent-bars', last4.map(p => p.id).join(',')],
     queryFn: async () => {
       if (!last4.length) return []
-      const { data: allEntries } = await supabase
-        .from('payroll_entries')
-        .select('period_id, ' + PAYROLL_COLS)
-        .in('period_id', last4.map(p => p.id))
-      return last4.map(p => ({
-        id: p.id,
-        label: periodShortLabel(p),
-        value: sumEntries((allEntries ?? []).filter((e: any) => e.period_id === p.id)).net
-      }))
+      const [entriesRes, advancesRes] = await Promise.all([
+        supabase.from('payroll_entries').select('period_id, ' + PAYROLL_COLS).in('period_id', last4.map(p => p.id)),
+        supabase.from('advance_payments').select('period_id, amount').in('period_id', last4.map(p => p.id))
+      ])
+
+      const allEntries = entriesRes.data ?? []
+      const allAdvances = advancesRes.data ?? []
+
+      return last4.map(p => {
+        const periodEntries = allEntries.filter((e: any) => e.period_id === p.id)
+        const periodAdvances = allAdvances.filter((a: any) => a.period_id === p.id)
+        const { net } = sumEntries(periodEntries)
+        const totalAdv = periodAdvances.reduce((s, a) => s + Number(a.amount), 0)
+        
+        return {
+          id: p.id,
+          label: periodShortLabel(p),
+          value: net - totalAdv
+        }
+      })
     },
     enabled: last4.length > 0
   })
@@ -277,14 +360,13 @@ export default function Dashboard() {
   }, [activePeriod?.id, user?.role, queryClient])
 
   // ── Derived values ────────────────────────────────────────────────────────
-  const isApproved = stats?.periodStatus === 'approved'
+  const isApproved = activePeriod?.status === 'approved'
   const dataFilled = !isLoading && (stats?.entryCount ?? 0) > 0
   const hasPendingProfiles = !isLoading && (stats?.pendingEmpCount ?? 0) > 0
 
   const profileStatus = isLoading ? 'pending' : hasPendingProfiles ? 'todo' : 'done'
   const fillStatus = isLoading ? 'pending' : dataFilled ? 'done' : 'todo'
   const approveStatus = isLoading ? 'pending' : isApproved ? 'done' : dataFilled ? 'pending' : 'todo'
-  const exportStatus = isApproved ? 'pending' : 'todo'
 
   const canApprove =
     (user?.role === 'superUser' || user?.role === 'admin') &&
@@ -294,10 +376,10 @@ export default function Dashboard() {
   const PeriodBadge = (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-1.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 transition-colors">
-          <Calendar className="w-3.5 h-3.5 text-slate-400" />
+        <button className="flex items-center gap-2.5 rounded-full border border-slate-200 bg-white px-6 py-2.5 text-base font-bold text-slate-700 shadow-sm hover:bg-slate-50 transition-colors">
+          <Calendar className="w-4 h-4 text-[#1D9E75]" />
           {activePeriod ? formatPeriodLabel(activePeriod.period_start, activePeriod.period_end) : 'เลือกงวด'}
-          <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+          <ChevronDown className="w-4 h-4 text-slate-400" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
@@ -514,19 +596,6 @@ export default function Dashboard() {
                 <StepBadge status={approveStatus} />
               </div>
 
-              {/* Step 3: Export */}
-              <Link to="/export" className="flex items-start justify-between gap-3 hover:bg-slate-50 p-2 -mx-2 rounded-xl transition-colors">
-                <div className="flex items-start gap-3">
-                  <div className={`mt-0.5 w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${isApproved ? 'bg-amber-50' : 'bg-slate-100'}`}>
-                    <XCircle className={`w-4 h-4 ${isApproved ? 'text-amber-500' : 'text-slate-300'}`} />
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-slate-800">Export ออก</p>
-                    <p className="text-xs text-slate-500 mt-0.5">ไปที่หน้าดาวน์โหลด</p>
-                  </div>
-                </div>
-                <StepBadge status={exportStatus} />
-              </Link>
             </div>
 
             {/* Approve / Unapprove buttons */}

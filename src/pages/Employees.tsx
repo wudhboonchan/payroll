@@ -16,6 +16,8 @@ import { Input } from '../components/ui/input'
 import { Badge } from '../components/ui/badge'
 import { Search, Plus, User, FileUp, AlertCircle, Filter } from 'lucide-react'
 import { formatThaiCurrency } from '../lib/formatters'
+import { format } from 'date-fns'
+import { th } from 'date-fns/locale'
 import EmployeeFormModal, { formatEmployeeName } from './EmployeeFormModal'
 import EmployeeImportModal from '../components/employees/EmployeeImportModal'
 
@@ -26,6 +28,25 @@ export default function Employees() {
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [isImportOpen, setIsImportOpen] = useState(false)
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null)
+
+  // Fetch current period
+  const { data: currentPeriod } = useQuery({
+    queryKey: ['current-period', user?.factory_id],
+    queryFn: async () => {
+      if (!user?.factory_id) return null
+      const { data, error } = await supabase
+        .from('payroll_periods')
+        .select('*')
+        .eq('factory_id', user.factory_id)
+        .eq('status', 'draft')
+        .order('period_end', { ascending: false })
+        .limit(1)
+        .single()
+      if (error && error.code !== 'PGRST116') throw error
+      return data
+    },
+    enabled: !!user?.factory_id
+  })
 
   // Fetch employees
   const { data: employees, isLoading } = useQuery({
@@ -78,19 +99,14 @@ export default function Employees() {
       <TopBar 
         title="ฐานข้อมูลพนักงาน" 
         action={
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              onClick={() => setIsImportOpen(true)}
-              className="border-[#1D9E75] text-[#1D9E75] hover:bg-[#1D9E75]/5"
-            >
-              <FileUp className="w-4 h-4 mr-2" />
-              นำเข้า Excel
-            </Button>
-            <Button onClick={handleCreate} className="bg-[#1D9E75] hover:bg-[#157a5a]">
-              <Plus className="w-4 h-4 mr-2" />
-              เพิ่มพนักงาน
-            </Button>
+          <div className="bg-white border border-slate-200 px-5 py-2 rounded-full shadow-sm">
+            <span className="text-base font-bold text-slate-600">
+              งวด: {currentPeriod ? (
+                `${format(new Date(currentPeriod.period_start), 'd', { locale: th })} - ${format(new Date(currentPeriod.period_end), 'd MMMM yyyy', { locale: th })}`
+              ) : (
+                'ยังไม่ได้สร้างงวด'
+              )}
+            </span>
           </div>
         } 
       />
@@ -102,12 +118,32 @@ export default function Employees() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
               <Input 
                 placeholder="ค้นหารหัส หรือชื่อพนักงาน..." 
-                className="pl-9 bg-white"
+                className="pl-9 bg-white h-10 shadow-sm"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
             
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setIsImportOpen(true)}
+                className="border-slate-200 text-slate-600 hover:bg-slate-50 h-10 shadow-sm"
+              >
+                <FileUp className="w-4 h-4 mr-2" />
+                นำเข้า Excel
+              </Button>
+              
+              <Button onClick={handleCreate} className="bg-[#1D9E75] hover:bg-[#157a5a] h-10 shadow-sm px-5">
+                <Plus className="w-4 h-4 mr-2" />
+                เพิ่มพนักงาน
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+          <div className="p-4 border-b border-slate-100">
             <Button
               variant={showPendingOnly ? "default" : "outline"}
               onClick={() => setShowPendingOnly(!showPendingOnly)}

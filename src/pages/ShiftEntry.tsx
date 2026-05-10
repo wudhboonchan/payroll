@@ -21,7 +21,8 @@ import {
   X,
   AlertCircle,
   Clock,
-  Clock4
+  Clock4,
+  CheckCircle2
 } from 'lucide-react'
 import { formatEmployeeName } from './EmployeeFormModal'
 
@@ -83,17 +84,34 @@ export default function ShiftEntry() {
     enabled: !!user?.factory_id
   })
 
-  // Fetch the target period (default to global selection or latest)
+  // Fetch the period that encompasses the selected date (item 6)
   const { data: periods = [] } = useQuery({
-    queryKey: ['periods', user?.factory_id],
+    queryKey: ['periods-for-date', workDateStr, user?.factory_id],
     queryFn: async () => {
       if (!user?.factory_id) return []
+      // Find period where workDate is between start and end
       const { data, error } = await supabase
         .from('payroll_periods')
         .select('*')
         .eq('factory_id', user.factory_id)
+        .lte('period_start', workDateStr)
+        .gte('period_end', workDateStr)
         .order('period_start', { ascending: false })
+      
       if (error) throw error
+      
+      // If no period found for this specific date, fallback to the latest one
+      if (!data || data.length === 0) {
+        const { data: latest, error: latestErr } = await supabase
+          .from('payroll_periods')
+          .select('*')
+          .eq('factory_id', user.factory_id)
+          .order('period_start', { ascending: false })
+          .limit(1)
+        if (latestErr) throw latestErr
+        return latest || []
+      }
+      
       return data
     },
     enabled: !!user?.factory_id
@@ -105,20 +123,20 @@ export default function ShiftEntry() {
   const { data: existingAssignments = [], isLoading: isLoadingAssignments } = useQuery({
     queryKey: ['shifts-for-date', workDateStr, user?.factory_id],
     queryFn: async () => {
-      if (!user?.factory_id || !currentPeriod?.id) return []
+      if (!user?.factory_id) return []
       const { data, error } = await supabase
         .from('shift_assignments')
         .select(`
           id, employee_id, shift_type, is_holiday_ot,
-          is_half_shift, wood_excess, film_amount,
+          is_half_shift, wood_excess, film_amount, ot_hours,
           employee:employees(employee_code, first_name, last_name, prefix, nationality)
         `)
         .eq('work_date', workDateStr)
-        .eq('period_id', currentPeriod.id)
       
       if (error) throw error
       return data as any[]
     },
+    enabled: !!user?.factory_id
   })
 
   // Fetch shift progress for the bottom bar
@@ -150,19 +168,23 @@ export default function ShiftEntry() {
   const totalDaysInPeriod = 15 // Assuming 15-day cycle
   const progressPercent = (daysFilled / totalDaysInPeriod) * 100
 
-  // Synchronize state with database (guard against infinite loops from React Query re-renders)
+  // Synchronize state with database
   useEffect(() => {
+    if (isLoadingAssignments || employees.length === 0 || !currentPeriod) {
+      return
+    }
+
     const mapped = (existingAssignments && existingAssignments.length > 0)
       ? existingAssignments.map((a: any) => {
           const emp = employees.find(e => e.id === a.employee_id)
           return {
             employee_id: a.employee_id,
-            code: a.employee.employee_code,
+            code: a.employee?.employee_code || emp?.employee_code || '?',
             name: formatEmployeeName({
-              prefix: a.employee.prefix,
-              first_name: a.employee.first_name,
-              last_name: a.employee.last_name,
-              nationality: a.employee.nationality,
+              prefix: a.employee?.prefix || emp?.prefix,
+              first_name: a.employee?.first_name || emp?.first_name,
+              last_name: a.employee?.last_name || emp?.last_name,
+              nationality: a.employee?.nationality || emp?.nationality,
             }),
             shift: a.shift_type as ShiftType,
             isNew: false,
@@ -177,9 +199,11 @@ export default function ShiftEntry() {
       : []
 
     setAssignments(prev => {
-      // Only update if the data actually changed
-      if (JSON.stringify(prev.map(p => p.employee_id + p.shift + p.isHalfShift)) ===
-          JSON.stringify(mapped.map((m: any) => m.employee_id + m.shift + m.isHalfShift))) {
+      // Only update if the data actually changed (Deep compare to avoid loops)
+      const currentSignature = JSON.stringify(mapped.map(m => m.employee_id + m.shift + m.isHalfShift + m.otHours + m.woodExcess))
+      const prevSignature = JSON.stringify(prev.map(p => p.employee_id + p.shift + p.isHalfShift + p.otHours + p.woodExcess))
+      
+      if (currentSignature === prevSignature) {
         return prev
       }
       return mapped
@@ -191,14 +215,14 @@ export default function ShiftEntry() {
       setIsHolidayOT(false)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workDateStr, existingAssignments?.length])
+  }, [workDateStr, existingAssignments, employees.length, currentPeriod?.id])
 
   // Derived state: available pool (employees not in assignments)
   const availablePool = useMemo(() => {
     return employees.filter(emp => !assignments.some(a => a.employee_id === emp.id))
       .filter(emp => 
         (emp.employee_code || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (emp.first_name || '').toLowerCase().includes(searchTerm.toLowerCase())
+        (`${emp.first_name || ''} ${emp.last_name || ''}`).toLowerCase().includes(searchTerm.toLowerCase())
       )
   }, [employees, assignments, searchTerm])
 
@@ -243,13 +267,12 @@ export default function ShiftEntry() {
   const saveMutation = useMutation({
     mutationFn: async () => {
       if (!user?.factory_id || !currentPeriod?.id) throw new Error("กรุณาสร้างงวดการจ่ายเงินก่อน")
-
-      // Delete existing for this date and period to refresh
-      await supabase
-        .from('shift_assignments')
-        .delete()
-        .eq('work_date', workDateStr)
-        .eq('period_id', currentPeriod.id)
+      
+      // SAFETY GUARD: Prevent accidental deletion if UI state is empty or invalid
+      if (assignments.length === 0) {
+        const confirmClear = window.confirm("คุณกำลังจะลบข้อมูลกะทั้งหมดของวันนี้ ยืนยันหรือไม่?")
+        if (!confirmClear) throw new Error("ยกเลิกการบันทึก")
+      }
 
       if (assignments.length === 0) return
 
@@ -276,6 +299,7 @@ export default function ShiftEntry() {
       queryClient.invalidateQueries({ queryKey: ['shifts-for-date'] })
       queryClient.invalidateQueries({ queryKey: ['shifts'] })
       queryClient.invalidateQueries({ queryKey: ['period-progress'] })
+      queryClient.invalidateQueries({ queryKey: ['all-period-shifts'] }) // Update PayrollEntry sidebar status
       toast.success(`บันทึกข้อมูลวันที่ ${formattedDate} สำเร็จ`)
     },
     onError: (error: any) => {
@@ -296,45 +320,25 @@ export default function ShiftEntry() {
 
   return (
     <>
-      <TopBar 
-        title="ตารางลงกะการทำงาน" 
-        action={
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-lg">
-              <Button 
-                variant={isHolidayOT ? "ghost" : "default"}
-                size="sm"
-                className={!isHolidayOT ? "bg-white text-slate-800 shadow-sm hover:bg-white" : ""}
-                onClick={() => setIsHolidayOT(false)}
-              >
-                วันปกติ
-              </Button>
-              <Button 
-                variant={!isHolidayOT ? "ghost" : "default"}
-                size="sm"
-                className={isHolidayOT ? "bg-amber-100 text-amber-800 shadow-sm hover:bg-amber-200" : "text-slate-500"}
-                onClick={() => setIsHolidayOT(true)}
-              >
-                วันหยุดนักขัตฤกษ์
-              </Button>
+      <div className="flex flex-col h-full overflow-hidden bg-white">
+        <TopBar 
+          title="ตารางลงกะการทำงาน" 
+          action={
+            <div className="bg-white border border-slate-200 px-5 py-2 rounded-full shadow-sm">
+              <span className="text-base font-bold text-slate-600">
+                งวด: {currentPeriod ? (
+                  `${format(new Date(currentPeriod.period_start), 'd', { locale: th })} - ${format(new Date(currentPeriod.period_end), 'd MMMM yyyy', { locale: th })}`
+                ) : (
+                  'ยังไม่ได้สร้างงวด'
+                )}
+              </span>
             </div>
-            
-            <Button 
-              className="bg-[#1D9E75] hover:bg-[#157a5a]"
-              onClick={() => saveMutation.mutate()}
-              disabled={saveMutation.isPending}
-            >
-              <Save className="w-4 h-4 mr-2" />
-              บันทึกวันนี้
-            </Button>
-          </div>
-        } 
-      />
+          } 
+        />
 
-      <div className="flex flex-col min-h-[calc(100vh-64px)] md:h-[calc(100vh-64px)] md:overflow-hidden">
-        
-        {/* Date Navigator & Status */}
-        <div className={`px-4 md:px-8 py-3 md:py-4 border-b flex flex-col sm:flex-row justify-between items-center gap-3 transition-colors ${isHolidayOT ? 'bg-amber-50 border-amber-200' : 'bg-white'}`}>
+        <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+          {/* Date Navigator & Action Controls */}
+          <div className={`px-4 md:px-8 py-2 md:py-3 border-b flex flex-col lg:flex-row justify-between items-center gap-4 transition-colors shrink-0 ${isHolidayOT ? 'bg-amber-50 border-amber-200' : 'bg-white'}`}>
           <div className="flex items-center gap-4">
             <Button variant="outline" size="icon" onClick={() => handleDateChange(subDays(currentDate, 1))}>
               <ChevronLeft className="w-5 h-5" />
@@ -349,61 +353,103 @@ export default function ShiftEntry() {
             <Button variant="outline" size="icon" onClick={() => handleDateChange(addDays(currentDate, 1))}>
               <ChevronRight className="w-5 h-5" />
             </Button>
-          </div>
 
-          <div className="flex flex-wrap justify-center items-center gap-2 text-sm">
-            <span className="font-medium whitespace-nowrap">งวดปัจจุบัน:</span>
-            <Badge variant="secondary" className="whitespace-nowrap">{currentPeriod?.label || 'ยังไม่ได้สร้างงวด'}</Badge>
             {isHolidayOT && (
-              <Badge variant="outline" className="border-amber-400 text-amber-700 bg-amber-100/50 whitespace-nowrap">
+              <Badge variant="outline" className="border-amber-400 text-amber-700 bg-amber-100/50 px-3 py-1.5 ml-2">
                 คิดเรท OT วันหยุด (x2)
               </Badge>
             )}
           </div>
+
+          <div className="flex items-center gap-3">
+            <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
+              <Button 
+                variant={!isHolidayOT ? 'default' : 'ghost'}
+                size="sm"
+                className={`rounded-lg px-4 ${!isHolidayOT ? 'bg-white text-slate-900 shadow-sm hover:bg-white' : 'text-slate-500'}`}
+                onClick={() => setIsHolidayOT(false)}
+              >
+                วันปกติ
+              </Button>
+              <Button 
+                variant={isHolidayOT ? 'default' : 'ghost'}
+                size="sm"
+                className={`rounded-lg px-4 ${isHolidayOT ? 'bg-amber-500 text-white shadow-sm hover:bg-amber-600' : 'text-slate-500'}`}
+                onClick={() => setIsHolidayOT(true)}
+              >
+                วันหยุดนักขัตฤกษ์
+              </Button>
+            </div>
+            
+            <div className="h-8 w-px bg-slate-200 mx-1 hidden md:block" />
+
+            <Button 
+              className="bg-[#1D9E75] hover:bg-[#157a5a] shadow-md px-6 py-2.5 rounded-xl text-base font-bold"
+              onClick={() => saveMutation.mutate()}
+              disabled={saveMutation.isPending}
+            >
+              <Save className="w-5 h-5 mr-2" />
+              {saveMutation.isPending ? 'กำลังบันทึก...' : 'บันทึกวันนี้'}
+            </Button>
+          </div>
         </div>
 
         {/* Main Work Area */}
-        <div className="flex-1 flex flex-col md:flex-row md:overflow-hidden">
+        <div className="flex-1 flex flex-col md:flex-row overflow-hidden min-h-0">
           
           {/* Left Panel: Employee Pool */}
           <div className="w-full md:w-80 border-b md:border-b-0 md:border-r bg-white flex flex-col h-[40vh] md:h-auto shrink-0">
             <div className="p-4 border-b shrink-0">
-              <h3 className="font-semibold text-slate-800 mb-3">พนักงานที่ยังไม่ได้ลงกะ ({availablePool.length})</h3>
+              <h3 className="font-semibold text-slate-800 mb-3">รายชื่อพนักงาน ({availablePool.length})</h3>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
                 <Input 
                   placeholder="ค้นหาพนักงาน..." 
-                  className="pl-9 bg-slate-50"
+                  className="pl-9 bg-slate-50 h-10"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                 />
               </div>
             </div>
             
-            <div className="flex-1 overflow-y-auto p-4 space-y-2">
-              {availablePool.map(emp => (
-                <div 
-                  key={emp.id}
-                  onClick={() => handleSelectEmployee(emp.id)}
-                  className={`
-                    p-3 rounded-lg border cursor-pointer transition-all
-                    ${selectedEmployeeIds.includes(emp.id) 
-                      ? 'border-[#1D9E75] bg-[#1D9E75]/10 shadow-sm ring-1 ring-[#1D9E75]' 
-                      : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
-                    }
-                  `}
-                >
-                  <div className="flex justify-between items-center">
-                    <span className="font-medium text-slate-900">{emp.employee_code}</span>
+            <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-slate-50/30">
+              {availablePool.map(emp => {
+                const isSelected = selectedEmployeeIds.includes(emp.id)
+                
+                return (
+                  <div 
+                    key={emp.id}
+                    onClick={() => handleSelectEmployee(emp.id)}
+                    className={`
+                      relative p-3 pl-4 rounded-xl border cursor-pointer transition-all flex flex-col gap-1
+                      ${isSelected 
+                        ? 'border-[#1D9E75] bg-[#1D9E75]/5 shadow-sm ring-1 ring-[#1D9E75]' 
+                        : 'border-slate-200 bg-white hover:bg-slate-50'
+                      }
+                    `}
+                  >
+                    {/* Selected Indicator Bar */}
+                    <div className={`absolute left-0 top-0 bottom-0 w-1 rounded-l-xl ${isSelected ? 'bg-[#1D9E75]' : 'bg-slate-200'}`} />
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-sm font-bold text-slate-900 truncate">
+                        {emp.position === 'clerk' ? '👩🏻‍🏫 ' : ''}{formatEmployeeName(emp)}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-bold text-slate-400 tabular-nums uppercase tracking-wider">{emp.employee_code}</span>
+                        {emp.position === 'clerk' && (
+                          <Badge className="bg-red-50 text-red-500 hover:bg-red-50 border-none text-[8px] px-1 py-0 h-3.5 font-bold uppercase">
+                            เสมียน
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <div className="text-sm text-slate-600 truncate mt-1">
-                    {formatEmployeeName(emp)}
-                  </div>
-                </div>
-              ))}
+                )
+              })}
               {availablePool.length === 0 && (
-                <div className="text-center py-8 text-slate-400 text-sm">
-                  ไม่มีพนักงานเหลือในรายชื่อ
+                <div className="text-center py-12 text-slate-400">
+                  <CheckCircle2 className="w-8 h-8 mx-auto mb-2 opacity-20 text-[#1D9E75]" />
+                  <p className="text-sm">ลงกะครบทุกคนแล้ว</p>
                 </div>
               )}
             </div>
@@ -492,6 +538,7 @@ export default function ShiftEntry() {
           </div>
         </div>
 
+        </div>
       </div>
 
       {/* Employee Detail Modal */}
@@ -507,13 +554,17 @@ export default function ShiftEntry() {
             {/* Header */}
             <div className="flex justify-between items-start">
               <div>
-                <p className="font-bold text-slate-900 text-lg">
-                  {detailModalEmp.isClerk ? '🖊️ ' : ''}{detailModalEmp.code}
+                <p className="font-bold text-slate-900 text-xl leading-tight">
+                  {detailModalEmp.isClerk ? '👩🏻‍🏫 ' : ''}{detailModalEmp.name}
                 </p>
-                <p className="text-sm text-slate-500 mt-0.5">{detailModalEmp.name}</p>
-                {detailModalEmp.isClerk && (
-                  <span className="text-xs bg-red-100 text-red-600 font-bold px-2 py-0.5 rounded mt-1 inline-block">เสมียน</span>
-                )}
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-sm font-bold text-slate-400 tabular-nums">
+                    รหัส: {detailModalEmp.code}
+                  </span>
+                  {detailModalEmp.isClerk && (
+                    <span className="text-[10px] bg-red-50 text-red-500 font-bold px-2 py-0.5 rounded uppercase tracking-wider border border-red-100">เสมียน</span>
+                  )}
+                </div>
               </div>
               <button onClick={() => setDetailModalEmp(null)} className="text-slate-400 hover:text-slate-600">
                 <X className="w-5 h-5" />
@@ -524,7 +575,7 @@ export default function ShiftEntry() {
               /* ── Clerk Modal: OT hours only ── */
               <>
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-700">
-                  🖊️ เสมียนทำงาน <strong>8 ชม./วัน</strong> โดยอัตโนมัติ ไม่มีค่ากะ<br/>
+                  👩🏻‍🏫 เสมียนทำงาน <strong>8 ชม./วัน</strong> โดยอัตโนมัติ ไม่มีค่ากะ<br/>
                   ชั่วโมงเกิน 8 ชม. คิดเป็น OT 1.5 เท่า
                 </div>
                 <div className="space-y-2">
@@ -652,27 +703,34 @@ function ShiftColumn({ title, time, icon, assignments, onAssign, onRemove, onCli
               onClick={() => onClickEmployee(emp)}
               title={emp.isClerk ? 'คลิกเพื่อกรอก OT ชั่วโมง' : 'คลิกเพื่อตั้งค่าชั่วโมงทำงาน / ค่าไม้ / ค่าฟิล์ม'}
             >
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-semibold text-slate-800">
-                  {emp.isClerk ? '🖊️ ' : ''}{emp.code}
-                </span>
-                {emp.isNew && (
-                  <Badge className="bg-green-100 text-green-700 hover:bg-green-100 border-none text-[10px] px-1.5 py-0 h-4">ใหม่</Badge>
-                )}
-                {emp.isClerk && (
-                  <Badge className="bg-red-100 text-red-600 hover:bg-red-100 border-none text-[10px] px-1.5 py-0 h-4">เสมียน</Badge>
-                )}
-                {!emp.isClerk && emp.isHalfShift && (
-                  <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100 border-none text-[10px] px-1.5 py-0 h-4">8ชม.</Badge>
-                )}
-                {emp.isClerk && emp.otHours > 0 && (
-                  <Badge className="bg-purple-100 text-purple-700 hover:bg-purple-100 border-none text-[10px] px-1.5 py-0 h-4">OT {emp.otHours}ชม.</Badge>
-                )}
-                {!emp.isClerk && (emp.woodExcess > 0 || emp.filmAmount > 0) && (
-                  <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 border-none text-[10px] px-1.5 py-0 h-4">+extra</Badge>
-                )}
+              <div className="flex flex-col">
+                <p className="text-sm font-bold text-slate-900 leading-tight">
+                  {emp.isClerk ? '👩🏻‍🏫 ' : ''}{emp.name}
+                </p>
+                <div className="flex items-center gap-2 mt-1 flex-wrap">
+                  <span className="text-[10px] font-bold text-slate-400 tabular-nums">
+                    {emp.code}
+                  </span>
+                  {emp.isNew && (
+                    <Badge className="bg-green-100 text-green-700 hover:bg-green-100 border-none text-[10px] px-1.5 py-0 h-4">ใหม่</Badge>
+                  )}
+                  {emp.isClerk && (
+                    <Badge className="bg-red-100 text-red-600 hover:bg-red-100 border-none text-[10px] px-1.5 py-0 h-4">เสมียน</Badge>
+                  )}
+                  {!emp.isClerk && emp.isHalfShift && (
+                    <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100 border-none text-[10px] px-1.5 py-0 h-4">ทำงาน 8 ชม.</Badge>
+                  )}
+                  {emp.isClerk && emp.otHours > 0 && (
+                    <Badge className="bg-purple-100 text-purple-700 hover:bg-purple-100 border-none text-[10px] px-1.5 py-0 h-4">มี OT {emp.otHours}ชม.</Badge>
+                  )}
+                  {!emp.isClerk && emp.woodExcess > 0 && (
+                    <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 border-none text-[10px] px-1.5 py-0 h-4">+ค่าไม้</Badge>
+                  )}
+                  {!emp.isClerk && emp.filmAmount > 0 && (
+                    <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 border-none text-[10px] px-1.5 py-0 h-4">+ค่าฟิล์ม</Badge>
+                  )}
+                </div>
               </div>
-              <p className="text-sm text-slate-600 mt-1">{emp.name}</p>
             </button>
             
             <button 

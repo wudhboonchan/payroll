@@ -47,7 +47,7 @@ export function AppLayout({ children }: AppLayoutProps) {
           <div className="ml-4 font-bold text-slate-900 text-sm sm:text-base truncate">วิราญกร | ระบบจัดการค่าแรงพนักงาน</div>
         </header>
 
-        <main className="flex-1 pb-8 w-full overflow-x-hidden">
+        <main className="flex-1 w-full overflow-x-hidden">
           {children || <Outlet />}
         </main>
       </div>

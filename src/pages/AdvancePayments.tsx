@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { format } from 'date-fns'
+import { th } from 'date-fns/locale'
 import { supabase } from '../lib/supabase'
 import { useAppStore } from '../store/useAppStore'
 import { TopBar } from '../components/layout/TopBar'
@@ -105,28 +107,34 @@ export default function AdvancePayments() {
       <TopBar 
         title="เบิกล่วงหน้า (Advance Payments)" 
         action={
-          <Button onClick={() => setIsModalOpen(true)} className="bg-[#1D9E75] hover:bg-[#157a5a]">
-            <Plus className="w-4 h-4 mr-2" />
-            เพิ่มรายการเบิก
-          </Button>
+          <div className="bg-white border border-slate-200 px-5 py-2 rounded-full shadow-sm">
+            <span className="text-base font-bold text-slate-600">
+              งวด: {currentPeriod ? (
+                `${format(new Date(currentPeriod.period_start), 'd', { locale: th })} - ${format(new Date(currentPeriod.period_end), 'd MMMM yyyy', { locale: th })}`
+              ) : (
+                'ยังไม่ได้สร้างงวด'
+              )}
+            </span>
+          </div>
         } 
       />
       
       <div className="p-8">
         <div className="flex justify-between items-center mb-6">
-          <div className="relative w-80">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
-            <Input 
-              placeholder="ค้นหารหัส หรือชื่อพนักงาน..." 
-              className="pl-9"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            <Badge variant="outline" className="text-slate-500 bg-white">
-              งวด: 1-15 พฤษภาคม 2568
-            </Badge>
+          <div className="flex items-center gap-4">
+            <div className="relative w-80">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
+              <Input 
+                placeholder="ค้นหารหัส หรือชื่อพนักงาน..." 
+                className="pl-9 h-11"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
+            <Button onClick={() => setIsModalOpen(true)} className="bg-[#1D9E75] hover:bg-[#157a5a] h-11 px-6 shadow-md rounded-xl font-bold">
+              <Plus className="w-5 h-5 mr-2" />
+              เพิ่มรายการเบิก
+            </Button>
           </div>
         </div>
 

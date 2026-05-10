@@ -9,6 +9,7 @@ export const IMPORT_COLUMNS = [
   { key: 'last_name',      header: 'นามสกุล',               example: 'ใจดี',          required: false, note: 'บังคับสำหรับสัญชาติไทย' },
   { key: 'nationality',    header: 'สัญชาติ*',              example: 'ไทย',           required: true,  note: 'ไทย / เมียนมา / กัมพูชา / ลาว' },
   { key: 'national_id',    header: 'เลขบัตร / Passport',    example: '1234567890123', required: false, note: 'เลขบัตรประชาชน 13 หลัก หรือ Passport' },
+  { key: 'position',       header: 'ตำแหน่ง*',              example: 'worker',        required: true,  note: 'worker (ทั่วไป) / clerk (เสมียน)' },
   { key: 'rate_per_12h',   header: 'ค่าแรง/วัน (บาท)*',    example: '320',           required: true,  note: 'ตัวเลขเท่านั้น เช่น 320' },
   { key: 'payment_method', header: 'วิธีรับเงิน*',          example: 'bank_transfer', required: true,  note: 'cash หรือ bank_transfer' },
   { key: 'bank_name',      header: 'ธนาคาร',               example: 'กสิกรไทย',     required: false, note: 'บังคับถ้าวิธีรับเงิน = bank_transfer' },
@@ -20,6 +21,7 @@ export const IMPORT_COLUMNS = [
 // ─── Valid value lists (single source of truth for template + validator) ───────
 
 export const VALID_NATIONALITIES   = ['ไทย', 'เมียนมา', 'กัมพูชา', 'ลาว']
+export const VALID_POSITIONS       = ['worker', 'clerk']
 export const VALID_PAYMENT_METHODS = ['cash', 'bank_transfer']
 export const VALID_STATUSES        = ['active', 'inactive']
 export const VALID_PREFIXES        = ['นาย', 'นาง', 'นางสาว']
@@ -36,12 +38,13 @@ const COL_IDX = {
   last_name: 3,
   nationality: 4,
   national_id: 5,
-  rate_per_12h: 6,
-  payment_method: 7,
-  bank_name: 8,
-  bank_account: 9,
-  status: 10,
-  notes: 11,
+  position: 6,
+  rate_per_12h: 7,
+  payment_method: 8,
+  bank_name: 9,
+  bank_account: 10,
+  status: 11,
+  notes: 12,
 }
 
 function colLetter(idx: number) { return String.fromCharCode(65 + idx) }
@@ -66,6 +69,7 @@ export function downloadEmployeeTemplate() {
     { title: 'สถานะ',        values: VALID_STATUSES },
     { title: 'คำนำหน้า',    values: VALID_PREFIXES },
     { title: 'ธนาคาร',      values: VALID_BANKS },
+    { title: 'ตำแหน่ง',      values: VALID_POSITIONS },
   ]
   const maxRows = Math.max(...refLists.map(l => l.values.length))
   const refMatrix: string[][] = [refLists.map(l => l.title)]
@@ -93,7 +97,8 @@ export function downloadEmployeeTemplate() {
     '(นามสกุล — บังคับสำหรับไทย)',
     VALID_NATIONALITIES.join(' / '),
     '(เลขบัตร 13 หลัก หรือ Passport)',
-    '(ตัวเลข เช่น 320)',
+    VALID_POSITIONS.join(' / '),
+    '(ตัวเลข เช่น 320 หรือ 15000)',
     VALID_PAYMENT_METHODS.join(' / '),
     VALID_BANKS.slice(0, 4).join(' / ') + ' ...',
     '(เลขบัญชี 10-12 หลัก)',
@@ -110,19 +115,19 @@ export function downloadEmployeeTemplate() {
     IMPORT_COLUMNS.map(c => c.header),
     // Row 4 — Reference / valid values row (copy-paste helper)
     ['▶ ค่าที่ยอมรับ / ตัวอย่าง:', ...refRow.slice(1)],
-    // Row 5 — Example 1: Thai, bank transfer
-    ['001', 'นาย', 'สมชาย', 'ใจดี', 'ไทย', '1234567890123', '320', 'bank_transfer', 'กสิกรไทย', '1234567890', 'active', ''],
-    // Row 6 — Example 2: Thai, cash
-    ['002', 'นาง', 'สมหญิง', 'รักดี', 'ไทย', '9876543210987', '340', 'cash', '', '', 'active', ''],
+    // Row 5 — Example 1: Thai, worker, bank transfer
+    ['001', 'นาย', 'สมชาย', 'ใจดี', 'ไทย', '1234567890123', 'worker', '350', 'bank_transfer', 'กสิกรไทย', '1234567890', 'active', ''],
+    // Row 6 — Example 2: Thai, clerk, monthly
+    ['003', 'นางสาว', 'ขยัน', 'รอบคอบ', 'ไทย', '5555555555555', 'clerk', '15000', 'bank_transfer', 'ไทยพาณิชย์', '1112223334', 'active', 'การเงิน'],
     // Row 7+ — Data entry starts here (data validation active)
   ]
 
   const ws = XLSX.utils.aoa_to_sheet(wsData)
 
   ws['!cols'] = [
-    { wch: 18 }, { wch: 14 }, { wch: 16 }, { wch: 20 }, { wch: 26 },
-    { wch: 22 }, { wch: 16 }, { wch: 26 }, { wch: 20 }, { wch: 18 },
-    { wch: 16 }, { wch: 24 },
+    { wch: 18 }, { wch: 14 }, { wch: 16 }, { wch: 20 }, { wch: 20 },
+    { wch: 22 }, { wch: 16 }, { wch: 16 }, { wch: 26 }, { wch: 20 },
+    { wch: 18 }, { wch: 16 }, { wch: 24 },
   ]
 
   ws['!merges'] = [
@@ -144,6 +149,19 @@ export function downloadEmployeeTemplate() {
       showInputMessage: true,
       promptTitle: 'สัญชาติ',
       prompt: VALID_NATIONALITIES.join(' / '),
+    },
+    {
+      sqref: sqref(COL_IDX.position),
+      type: 'list',
+      formula1: refRange(5, VALID_POSITIONS.length),
+      showDropDown: false,
+      showErrorMessage: true,
+      errorStyle: 'stop',
+      error: `ใช้: ${VALID_POSITIONS.join(' หรือ ')}`,
+      errorTitle: 'ตำแหน่งไม่ถูกต้อง',
+      showInputMessage: true,
+      promptTitle: 'ตำแหน่ง',
+      prompt: 'worker = พนักงานทั่วไป  |  clerk = เสมียน',
     },
     {
       sqref: sqref(COL_IDX.payment_method),
@@ -207,6 +225,7 @@ export function downloadEmployeeTemplate() {
     ]),
     ['', '', ''],
     ['ค่าที่ยอมรับ — สัญชาติ',     '', VALID_NATIONALITIES.join(', ')],
+    ['ค่าที่ยอมรับ — ตำแหน่ง',     '', VALID_POSITIONS.join(', ')],
     ['ค่าที่ยอมรับ — วิธีรับเงิน', '', VALID_PAYMENT_METHODS.join(', ')],
     ['ค่าที่ยอมรับ — สถานะ',       '', VALID_STATUSES.join(', ')],
     ['ค่าที่ยอมรับ — ธนาคาร',     '', VALID_BANKS.join(', ')],
@@ -291,8 +310,12 @@ export function parseEmployeeExcel(file: File): Promise<ParsedRow[]> {
 
           // Defaults
           if (!data.nationality)    data.nationality = 'ไทย'
+          if (!data.position)       data.position = 'worker'
           if (!data.status)         data.status = 'active'
           if (!data.payment_method) data.payment_method = 'bank_transfer'
+
+          // Auto-assign wage_type based on position
+          data.wage_type = data.position === 'clerk' ? 'monthly' : 'daily'
 
           // Validation
           const errors: string[] = []
@@ -306,6 +329,8 @@ export function parseEmployeeExcel(file: File): Promise<ParsedRow[]> {
             errors.push('โอนบัญชีต้องกรอกเลขบัญชี')
           if (!VALID_NATIONALITIES.includes(data.nationality))
             errors.push(`สัญชาติ "${data.nationality}" ไม่รู้จัก`)
+          if (!VALID_POSITIONS.includes(data.position))
+            errors.push(`ตำแหน่ง "${data.position}" ไม่รู้จัก`)
           if (!VALID_PAYMENT_METHODS.includes(data.payment_method))
             errors.push(`วิธีรับเงิน "${data.payment_method}" ไม่รู้จัก`)
 

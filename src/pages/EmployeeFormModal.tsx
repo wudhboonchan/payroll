@@ -95,7 +95,7 @@ interface Props {
 }
 
 const SELECT_CLASS =
-  'flex h-10 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50'
+  'flex h-11 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50'
 
 export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props) {
   const { user } = useAppStore()
@@ -140,6 +140,15 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
     },
     enabled: !!employeeId && isOpen,
   })
+
+  // Auto-set wage type based on position
+  useEffect(() => {
+    if (position === 'clerk') {
+      setValue('wage_type', 'monthly')
+    } else if (position === 'worker') {
+      setValue('wage_type', 'daily')
+    }
+  }, [position, setValue])
 
   // Populate form on edit
   useEffect(() => {
@@ -259,7 +268,7 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
                 <Input
                   {...register('employee_code')}
                   placeholder="เช่น 001"
-                  className="w-full"
+                  className="w-full h-11"
                 />
                 {errors.employee_code && (
                   <p className="text-xs text-red-500">{errors.employee_code.message}</p>
@@ -283,7 +292,7 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
                 <Label className="text-sm font-semibold text-slate-700">ตำแหน่งงาน *</Label>
                 <select {...register('position')} className={SELECT_CLASS}>
                   <option value="worker">👷 พนักงาน (ทั่วไป)</option>
-                  <option value="clerk">🖊️ เสมียน</option>
+                  <option value="clerk">👩🏻‍🏫 เสมียน</option>
                 </select>
                 {position === 'clerk' && (
                   <p className="text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded border border-amber-200">
@@ -294,20 +303,22 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
               <div className="space-y-2">
                 <Label className="text-sm font-semibold text-slate-700">ประเภทค่าจ้าง *</Label>
                 <div className="flex gap-4 pt-2">
-                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <label className={`flex items-center gap-2 text-sm ${position === 'worker' ? 'cursor-default opacity-100' : 'cursor-not-allowed opacity-50'}`}>
                     <input
                       type="radio"
                       value="daily"
                       {...register('wage_type')}
+                      disabled={true}
                       className="w-4 h-4 accent-[#1D9E75]"
                     />
                     รายวัน (บาท/วัน)
                   </label>
-                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <label className={`flex items-center gap-2 text-sm ${position === 'clerk' ? 'cursor-default opacity-100' : 'cursor-not-allowed opacity-50'}`}>
                     <input
                       type="radio"
                       value="monthly"
                       {...register('wage_type')}
+                      disabled={true}
                       className="w-4 h-4 accent-[#1D9E75]"
                     />
                     รายเดือน (บาท/เดือน)
@@ -331,7 +342,7 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
                 <Label className="text-sm font-semibold text-slate-700">ชื่อ *</Label>
                 <Input
                   {...register('first_name')}
-                  className="w-full"
+                  className="w-full h-11"
                 />
                 {errors.first_name && (
                   <p className="text-xs text-red-500">{errors.first_name.message}</p>
@@ -343,7 +354,7 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
                 </Label>
                 <Input
                   {...register('last_name')}
-                  className="w-full"
+                  className="w-full h-11"
                 />
                 {errors.last_name && (
                   <p className="text-xs text-red-500">{errors.last_name.message}</p>
@@ -364,7 +375,7 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
                 </Label>
                 <Input
                   {...register('national_id')}
-                  className="w-full"
+                  className="w-full h-11"
                 />
               </div>
               <div className="space-y-2">
@@ -381,7 +392,7 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
                     type="number"
                     step="0.01"
                     {...register('rate_per_12h')}
-                    className="pl-8 w-full"
+                    className="pl-8 w-full h-11"
                     placeholder={wageType === 'monthly' ? 'เช่น 15000' : 'เช่น 350'}
                   />
                 </div>
@@ -446,7 +457,7 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
                     <Input
                       {...register('bank_account')}
                       placeholder="XXXXXXXXXX"
-                      className="w-full bg-white"
+                      className="w-full h-11 bg-white"
                     />
                     {errors.bank_account && (
                       <p className="text-xs text-red-500">{errors.bank_account.message}</p>
@@ -469,7 +480,7 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
                 <Label className="text-sm font-semibold text-slate-700">หมายเหตุ</Label>
                 <Input
                   {...register('notes')}
-                  className="w-full"
+                  className="w-full h-11"
                 />
               </div>
             </div>

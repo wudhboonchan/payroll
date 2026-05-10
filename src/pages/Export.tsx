@@ -335,10 +335,12 @@ export default function Export() {
       <TopBar
         title="Export ข้อมูล"
         action={
-          <Badge variant="secondary" className="bg-slate-100 text-slate-700 hover:bg-slate-200 px-3 py-1.5 text-sm font-medium border-slate-200">
-            <Calendar className="w-4 h-4 mr-2" />
-            {exportType === 'month' ? 'รายเดือน' : 'รายงวด'}: {displayLabel.replace('เดือน_', '')}
-          </Badge>
+          <div className="bg-white border border-slate-200 px-5 py-2 rounded-full shadow-sm flex items-center gap-2">
+            <Calendar className="w-4 h-4 text-[#1D9E75]" />
+            <span className="text-base font-bold text-slate-600">
+              {exportType === 'month' ? 'รายเดือน' : 'รายงวด'}: {displayLabel.replace('เดือน_', '')}
+            </span>
+          </div>
         }
       />
 

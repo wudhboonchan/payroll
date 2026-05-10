@@ -1,5 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { format } from 'date-fns'
+import { th } from 'date-fns/locale'
 import { supabase } from '../lib/supabase'
 import { useAppStore } from '../store/useAppStore'
 import { TopBar } from '../components/layout/TopBar'
@@ -112,7 +114,41 @@ export default function PayrollEntry() {
     enabled: !!selectedEmployeeId && !!currentPeriod?.id
   })
 
-  // Fetch existing payroll entry
+  // Fetch ALL payroll entries for this period to show status in sidebar
+  const { data: allPeriodEntries = [] } = useQuery({
+    queryKey: ['all-payroll-entries', currentPeriod?.id],
+    queryFn: async () => {
+      if (!currentPeriod?.id) return []
+      const { data, error } = await supabase
+        .from('payroll_entries')
+        .select('*') // Get all fields to compare
+        .eq('period_id', currentPeriod.id)
+      if (error) throw error
+      return data
+    },
+    enabled: !!currentPeriod?.id,
+    staleTime: 0,
+    refetchOnMount: true
+  })
+
+  // Fetch ALL shift assignments for this period to detect "Outdated" status for everyone
+  const { data: allPeriodShifts = [] } = useQuery({
+    queryKey: ['all-period-shifts', currentPeriod?.id],
+    queryFn: async () => {
+      if (!currentPeriod?.id) return []
+      const { data, error } = await supabase
+        .from('shift_assignments')
+        .select('*')
+        .eq('period_id', currentPeriod.id)
+      if (error) throw error
+      return data as any[]
+    },
+    enabled: !!currentPeriod?.id,
+    staleTime: 0,
+    refetchOnMount: true
+  })
+
+  // Fetch existing payroll entry for the selected employee (full detail)
   const { data: existingEntry } = useQuery({
     queryKey: ['payroll-entry', selectedEmployeeId, currentPeriod?.id],
     queryFn: async () => {
@@ -211,8 +247,18 @@ export default function PayrollEntry() {
     const diffOt = Math.abs(calc.amount_ot - Number(existingEntry.amount_ot || 0));
     const diffAdv = Math.abs(totalAdvance - Number(existingEntry.deduct_advance || 0));
     
-    return diffNormal > 0.01 || diffShift > 0.01 || diffOt > 0.01 || diffAdv > 0.01;
-  }, [calc, existingEntry, totalAdvance])
+    // Also check if manual values in the form differ from DB
+    const isDirty = 
+      manualEntries.amount_wood_excess !== Number(existingEntry.amount_wood_excess || 0) ||
+      manualEntries.amount_film !== Number(existingEntry.amount_film || 0) ||
+      manualEntries.amount_special !== Number(existingEntry.amount_special || 0) ||
+      manualEntries.amount_diligence !== Number(existingEntry.amount_diligence || 0) ||
+      manualEntries.amount_position !== Number(existingEntry.amount_position || 0) ||
+      manualEntries.deduct_safety_equipment !== Number(existingEntry.deduct_safety_equipment || 0) ||
+      manualEntries.deduct_uniform !== Number(existingEntry.deduct_uniform || 0);
+
+    return diffNormal > 0.01 || diffShift > 0.01 || diffOt > 0.01 || diffAdv > 0.01 || isDirty;
+  }, [calc, existingEntry, totalAdvance, manualEntries])
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -240,6 +286,8 @@ export default function PayrollEntry() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['payroll-entry'] })
+      queryClient.invalidateQueries({ queryKey: ['all-payroll-entries'] })
+      queryClient.invalidateQueries({ queryKey: ['all-period-shifts'] })
       toast.success('บันทึกข้อมูลค่าจ้างสำเร็จ')
     },
     onError: (error: any) => {
@@ -258,21 +306,30 @@ export default function PayrollEntry() {
   return (
     <>
       <TopBar 
-        title="กรอกค่าจ้าง" 
+        title="บันทึกข้อมูลค่าจ้าง" 
         action={
           <div className="flex items-center gap-4">
+            <div className="bg-white border border-slate-200 px-5 py-2 rounded-full shadow-sm">
+              <span className="text-base font-bold text-slate-600">
+                งวด: {currentPeriod ? (
+                  `${format(new Date(currentPeriod.period_start), 'd', { locale: th })} - ${format(new Date(currentPeriod.period_end), 'd MMMM yyyy', { locale: th })}`
+                ) : (
+                  'ยังไม่ได้สร้างงวด'
+                )}
+              </span>
+            </div>
             {user?.role === 'superUser' && (
-              <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border">
-                <Label className="text-xs text-slate-500">อัตราประกันสังคม:</Label>
+              <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border shadow-sm">
+                <span className="text-[10px] font-bold text-slate-500 uppercase">ประกันสังคม:</span>
                 <div className="flex items-center gap-1">
                   <Input 
                     type="number" 
-                    className="w-16 h-7 text-right text-sm"
+                    className="w-14 h-7 text-right text-sm font-bold"
                     value={socialSecurityRate * 100}
                     onChange={(e) => setSocialSecurityRate(Number(e.target.value) / 100)}
                     disabled={isApproved}
                   />
-                  <span className="text-sm font-medium">%</span>
+                  <span className="text-sm font-medium text-slate-400">%</span>
                 </div>
               </div>
             )}
@@ -284,9 +341,6 @@ export default function PayrollEntry() {
         {/* Left Sidebar: Employee List */}
         <div className="w-full md:w-80 border-b md:border-b-0 md:border-r bg-white flex flex-col h-[40vh] md:h-auto shrink-0">
           <div className="p-4 border-b space-y-3 shrink-0">
-            <Badge variant="outline" className="w-full justify-center py-1.5 bg-slate-50">
-              งวด: {currentPeriod?.label || 'ยังไม่ได้สร้างงวด'}
-            </Badge>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
               <Input 
@@ -311,40 +365,83 @@ export default function PayrollEntry() {
               .map(emp => {
                 const isInactive = emp.status !== 'active'
                 const isSelected = selectedEmployeeId === emp.id
+                const entry = allPeriodEntries.find((e: any) => e.employee_id === emp.id)
                 
+                // ── Status Logic (Using central calculatePayroll) ──
+                const empShifts = allPeriodShifts.filter((s: any) => s.employee_id === emp.id)
+                
+                // Prepare input for calculation
+                const normalShifts = empShifts.filter((s: any) => !s.is_holiday_ot)
+                const isEmpClerk = emp.position === 'clerk'
+                
+                const calcInput: PayrollCalculationInput = {
+                  position: emp.position,
+                  wage_type: emp.wage_type,
+                  rate_per_12h: emp.rate_per_12h || 0,
+                  normal_days: isEmpClerk ? normalShifts.length : normalShifts.filter((s: any) => !s.is_half_shift).length,
+                  half_shift_days: isEmpClerk ? 0 : normalShifts.filter((s: any) => s.is_half_shift).length,
+                  holiday_ot_days: empShifts.filter((s: any) => s.is_holiday_ot).length,
+                  clerk_ot_hours: empShifts.reduce((sum: number, s: any) => sum + Number(s.ot_hours || 0), 0),
+                  social_security_rate: socialSecurityRate,
+                  // We don't check advances for the "Outdated" status dot in sidebar for performance, 
+                  // but we check the core income components which are most critical
+                }
+                
+                const currentCalc = calculatePayroll(calcInput)
+
+                let status: 'grey' | 'green' | 'orange' = 'grey'
+                if (entry) {
+                  // Compare core income values saved in DB vs currently calculated from shifts
+                  const diffNormal = Math.abs(currentCalc.amount_normal - Number(entry.amount_normal || 0))
+                  const diffShift = Math.abs(currentCalc.amount_shift - Number(entry.amount_shift || 0))
+                  const diffOt = Math.abs(currentCalc.amount_ot - Number(entry.amount_ot || 0))
+                  
+                  // Use a very small epsilon for float comparison
+                  if (diffNormal > 0.1 || diffShift > 0.1 || diffOt > 0.1) {
+                    status = 'orange'
+                  } else {
+                    status = 'green'
+                  }
+                }
+
                 return (
                   <div 
                     key={emp.id}
-                    onClick={() => {
-                      if (isInactive) {
-                        toast.error('ไม่สามารถกรอกค่าจ้างได้', {
-                          description: `พนักงาน ${emp.first_name} ${emp.last_name} พ้นสภาพพนักงานแล้ว`
-                        })
-                        return
-                      }
-                      setSelectedEmployeeId(emp.id)
-                    }}
+                    onClick={() => !isInactive && setSelectedEmployeeId(emp.id)}
                     className={`
-                      p-3 rounded-lg cursor-pointer transition-all flex justify-between items-center
+                      relative p-3 pl-4 rounded-xl cursor-pointer transition-all flex justify-between items-center border
                       ${isSelected 
-                        ? 'bg-[#1D9E75]/10 text-[#1D9E75] font-medium border-l-4 border-l-[#1D9E75]' 
-                        : 'hover:bg-slate-50 text-slate-700'
+                        ? 'bg-[#1D9E75]/10 border-[#1D9E75] text-[#1D9E75] font-bold shadow-sm' 
+                        : 'bg-white border-slate-100 hover:border-slate-200 text-slate-700'
                       }
                       ${isInactive ? 'opacity-50 grayscale' : ''}
                     `}
                   >
-                    <div className="flex flex-col">
-                      <span className="text-sm flex items-center gap-2">
-                        {emp.employee_code} — {formatEmployeeName(emp)}
-                        {isInactive && <UserX className="w-3 h-3 text-rose-500" />}
+                    <div className="flex flex-col gap-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold opacity-60">{emp.employee_code}</span>
                         {emp.position === 'clerk' && (
-                          <span className="text-[10px] font-bold bg-red-100 text-red-600 px-1.5 py-0.5 rounded">เสมียน</span>
+                          <span className="text-[9px] font-bold bg-red-100 text-red-600 px-1.5 py-0.5 rounded leading-none">
+                            👩🏻‍🏫 เสมียน
+                          </span>
                         )}
+                      </div>
+                      <span className="text-sm font-medium truncate max-w-[140px]">
+                        {formatEmployeeName(emp)}
                       </span>
                     </div>
-                    {!isInactive && (
-                      <CheckCircle2 className={`w-4 h-4 ${emp.id === employees[0]?.id ? 'text-[#1D9E75]' : 'text-slate-200'}`} />
-                    )}
+
+                    <div className="flex items-center gap-3">
+                      {status === 'orange' && (
+                        <span className="text-[9px] font-black text-orange-600 uppercase animate-pulse">Outdated</span>
+                      )}
+                      {/* Status Dot */}
+                      <div className={`w-3.5 h-3.5 rounded-full shadow-inner border ${
+                        status === 'grey' ? 'bg-slate-200 border-slate-300' :
+                        status === 'green' ? 'bg-[#1D9E75] border-[#157a5a]' :
+                        'bg-orange-500 border-orange-600'
+                      }`} />
+                    </div>
                   </div>
                 )
               })}

@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { TopBar } from '../components/layout/TopBar'
+import { format } from 'date-fns'
+import { th } from 'date-fns/locale'
 import { PaySlipPreview } from '../components/payroll/PaySlipPreview'
 import type { PaySlipData } from '../components/payroll/PaySlipPreview'
 import { Button } from '../components/ui/button'
@@ -185,14 +187,25 @@ export default function PaySlipPage() {
       <TopBar
         title="ดูสลิปเงินเดือน"
         action={
-          <Button
-            className="bg-[#1D9E75] hover:bg-[#157a5a]"
-            onClick={handlePrint}
-            disabled={!slipData}
-          >
-            <Printer className="w-4 h-4 mr-2" />
-            พิมพ์สลิป
-          </Button>
+          <div className="flex items-center gap-3">
+            <Button
+              className="bg-[#1D9E75] hover:bg-[#157a5a] h-10 px-5 font-bold shadow-sm"
+              onClick={handlePrint}
+              disabled={!slipData}
+            >
+              <Printer className="w-4 h-4 mr-2" />
+              พิมพ์สลิป
+            </Button>
+            <div className="bg-white border border-slate-200 px-5 py-2 rounded-full shadow-sm">
+              <span className="text-base font-bold text-slate-600">
+                งวด: {currentPeriod ? (
+                  `${format(new Date(currentPeriod.period_start), 'd', { locale: th })} - ${format(new Date(currentPeriod.period_end), 'd MMMM yyyy', { locale: th })}`
+                ) : (
+                  'ยังไม่ได้สร้างงวด'
+                )}
+              </span>
+            </div>
+          </div>
         }
       />
 
@@ -237,9 +250,11 @@ export default function PaySlipPage() {
                   `}
                 >
                   <div>
-                    <p className={`text-sm font-semibold ${isInactive ? 'text-slate-400' : 'text-slate-800'}`}>
-                      {emp.employee_code} — {formatEmployeeName(emp)}
-                    </p>
+                    <div className={`flex items-center gap-3 text-sm font-bold ${isInactive ? 'text-slate-400' : 'text-slate-800'}`}>
+                      <span className="w-12 shrink-0 tabular-nums">{emp.employee_code}</span>
+                      <span className="text-slate-300 font-normal">—</span>
+                      <span className="truncate">{formatEmployeeName(emp)}</span>
+                    </div>
                     {isInactive && (
                       <span className="text-xs text-slate-400 flex items-center gap-1 mt-0.5">
                         <UserX className="w-3 h-3" /> พ้นสภาพพนักงาน

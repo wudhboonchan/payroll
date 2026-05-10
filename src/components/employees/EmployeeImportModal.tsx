@@ -84,6 +84,8 @@ export default function EmployeeImportModal({ isOpen, onClose }: Props) {
         last_name: r.data.last_name?.trim() || '',
         nationality: r.data.nationality || 'ไทย',
         national_id: r.data.national_id || null,
+        position: r.data.position || 'worker',
+        wage_type: r.data.position === 'clerk' ? 'monthly' : 'daily',
         rate_per_12h: Number(r.data.rate_per_12h),
         payment_method: r.data.payment_method as 'cash' | 'bank_transfer',
         bank_name: r.data.payment_method === 'bank_transfer' ? r.data.bank_name || null : null,

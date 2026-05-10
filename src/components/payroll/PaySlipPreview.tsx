@@ -99,7 +99,7 @@ export const PaySlipPreview = forwardRef<HTMLDivElement, PaySlipPreviewProps>(({
       {/* ===== HEADER ===== */}
       <div className="flex items-start mb-6 print:mb-4">
         <div className="flex items-center gap-5 print:gap-4">
-          <div className="bg-slate-50 p-2 rounded-xl border border-slate-100 print:border-none print:bg-transparent print:p-0 flex-shrink-0">
+          <div className="flex-shrink-0">
             <img src="/logo.png" className="w-16 h-16 md:w-20 md:h-20 print:w-16 print:h-16 object-contain" alt="โลโก้ บริษัท" />
           </div>
           <div>

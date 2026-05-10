@@ -9,12 +9,13 @@ import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/card'
 import { Button } from '../components/ui/button'
 import { Label } from '../components/ui/label'
 
-import { CheckCircle2, AlertCircle, Clock, Loader2 } from 'lucide-react'
+import { CheckCircle2, AlertCircle, Clock, Loader2, ShieldAlert, Eye, Lock } from 'lucide-react'
 
 export default function EmployeeSlip() {
   const { token } = useParams<{ token: string }>()
   const [localStatus, setLocalStatus] = useState<string>('')
   const [disputeReason, setDisputeReason] = useState('')
+  const [hasAcceptedWarning, setHasAcceptedWarning] = useState(false)
 
   const { data: rawData, isLoading: isLoadingToken, error: errorToken } = useQuery<any>({
     queryKey: ['slip_token_data', token],
@@ -194,14 +195,15 @@ export default function EmployeeSlip() {
   }
 
   return (
+    <>
     <div className="min-h-screen bg-slate-100 flex flex-col items-center py-8 px-4">
       
       {localStatus === 'pending' && (
         <div className="w-full max-w-[600px] bg-blue-50 border border-blue-200 text-blue-800 px-6 py-4 rounded-xl flex items-start gap-4 mb-6 shadow-sm">
           <Clock className="w-6 h-6 text-blue-500 mt-0.5 flex-shrink-0" />
           <div>
-            <h3 className="font-semibold">โปรดตรวจสอบและยืนยัน</h3>
-            <p className="text-sm mt-1">กรุณาตรวจสอบความถูกต้องของสลิปเงินเดือน หากมีข้อสงสัยสามารถแจ้งปัญหาผ่านระบบด้านล่าง</p>
+            <h3 className="font-semibold">โปรดตรวจสอบและยืนยันภายใน 24 ชม.</h3>
+            <p className="text-sm mt-1">กรุณาตรวจสอบความถูกต้องของสลิปเงินเดือนให้เรียบร้อย หากพ้นกำหนดเวลา ระบบจะถือว่าท่านตรวจสอบความถูกต้องแล้วโดยอัตโนมัติค่ะ</p>
           </div>
         </div>
       )}
@@ -276,5 +278,47 @@ export default function EmployeeSlip() {
       )}
 
     </div>
+    
+    {/* Privacy Warning Modal */}
+    {!hasAcceptedWarning && (
+      <div className="fixed inset-0 z-[100] bg-slate-900/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-300">
+        <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-8 text-center space-y-6 overflow-hidden relative animate-in fade-in zoom-in-95 duration-500">
+          <div className="absolute top-0 left-0 right-0 h-2 bg-gradient-to-r from-amber-400 via-[#1D9E75] to-blue-500" />
+          
+          <div className="flex justify-center">
+            <div className="w-20 h-20 bg-amber-50 rounded-full flex items-center justify-center relative">
+              <ShieldAlert className="w-10 h-10 text-amber-500" />
+              <div className="absolute -bottom-1 -right-1 bg-white p-1 rounded-full shadow-sm">
+                <Lock className="w-5 h-5 text-slate-400" />
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <h2 className="text-2xl font-bold text-slate-900">แจ้งเตือนความเป็นส่วนตัว</h2>
+            <p className="text-slate-500">
+              ระบบกำลังจะแสดงผลข้อมูลสลิปเงินเดือนและข้อมูลส่วนบุคคลของท่าน
+            </p>
+          </div>
+
+          <div className="bg-slate-50 p-4 rounded-2xl text-left border border-slate-100">
+            <div className="flex items-start gap-3">
+              <Eye className="w-5 h-5 text-slate-400 mt-0.5" />
+              <p className="text-xs text-slate-600 leading-relaxed">
+                ข้อมูลนี้เป็นข้อมูลส่วนตัวและมีความสำคัญ โปรดระมัดระวังการเปิดอ่านในที่สาธารณะ หรือในที่ที่มีผู้อื่นอาจมองเห็นหน้าจอของท่านได้
+              </p>
+            </div>
+          </div>
+
+          <Button 
+            onClick={() => setHasAcceptedWarning(true)}
+            className="w-full h-14 text-lg bg-[#1D9E75] hover:bg-[#157a5a] rounded-2xl shadow-lg shadow-[#1D9E75]/20 font-bold"
+          >
+            ยืนยันเพื่อดูข้อมูล
+          </Button>
+        </div>
+      </div>
+    )}
+  </>
   )
 }
