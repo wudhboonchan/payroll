@@ -135,9 +135,20 @@ export default function EmployeeSlip() {
   // Sync local status when data loads
   useEffect(() => {
     if (tokenData?.employee_status) {
-      setLocalStatus(tokenData.employee_status as any)
+      let statusToSet = tokenData.employee_status
+      if (statusToSet === 'pending') {
+        const createdTime = tokenData.created_at 
+          ? new Date(tokenData.created_at).getTime()
+          : (tokenData.expires_at ? new Date(tokenData.expires_at).getTime() - (30 * 24 * 60 * 60 * 1000) : Date.now())
+        
+        const hoursPassed = (Date.now() - createdTime) / (1000 * 60 * 60)
+        if (hoursPassed >= 24) {
+          statusToSet = 'auto_confirmed'
+        }
+      }
+      setLocalStatus(statusToSet)
     }
-  }, [tokenData?.employee_status])
+  }, [tokenData?.employee_status, tokenData?.created_at, tokenData?.expires_at])
 
   const confirmMutation = useMutation({
     mutationFn: async () => {
@@ -208,13 +219,19 @@ export default function EmployeeSlip() {
         </div>
       )}
 
-      {localStatus === 'confirmed' && (
+      {(localStatus === 'confirmed' || localStatus === 'auto_confirmed') && (
         <div className="w-full max-w-[600px] bg-green-50 border border-green-200 text-green-800 px-6 py-4 rounded-xl flex items-start gap-4 mb-6 shadow-sm animate-in fade-in slide-in-from-top-2">
           <CheckCircle2 className="w-8 h-8 text-green-500 flex-shrink-0" />
           <div className="flex flex-col">
-            <h3 className="font-bold text-lg">ยืนยันรับทราบข้อมูลเรียบร้อย ขอบคุณค่ะ</h3>
+            <h3 className="font-bold text-lg">
+              {localStatus === 'auto_confirmed' 
+                ? 'ระบบยืนยันรับทราบข้อมูลให้อัตโนมัติ ขอบคุณค่ะ' 
+                : 'ยืนยันรับทราบข้อมูลเรียบร้อย ขอบคุณค่ะ'}
+            </h3>
             <p className="text-sm mt-1 text-green-700">
-              * ปุ่มยืนยันถูกปิดการใช้งานแล้ว หากต้องการทักท้วงหรือแก้ไขข้อมูล กรุณาติดต่อกลับหาบริษัทตามช่องทางแชทที่ได้รับข้อความแจ้งไปนะคะ
+              {localStatus === 'auto_confirmed' 
+                ? '* เนื่องจากท่านไม่ได้ตรวจสอบและยืนยันภายใน 24 ชั่วโมง ระบบจึงถือว่าข้อมูลถูกต้องและทำการยืนยันให้อัตโนมัติ หากมีข้อสงสัย กรุณาติดต่อบริษัทผ่านช่องทางแชทนะคะ'
+                : '* ปุ่มยืนยันถูกปิดการใช้งานแล้ว หากต้องการทักท้วงหรือแก้ไขข้อมูล กรุณาติดต่อกลับหาบริษัทตามช่องทางแชทที่ได้รับข้อความแจ้งไปนะคะ'}
             </p>
           </div>
         </div>

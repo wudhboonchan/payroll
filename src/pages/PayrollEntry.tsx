@@ -469,7 +469,10 @@ export default function PayrollEntry() {
                   <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-2 text-sm text-slate-500">
                     <span>รหัสพนักงาน: <strong className="text-slate-700">{selectedEmployee?.employee_code}</strong></span>
                     <span>อัตราค่าจ้าง: <strong className="text-slate-700">{formatThaiCurrency(selectedEmployee?.rate_per_12h)} บาท/{selectedEmployee?.wage_type === 'monthly' ? 'เดือน' : 'วัน'}</strong></span>
-                    <span>ตำแหน่ง: <strong className={isClerk ? 'text-red-600' : 'text-slate-700'}>{isClerk ? 'เสมียน' : 'พนักงาน'}</strong></span>
+                    <span>กลุ่มงาน: <strong className={isClerk ? 'text-red-600' : 'text-slate-700'}>{isClerk ? 'เสมียน' : 'พนักงาน'}</strong></span>
+                    {selectedEmployee?.job_title && (
+                      <span>ตำแหน่ง: <strong className="text-slate-700">{selectedEmployee.job_title}</strong></span>
+                    )}
                     <span>การรับเงิน: <strong className="text-slate-700">{selectedEmployee?.payment_method === 'bank_transfer' ? 'โอนบัญชี' : 'เงินสด'}</strong></span>
                   </div>
                 </div>

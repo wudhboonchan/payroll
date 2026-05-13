@@ -28,6 +28,34 @@ import {
 } from '../components/ui/dialog'
 import { formatEmployeeName } from './EmployeeFormModal'
 
+interface Employee {
+  id: string
+  employee_code: string
+  first_name: string
+  last_name: string
+  factory_id: string
+  status?: string
+}
+
+interface Advance {
+  id: string
+  amount: number
+  request_date: string
+  notes?: string
+  entered_by: string
+  employee: Employee
+  admin?: { full_name: string }
+}
+
+interface PayrollPeriod {
+  id: string
+  factory_id: string
+  label: string
+  period_start: string
+  period_end: string
+  status: string | null
+}
+
 export default function AdvancePayments() {
   const { user } = useAppStore()
   const [searchTerm, setSearchTerm] = useState('')
@@ -43,7 +71,7 @@ export default function AdvancePayments() {
         .select('*')
         .eq('factory_id', user.factory_id)
       if (error) throw error
-      return data as any[]
+      return data as Employee[]
     },
     enabled: !!user?.factory_id
   })
@@ -51,7 +79,7 @@ export default function AdvancePayments() {
   // Fetch the current payroll period
   const { data: currentPeriod } = useQuery({
     queryKey: ['current-period', user?.factory_id],
-    queryFn: async () => {
+    queryFn: async (): Promise<PayrollPeriod | null> => {
       if (!user?.factory_id) return null
       const { data, error } = await supabase
         .from('payroll_periods')
@@ -85,19 +113,19 @@ export default function AdvancePayments() {
         .eq('period_id', period_id)
       
       if (error) throw error
-      return data as any[]
+      return data as Advance[]
     },
     enabled: !!user?.factory_id
   })
 
   // Count advances per employee to show limits
-  const advanceCounts = advances.reduce((acc: any, curr: any) => {
+  const advanceCounts = advances.reduce((acc: Record<string, number>, curr: Advance) => {
     const code = curr.employee.employee_code
     acc[code] = (acc[code] || 0) + 1
     return acc
   }, {})
 
-  const filteredAdvances = advances.filter((adv: any) => 
+  const filteredAdvances = advances.filter((adv: Advance) => 
     adv.employee.employee_code.toLowerCase().includes(searchTerm.toLowerCase()) ||
     `${adv.employee.first_name} ${adv.employee.last_name}`.toLowerCase().includes(searchTerm.toLowerCase())
   )
@@ -158,7 +186,7 @@ export default function AdvancePayments() {
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredAdvances.map((adv: any) => {
+                filteredAdvances.map((adv: Advance) => {
                   const count = advanceCounts[adv.employee.employee_code]
                   return (
                     <TableRow key={adv.id}>
@@ -200,8 +228,8 @@ export default function AdvancePayments() {
 function AdvanceModal({ isOpen, onClose, employees, currentPeriod }: { 
   isOpen: boolean, 
   onClose: () => void, 
-  employees: any[],
-  currentPeriod: any
+  employees: Employee[],
+  currentPeriod: PayrollPeriod | null | undefined
 }) {
   const { user } = useAppStore()
   const queryClient = useQueryClient()
@@ -211,20 +239,22 @@ function AdvanceModal({ isOpen, onClose, employees, currentPeriod }: {
   const [notes, setNotes] = useState('')
 
   const mutation = useMutation({
-    mutationFn: async (newData: any) => {
+    mutationFn: async (newData: { employee_id: string; amount: number; request_date: string; notes: string }) => {
       let periodId = currentPeriod?.id
 
       // CRITICAL: If no draft period exists, we must create one first to satisfy foreign key constraints
       if (!periodId) {
+        const newPeriodPayload = {
+          factory_id: user?.factory_id as string,
+          label: '1-15 พฤษภาคม 2569',
+          period_start: '2026-05-01',
+          period_end: '2026-05-15',
+          status: 'draft' as const
+        }
+        
         const { data: newPeriod, error: periodError } = await supabase
           .from('payroll_periods')
-          .insert([{
-            factory_id: user?.factory_id,
-            label: '1-15 พฤษภาคม 2569',
-            period_start: '2026-05-01',
-            period_end: '2026-05-15',
-            status: 'draft'
-          }])
+          .insert([newPeriodPayload])
           .select()
           .single()
         
@@ -232,13 +262,15 @@ function AdvanceModal({ isOpen, onClose, employees, currentPeriod }: {
         periodId = newPeriod.id
       }
 
+      const advancePayload = {
+        ...newData,
+        period_id: periodId as string,
+        entered_by: user?.id || null
+      }
+
       const { error } = await supabase
         .from('advance_payments')
-        .insert([{
-          ...newData,
-          period_id: periodId,
-          entered_by: user?.id
-        }])
+        .insert([advancePayload])
       if (error) throw error
     },
     onSuccess: () => {
@@ -250,7 +282,7 @@ function AdvanceModal({ isOpen, onClose, employees, currentPeriod }: {
       setNotes('')
       onClose()
     },
-    onError: (error: any) => {
+    onError: (error: Error) => {
       toast.error('เกิดข้อผิดพลาด', { description: error.message })
     }
   })

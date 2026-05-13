@@ -274,7 +274,16 @@ export default function ShiftEntry() {
         if (!confirmClear) throw new Error("ยกเลิกการบันทึก")
       }
 
-      if (assignments.length === 0) return
+      if (assignments.length === 0) {
+        // User cleared all assignments
+        const { error } = await supabase
+          .from('shift_assignments')
+          .delete()
+          .eq('period_id', currentPeriod.id)
+          .eq('work_date', workDateStr)
+        if (error) throw error
+        return
+      }
 
       const payload = assignments.map(a => ({
         period_id: currentPeriod.id,
@@ -289,11 +298,23 @@ export default function ShiftEntry() {
         entered_by: user?.id
       }))
 
-      const { error } = await supabase
+      // Upsert current assignments
+      const { error: upsertError } = await supabase
         .from('shift_assignments')
-        .insert(payload)
+        .upsert(payload, { onConflict: 'employee_id, work_date' })
       
-      if (error) throw error
+      if (upsertError) throw upsertError
+
+      // Delete removed assignments
+      const employeeIdsToKeep = assignments.map(a => a.employee_id)
+      const { error: deleteError } = await supabase
+        .from('shift_assignments')
+        .delete()
+        .eq('period_id', currentPeriod.id)
+        .eq('work_date', workDateStr)
+        .not('employee_id', 'in', `(${employeeIdsToKeep.join(',')})`)
+        
+      if (deleteError) throw deleteError
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['shifts-for-date'] })

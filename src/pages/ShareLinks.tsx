@@ -127,13 +127,22 @@ export default function ShareLinks() {
       const { data, error } = await supabase
         .from('payslip_tokens')
         .select(`
-          id, token, expires_at, employee_status, dispute_reason,
+          id, token, expires_at, employee_status, dispute_reason, created_at,
           employees(employee_code, first_name, last_name, prefix, nationality)
         `)
         .eq('period_id', selectedPeriodId)
         .order('created_at')
       if (error) throw error
-      return data as any[]
+      
+      return data.map((t: any) => {
+        if (t.employee_status === 'pending' && t.created_at) {
+          const hoursPassed = (Date.now() - new Date(t.created_at).getTime()) / (1000 * 60 * 60)
+          if (hoursPassed >= 24) {
+            return { ...t, employee_status: 'auto_confirmed' }
+          }
+        }
+        return t
+      }) as any[]
     },
     enabled: !!selectedPeriodId,
   })

@@ -49,6 +49,7 @@ const employeeSchema = z
     national_id: z.string().optional(),
     nationality: z.string().default('ไทย'),
     position: z.enum(['worker', 'clerk']).default('worker'),
+    job_title: z.string().optional(),
     wage_type: z.enum(['daily', 'monthly']).default('daily'),
     payment_method: z.enum(['cash', 'bank_transfer']),
     bank_name: z.string().optional(),
@@ -161,6 +162,7 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
         national_id: employeeData.national_id || '',
         nationality: employeeData.nationality || 'ไทย',
         position: employeeData.position || 'worker',
+        job_title: employeeData.job_title || '',
         wage_type: employeeData.wage_type || 'daily',
         payment_method: employeeData.payment_method || 'bank_transfer',
         bank_name: employeeData.bank_name || '',
@@ -179,6 +181,7 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
         national_id: '',
         nationality: 'ไทย',
         position: 'worker',
+        job_title: '',
         wage_type: 'daily',
         payment_method: 'bank_transfer',
         bank_name: '',
@@ -261,7 +264,7 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
         >
           <div className="p-5 md:p-8 bg-white space-y-6">
 
-            {/* Row 1: Employee Code + Nationality */}
+            {/* Row 1: รหัสพนักงาน + สัญชาติ */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
               <div className="space-y-2">
                 <Label className="text-sm font-semibold text-slate-700">รหัสพนักงาน *</Label>
@@ -286,49 +289,17 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
               </div>
             </div>
 
-            {/* Row 1b: Position + Wage Type */}
+            {/* Row 2: เลขบัตรประชาชน / Passport + คำนำหน้า */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
               <div className="space-y-2">
-                <Label className="text-sm font-semibold text-slate-700">ตำแหน่งงาน *</Label>
-                <select {...register('position')} className={SELECT_CLASS}>
-                  <option value="worker">👷 พนักงาน (ทั่วไป)</option>
-                  <option value="clerk">👩🏻‍🏫 เสมียน</option>
-                </select>
-                {position === 'clerk' && (
-                  <p className="text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded border border-amber-200">
-                    ⚠️ เสมียน: คิดค่าแรงแบบรายเดือน / OT ชั่วโมงละ 1.5 เท่า
-                  </p>
-                )}
+                <Label className="text-sm font-semibold text-slate-700">
+                  เลขบัตรประชาชน / Passport
+                </Label>
+                <Input
+                  {...register('national_id')}
+                  className="w-full h-11"
+                />
               </div>
-              <div className="space-y-2">
-                <Label className="text-sm font-semibold text-slate-700">ประเภทค่าจ้าง *</Label>
-                <div className="flex gap-4 pt-2">
-                  <label className={`flex items-center gap-2 text-sm ${position === 'worker' ? 'cursor-default opacity-100' : 'cursor-not-allowed opacity-50'}`}>
-                    <input
-                      type="radio"
-                      value="daily"
-                      {...register('wage_type')}
-                      disabled={true}
-                      className="w-4 h-4 accent-[#1D9E75]"
-                    />
-                    รายวัน (บาท/วัน)
-                  </label>
-                  <label className={`flex items-center gap-2 text-sm ${position === 'clerk' ? 'cursor-default opacity-100' : 'cursor-not-allowed opacity-50'}`}>
-                    <input
-                      type="radio"
-                      value="monthly"
-                      {...register('wage_type')}
-                      disabled={true}
-                      className="w-4 h-4 accent-[#1D9E75]"
-                    />
-                    รายเดือน (บาท/เดือน)
-                  </label>
-                </div>
-              </div>
-            </div>
-
-            {/* Row 2: Prefix + First Name + Last Name */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
               <div className="space-y-2">
                 <Label className="text-sm font-semibold text-slate-700">คำนำหน้า</Label>
                 <select {...register('prefix')} className={SELECT_CLASS}>
@@ -338,6 +309,10 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
                   <option value="นางสาว">นางสาว</option>
                 </select>
               </div>
+            </div>
+
+            {/* Row 3: ชื่อ + นามสกุล */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
               <div className="space-y-2">
                 <Label className="text-sm font-semibold text-slate-700">ชื่อ *</Label>
                 <Input
@@ -367,16 +342,56 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
               </div>
             </div>
 
-            {/* Row 3: National ID + Wage Rate */}
+            {/* Row 4: กลุ่มงาน + ตำแหน่งงาน */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
               <div className="space-y-2">
-                <Label className="text-sm font-semibold text-slate-700">
-                  เลขบัตรประชาชน / Passport
-                </Label>
+                <Label className="text-sm font-semibold text-slate-700">กลุ่มงาน *</Label>
+                <select {...register('position')} className={SELECT_CLASS}>
+                  <option value="worker">👷 พนักงาน (ทั่วไป)</option>
+                  <option value="clerk">👩🏻‍🏫 เสมียน</option>
+                </select>
+                {position === 'clerk' && (
+                  <p className="text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded border border-amber-200">
+                    ⚠️ เสมียน: คิดค่าแรงแบบรายเดือน / OT ชั่วโมงละ 1.5 เท่า
+                  </p>
+                )}
+              </div>
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold text-slate-700">ตำแหน่งงาน</Label>
                 <Input
-                  {...register('national_id')}
+                  {...register('job_title')}
+                  placeholder="เช่น หัวหน้าช่าง, พนักงานขับรถ"
                   className="w-full h-11"
                 />
+              </div>
+            </div>
+
+            {/* Row 5: ประเภทค่าจ้าง + อัตราค่าจ้างรายวัน */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold text-slate-700">ประเภทค่าจ้าง *</Label>
+                <div className="flex gap-4 pt-2">
+                  <label className={`flex items-center gap-2 text-sm ${position === 'worker' ? 'cursor-default opacity-100' : 'cursor-not-allowed opacity-50'}`}>
+                    <input
+                      type="radio"
+                      value="daily"
+                      {...register('wage_type')}
+                      disabled={true}
+                      className="w-4 h-4 accent-[#1D9E75]"
+                    />
+                    รายวัน (บาท/วัน)
+                  </label>
+                  <label className={`flex items-center gap-2 text-sm ${position === 'clerk' ? 'cursor-default opacity-100' : 'cursor-not-allowed opacity-50'}`}>
+                    <input
+                      type="radio"
+                      value="monthly"
+                      {...register('wage_type')}
+                      disabled={true}
+                      className="w-4 h-4 accent-[#1D9E75]"
+                    />
+                    รายเดือน (บาท/เดือน)
+                  </label>
+                </div>
               </div>
               <div className="space-y-2">
                 <Label className="text-sm font-semibold text-slate-700">
@@ -467,16 +482,16 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
               )}
             </div>
 
-            {/* Row 5: Status + Notes */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
-              <div className="space-y-2">
+            {/* Row 7: สถานะ + หมายเหตุ */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
+              <div className="space-y-2 md:col-span-1">
                 <Label className="text-sm font-semibold text-slate-700">สถานะ</Label>
                 <select {...register('status')} className={SELECT_CLASS}>
                   <option value="active">พนักงานปัจจุบัน</option>
                   <option value="inactive">พ้นสภาพพนักงาน</option>
                 </select>
               </div>
-              <div className="space-y-2">
+              <div className="space-y-2 md:col-span-2">
                 <Label className="text-sm font-semibold text-slate-700">หมายเหตุ</Label>
                 <Input
                   {...register('notes')}
