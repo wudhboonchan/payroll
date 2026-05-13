@@ -550,7 +550,7 @@ export default function PayrollEntry() {
                         </Label>
                         <span className="text-xs text-slate-500">
                           คำนวณอัตโนมัติ: {normalDays + halfShiftDays} วัน
-                          {halfShiftDays > 0 && <span className="text-amber-600 ml-1">({halfShiftDays} วัน 8ชม.)</span>}
+                          {halfShiftDays > 0 && <span className="text-amber-600 ml-1">(ทำงาน 8 ชม.: {halfShiftDays} วัน)</span>}
                         </span>
                       </div>
                       
