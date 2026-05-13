@@ -229,7 +229,7 @@ export default function AttendanceOverview() {
             {/* Legend */}
             <div className="flex flex-wrap gap-4 items-center bg-white p-4 rounded-2xl border border-slate-200 shadow-sm w-fit">
               <div className="flex items-center gap-2 pr-4 border-r border-slate-100">
-                <div className="w-4 h-4 rounded-full bg-emerald-500 shadow-sm" />
+                <div className="w-4 h-4 rounded-full bg-emerald-500 shadow-sm ring-2 ring-pink-600 ring-offset-1" />
                 <span className="text-xs font-bold text-slate-600">8 ชม. / เสมียน</span>
               </div>
               <div className="flex items-center gap-2 pr-4 border-r border-slate-100">
@@ -331,15 +331,19 @@ export default function AttendanceOverview() {
                                     <Tooltip>
                                       <TooltipTrigger>
                                         <div className="w-full h-full flex items-center justify-center cursor-default">
-                                          { (assignment.is_half_shift || isClerk) ? (
-                                            /* 8 Hours - Solid Dot */
-                                            <div className="w-4 h-4 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.3)] animate-in zoom-in-50 duration-300" />
-                                          ) : (
-                                            /* 12 Hours - Dot with Check */
-                                            <div className="w-6 h-6 rounded-full bg-emerald-500 flex items-center justify-center shadow-lg shadow-emerald-500/20 animate-in zoom-in-50 duration-300">
-                                              <Check className="w-3.5 h-3.5 text-white" strokeWidth={4} />
-                                            </div>
-                                          )}
+                                          {(() => {
+                                            const isEightHours = assignment.is_half_shift || isClerk
+                                            
+                                            return isEightHours ? (
+                                              /* 8 Hours - Solid Dot with Deep Pink Ring */
+                                              <div className="w-4 h-4 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.3)] animate-in zoom-in-50 duration-300 ring-2 ring-pink-600 ring-offset-1" />
+                                            ) : (
+                                              /* 12 Hours - Dot with Check (No Ring) */
+                                              <div className="w-6 h-6 rounded-full bg-emerald-500 flex items-center justify-center shadow-lg shadow-emerald-500/20 animate-in zoom-in-50 duration-300">
+                                                <Check className="w-3.5 h-3.5 text-white" strokeWidth={4} />
+                                              </div>
+                                            )
+                                          })()}
                                         </div>
                                       </TooltipTrigger>
                                       <TooltipContent 
