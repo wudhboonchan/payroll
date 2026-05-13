@@ -132,6 +132,22 @@ export default function PayrollEntry() {
     staleTime: 30_000,
   })
 
+  // Fetch ALL advances for this period to show OUTDATED status in sidebar
+  const { data: allPeriodAdvances = [] } = useQuery({
+    queryKey: ['advances', 'all', currentPeriod?.id],
+    queryFn: async () => {
+      if (!currentPeriod?.id) return []
+      const { data, error } = await supabase
+        .from('advance_payments')
+        .select('employee_id, amount')
+        .eq('period_id', currentPeriod.id)
+      if (error) throw error
+      return data
+    },
+    enabled: !!currentPeriod?.id,
+    staleTime: 30_000,
+  })
+
   // Fetch ALL shift assignments for this period to detect "Outdated" status for everyone
   const { data: allPeriodShifts = [] } = useQuery({
     queryKey: ['all-period-shifts', currentPeriod?.id],
@@ -428,7 +444,13 @@ export default function PayrollEntry() {
                   const diffWood = isEmpClerk ? 0 : Math.abs(autoWood - Number(entry.amount_wood_excess || 0))
                   const diffFilm = isEmpClerk ? 0 : Math.abs(autoFilm - Number(entry.amount_film || 0))
 
-                  if (diffNormal > 0.1 || diffShift > 0.1 || diffOt > 0.1 || diffWood > 0.1 || diffFilm > 0.1) {
+                  // NEW: Check Advance Payments
+                  const currentTotalAdvance = allPeriodAdvances
+                    .filter((a: any) => a.employee_id === emp.id)
+                    .reduce((sum: number, a: any) => sum + Number(a.amount), 0)
+                  const diffAdvance = Math.abs(currentTotalAdvance - Number(entry.deduct_advance || 0))
+
+                  if (diffNormal > 0.1 || diffShift > 0.1 || diffOt > 0.1 || diffWood > 0.1 || diffFilm > 0.1 || diffAdvance > 0.1) {
                     status = 'orange'
                   } else {
                     status = 'green'

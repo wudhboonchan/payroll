@@ -60,6 +60,7 @@ export default function AdvancePayments() {
   const { user } = useAppStore()
   const [searchTerm, setSearchTerm] = useState('')
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [selectedAdvance, setSelectedAdvance] = useState<Advance | null>(null)
 
   // Fetch employees for the selector
   const { data: employees = [] } = useQuery({
@@ -106,7 +107,7 @@ export default function AdvancePayments() {
         .from('advance_payments')
         .select(`
           id, amount, request_date, notes, entered_by,
-          employee:employees!inner(employee_code, first_name, last_name, factory_id),
+          employee:employees!inner(id, employee_code, first_name, last_name, factory_id),
           admin:profiles!entered_by(full_name)
         `)
         .eq('employees.factory_id', user.factory_id)
@@ -129,6 +130,16 @@ export default function AdvancePayments() {
     adv.employee.employee_code.toLowerCase().includes(searchTerm.toLowerCase()) ||
     `${adv.employee.first_name} ${adv.employee.last_name}`.toLowerCase().includes(searchTerm.toLowerCase())
   )
+
+  const handleAddNew = () => {
+    setSelectedAdvance(null)
+    setIsModalOpen(true)
+  }
+
+  const handleEdit = (adv: Advance) => {
+    setSelectedAdvance(adv)
+    setIsModalOpen(true)
+  }
 
   return (
     <>
@@ -166,7 +177,7 @@ export default function AdvancePayments() {
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
-            <Button onClick={() => setIsModalOpen(true)} className="bg-[#1D9E75] hover:bg-[#157a5a] h-11 px-6 shadow-md rounded-xl font-bold">
+            <Button onClick={handleAddNew} className="bg-[#1D9E75] hover:bg-[#157a5a] h-11 px-6 shadow-md rounded-xl font-bold">
               <Plus className="w-5 h-5 mr-2" />
               เพิ่มรายการเบิก
             </Button>
@@ -196,7 +207,11 @@ export default function AdvancePayments() {
                 filteredAdvances.map((adv: Advance) => {
                   const count = advanceCounts[adv.employee.employee_code]
                   return (
-                    <TableRow key={adv.id}>
+                    <TableRow 
+                      key={adv.id} 
+                      className="cursor-pointer hover:bg-slate-50 transition-colors"
+                      onClick={() => handleEdit(adv)}
+                    >
                       <TableCell className="font-medium text-slate-900">
                         {adv.employee.employee_code} — {formatEmployeeName(adv.employee)}
                       </TableCell>
@@ -224,21 +239,26 @@ export default function AdvancePayments() {
 
       <AdvanceModal 
         isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
+        onClose={() => {
+          setIsModalOpen(false)
+          setSelectedAdvance(null)
+        }}
         employees={employees}
         currentPeriod={currentPeriod}
         advances={advances}
+        initialData={selectedAdvance}
       />
     </>
   )
 }
 
-function AdvanceModal({ isOpen, onClose, employees, currentPeriod, advances }: { 
+function AdvanceModal({ isOpen, onClose, employees, currentPeriod, advances, initialData }: { 
   isOpen: boolean, 
   onClose: () => void, 
   employees: Employee[],
   currentPeriod: PayrollPeriod | null | undefined,
-  advances: Advance[]
+  advances: Advance[],
+  initialData: Advance | null
 }) {
   const { user } = useAppStore()
   const queryClient = useQueryClient()
@@ -247,52 +267,104 @@ function AdvanceModal({ isOpen, onClose, employees, currentPeriod, advances }: {
   const [requestDate, setRequestDate] = useState(new Date().toISOString().split('T')[0])
   const [notes, setNotes] = useState('')
 
+  const isEdit = !!initialData
+
+  // Set initial data when editing
+  useState(() => {
+    if (initialData) {
+      setEmployeeId(initialData.employee.id || (initialData as any).employee_id)
+      setAmount(initialData.amount.toString())
+      setRequestDate(initialData.request_date.split('T')[0])
+      setNotes(initialData.notes || '')
+    }
+  })
+
+  // Also update when initialData changes (modal opens for edit)
+  const [prevInitialData, setPrevInitialData] = useState<Advance | null>(null)
+  if (initialData !== prevInitialData) {
+    if (initialData) {
+      setEmployeeId(initialData.employee.id || (initialData as any).employee_id)
+      setAmount(initialData.amount.toString())
+      setRequestDate(initialData.request_date.split('T')[0])
+      setNotes(initialData.notes || '')
+    } else {
+      setEmployeeId('')
+      setAmount('')
+      setRequestDate(new Date().toISOString().split('T')[0])
+      setNotes('')
+    }
+    setPrevInitialData(initialData)
+  }
+
   const mutation = useMutation({
     mutationFn: async (newData: { employee_id: string; amount: number; request_date: string; notes: string }) => {
-      let periodId = currentPeriod?.id
+      if (isEdit) {
+        const { error } = await supabase
+          .from('advance_payments')
+          .update(newData)
+          .eq('id', initialData.id)
+        if (error) throw error
+      } else {
+        let periodId = currentPeriod?.id
 
-      // CRITICAL: If no draft period exists, we must create one first to satisfy foreign key constraints
-      if (!periodId) {
-        const newPeriodPayload = {
-          factory_id: user?.factory_id as string,
-          label: '1-15 พฤษภาคม 2569',
-          period_start: '2026-05-01',
-          period_end: '2026-05-15',
-          status: 'draft' as const
+        if (!periodId) {
+          const newPeriodPayload = {
+            factory_id: user?.factory_id as string,
+            label: formatThaiDate(new Date().toISOString()),
+            period_start: format(new Date(), 'yyyy-MM-01'),
+            period_end: format(new Date(), 'yyyy-MM-15'),
+            status: 'draft' as const
+          }
+          
+          const { data: newPeriod, error: periodError } = await supabase
+            .from('payroll_periods')
+            .insert([newPeriodPayload])
+            .select()
+            .single()
+          
+          if (periodError) throw new Error('กรุณาสร้างงวดการจ่ายเงินก่อน: ' + periodError.message)
+          periodId = newPeriod.id
         }
-        
-        const { data: newPeriod, error: periodError } = await supabase
-          .from('payroll_periods')
-          .insert([newPeriodPayload])
-          .select()
-          .single()
-        
-        if (periodError) throw new Error('กรุณาสร้างงวดการจ่ายเงินก่อน: ' + periodError.message)
-        periodId = newPeriod.id
-      }
 
-      const advancePayload = {
-        ...newData,
-        period_id: periodId as string,
-        entered_by: user?.id || null
-      }
+        const advancePayload = {
+          ...newData,
+          period_id: periodId as string,
+          entered_by: user?.id || null
+        }
 
-      const { error } = await supabase
-        .from('advance_payments')
-        .insert([advancePayload])
-      if (error) throw error
+        const { error } = await supabase
+          .from('advance_payments')
+          .insert([advancePayload])
+        if (error) throw error
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['advances'] })
       queryClient.invalidateQueries({ queryKey: ['current-period'] })
-      toast.success('บันทึกข้อมูลการเบิกล่วงหน้าสำเร็จ')
-      setEmployeeId('')
-      setAmount('')
-      setNotes('')
+      toast.success(isEdit ? 'อัปเดตข้อมูลสำเร็จ' : 'บันทึกข้อมูลการเบิกล่วงหน้าสำเร็จ')
       onClose()
     },
     onError: (error: Error) => {
       toast.error('เกิดข้อผิดพลาด', { description: error.message })
+    }
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: async () => {
+      if (!initialData) return
+      const { error } = await supabase
+        .from('advance_payments')
+        .delete()
+        .eq('id', initialData.id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['advances'] })
+      toast.success('ลบรายการสำเร็จ')
+      onClose()
+    },
+    onError: (error: Error) => {
+      toast.error('ลบไม่สำเร็จ', { description: error.message })
     }
   })
 
@@ -303,22 +375,20 @@ function AdvanceModal({ isOpen, onClose, employees, currentPeriod, advances }: {
       return
     }
 
-    // ── Block if employee already has 2 advances this period ──
-    const countForEmployee = advances.filter(
-      (adv) => adv.employee?.id === employeeId || (adv as any).employee_id === employeeId
-    ).length
-    // fallback: match by employee object id via the joined data
-    const selectedEmp = employees.find(e => e.id === employeeId)
-    const countByCode = selectedEmp
-      ? advances.filter(adv => adv.employee.employee_code === selectedEmp.employee_code).length
-      : countForEmployee
+    // Only block if NOT editing the same employee's existing record
+    if (!isEdit) {
+      const selectedEmp = employees.find(e => e.id === employeeId)
+      const countByCode = selectedEmp
+        ? advances.filter(adv => adv.employee.employee_code === selectedEmp.employee_code).length
+        : 0
 
-    if (countByCode >= 2) {
-      toast.error('ไม่สามารถเบิกได้', {
-        description: `${selectedEmp ? selectedEmp.employee_code + ' — ' + selectedEmp.first_name : 'พนักงาน'} เบิกล่วงหน้าครบ 2 ครั้งในงวดนี้แล้ว ไม่อนุญาตให้เบิกเพิ่ม`,
-        duration: 5000,
-      })
-      return
+      if (countByCode >= 2) {
+        toast.error('ไม่สามารถเบิกได้', {
+          description: `${selectedEmp ? selectedEmp.employee_code + ' — ' + selectedEmp.first_name : 'พนักงาน'} เบิกล่วงหน้าครบ 2 ครั้งในงวดนี้แล้ว ไม่อนุญาตให้เบิกเพิ่ม`,
+          duration: 5000,
+        })
+        return
+      }
     }
 
     mutation.mutate({
@@ -329,23 +399,24 @@ function AdvanceModal({ isOpen, onClose, employees, currentPeriod, advances }: {
     })
   }
 
+  const isAdmin = user?.role === 'admin' || user?.role === 'superadmin'
+
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-md p-0 overflow-hidden border-none shadow-2xl">
-        {/* Green Header - Kept as requested */}
         <div className="bg-[#1D9E75] p-6 text-white">
           <DialogHeader>
             <DialogTitle className="text-xl font-bold flex items-center gap-2">
               <CreditCard className="w-6 h-6" />
-              บันทึกรายการเบิกล่วงหน้า
+              {isEdit ? 'แก้ไขรายการเบิกล่วงหน้า' : 'บันทึกรายการเบิกล่วงหน้า'}
             </DialogTitle>
-            <p className="text-emerald-100 mt-1 text-sm">กรอกรายละเอียดการเบิกเงินของพนักงานให้ครบถ้วน</p>
+            <p className="text-emerald-100 mt-1 text-sm">
+              {isEdit ? 'แก้ไขรายละเอียดการเบิกเงินของพนักงาน' : 'กรอกรายละเอียดการเบิกเงินของพนักงานให้ครบถ้วน'}
+            </p>
           </DialogHeader>
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 bg-white space-y-6">
-          {/* 1-Column Layout: One field per row, making it very wide and easy to read */}
-          
           <div className="space-y-2">
             <Label className="text-sm font-semibold text-slate-700">เลือกพนักงาน *</Label>
             <select 
@@ -353,20 +424,23 @@ function AdvanceModal({ isOpen, onClose, employees, currentPeriod, advances }: {
               value={employeeId}
               onChange={(e) => setEmployeeId(e.target.value)}
               required
+              disabled={isEdit}
             >
               <option value="">ค้นหาและเลือกพนักงาน...</option>
               {employees
-                .filter(emp => emp.status !== 'inactive')
+                .filter(emp => emp.status !== 'inactive' || (isEdit && emp.id === employeeId))
                 .map(emp => (
                   <option key={emp.id} value={emp.id}>
                     {emp.employee_code} — {formatEmployeeName(emp)}
                   </option>
                 ))}
             </select>
-            <div className="flex items-center gap-1.5 mt-1.5">
-              <AlertCircle className="w-3.5 h-3.5 text-amber-500" />
-              <p className="text-xs text-amber-700">เบิกได้สูงสุด 2 ครั้งต่องวด</p>
-            </div>
+            {!isEdit && (
+              <div className="flex items-center gap-1.5 mt-1.5">
+                <AlertCircle className="w-3.5 h-3.5 text-amber-500" />
+                <p className="text-xs text-amber-700">เบิกได้สูงสุด 2 ครั้งต่องวด</p>
+              </div>
+            )}
           </div>
 
           <div className="space-y-2">
@@ -405,21 +479,40 @@ function AdvanceModal({ isOpen, onClose, employees, currentPeriod, advances }: {
             />
           </div>
 
-          <div className="flex justify-end gap-3 pt-6 border-t border-slate-100">
-            <Button 
-              type="button" 
-              variant="outline" 
-              onClick={onClose}
-            >
-              ยกเลิก
-            </Button>
-            <Button 
-              type="submit" 
-              className="bg-[#1D9E75] hover:bg-[#157a5a]"
-              disabled={mutation.isPending}
-            >
-              {mutation.isPending ? 'กำลังบันทึก...' : 'บันทึกรายการเบิก'}
-            </Button>
+          <div className="flex justify-between items-center pt-6 border-t border-slate-100">
+            <div>
+              {isEdit && isAdmin && (
+                <Button 
+                  type="button" 
+                  variant="destructive" 
+                  className="bg-rose-50 text-rose-600 hover:bg-rose-100 border-none shadow-none"
+                  onClick={() => {
+                    if (confirm('คุณต้องการลบรายการเบิกนี้ใช่หรือไม่?')) {
+                      deleteMutation.mutate()
+                    }
+                  }}
+                  disabled={deleteMutation.isPending}
+                >
+                  {deleteMutation.isPending ? 'กำลังลบ...' : 'ลบรายการ'}
+                </Button>
+              )}
+            </div>
+            <div className="flex gap-3">
+              <Button 
+                type="button" 
+                variant="outline" 
+                onClick={onClose}
+              >
+                ยกเลิก
+              </Button>
+              <Button 
+                type="submit" 
+                className="bg-[#1D9E75] hover:bg-[#157a5a]"
+                disabled={mutation.isPending}
+              >
+                {mutation.isPending ? 'กำลังบันทึก...' : isEdit ? 'อัปเดตรายการ' : 'บันทึกรายการเบิก'}
+              </Button>
+            </div>
           </div>
         </form>
       </DialogContent>
