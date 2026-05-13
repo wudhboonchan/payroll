@@ -105,30 +105,31 @@ export default function PayrollEntry() {
       if (!selectedEmployeeId || !currentPeriod?.id) return []
       const { data, error } = await supabase
         .from('advance_payments')
-        .select('*')
+        .select('id, amount, period_id')
         .eq('employee_id', selectedEmployeeId)
-        // .eq('period_id', currentPeriod.id)
+        .eq('period_id', currentPeriod.id)
       if (error) throw error
       return data
     },
-    enabled: !!selectedEmployeeId && !!currentPeriod?.id
+    enabled: !!selectedEmployeeId && !!currentPeriod?.id,
+    staleTime: 30_000,
   })
 
   // Fetch ALL payroll entries for this period to show status in sidebar
+  // Only select fields needed for status comparison (not all columns)
   const { data: allPeriodEntries = [] } = useQuery({
     queryKey: ['all-payroll-entries', currentPeriod?.id],
     queryFn: async () => {
       if (!currentPeriod?.id) return []
       const { data, error } = await supabase
         .from('payroll_entries')
-        .select('*') // Get all fields to compare
+        .select('employee_id, amount_normal, amount_shift, amount_ot, amount_wood_excess, amount_film, amount_special, amount_diligence, amount_position, deduct_social_security, deduct_safety_equipment, deduct_uniform, deduct_advance, override_normal, override_reason')
         .eq('period_id', currentPeriod.id)
       if (error) throw error
       return data
     },
     enabled: !!currentPeriod?.id,
-    staleTime: 0,
-    refetchOnMount: true
+    staleTime: 30_000,
   })
 
   // Fetch ALL shift assignments for this period to detect "Outdated" status for everyone
@@ -138,14 +139,13 @@ export default function PayrollEntry() {
       if (!currentPeriod?.id) return []
       const { data, error } = await supabase
         .from('shift_assignments')
-        .select('*')
+        .select('employee_id, work_date, shift_type, is_holiday_ot, is_half_shift, wood_excess, film_amount, ot_hours')
         .eq('period_id', currentPeriod.id)
       if (error) throw error
       return data as any[]
     },
     enabled: !!currentPeriod?.id,
-    staleTime: 0,
-    refetchOnMount: true
+    staleTime: 30_000,
   })
 
   // Fetch existing payroll entry for the selected employee (full detail)
@@ -239,26 +239,29 @@ export default function PayrollEntry() {
 
   const calc = calculatePayroll(payrollInput)
 
-  // Check if underlying shift or advance data changed since last save
+  // Check if underlying data changed since last save — compare calc output vs DB entry directly
   const isOutdated = useMemo(() => {
     if (!existingEntry) return false;
-    const diffNormal = Math.abs(calc.amount_normal - Number(existingEntry.amount_normal || 0));
-    const diffShift = Math.abs(calc.amount_shift - Number(existingEntry.amount_shift || 0));
-    const diffOt = Math.abs(calc.amount_ot - Number(existingEntry.amount_ot || 0));
-    const diffAdv = Math.abs(totalAdvance - Number(existingEntry.deduct_advance || 0));
     
-    // Also check if manual values in the form differ from DB
-    const isDirty = 
-      manualEntries.amount_wood_excess !== Number(existingEntry.amount_wood_excess || 0) ||
-      manualEntries.amount_film !== Number(existingEntry.amount_film || 0) ||
-      manualEntries.amount_special !== Number(existingEntry.amount_special || 0) ||
-      manualEntries.amount_diligence !== Number(existingEntry.amount_diligence || 0) ||
-      manualEntries.amount_position !== Number(existingEntry.amount_position || 0) ||
-      manualEntries.deduct_safety_equipment !== Number(existingEntry.deduct_safety_equipment || 0) ||
-      manualEntries.deduct_uniform !== Number(existingEntry.deduct_uniform || 0);
+    // All these come from calc which uses current shifts + form state
+    const checks = [
+      Math.abs(calc.amount_normal         - Number(existingEntry.amount_normal         || 0)) > 0.01,
+      Math.abs(calc.amount_shift          - Number(existingEntry.amount_shift          || 0)) > 0.01,
+      Math.abs(calc.amount_ot             - Number(existingEntry.amount_ot             || 0)) > 0.01,
+      Math.abs(calc.amount_wood_excess    - Number(existingEntry.amount_wood_excess    || 0)) > 0.01,
+      Math.abs(calc.amount_film           - Number(existingEntry.amount_film           || 0)) > 0.01,
+      Math.abs(calc.amount_special        - Number(existingEntry.amount_special        || 0)) > 0.01,
+      Math.abs(calc.amount_diligence      - Number(existingEntry.amount_diligence      || 0)) > 0.01,
+      Math.abs(calc.amount_position       - Number(existingEntry.amount_position       || 0)) > 0.01,
+      Math.abs(calc.deduct_social_security- Number(existingEntry.deduct_social_security|| 0)) > 0.01,
+      Math.abs(calc.deduct_safety_equipment-Number(existingEntry.deduct_safety_equipment||0)) > 0.01,
+      Math.abs(calc.deduct_uniform        - Number(existingEntry.deduct_uniform        || 0)) > 0.01,
+      Math.abs(totalAdvance               - Number(existingEntry.deduct_advance        || 0)) > 0.01,
+      (overrideNormal ?? null) !== (existingEntry.override_normal ?? null),
+    ];
 
-    return diffNormal > 0.01 || diffShift > 0.01 || diffOt > 0.01 || diffAdv > 0.01 || isDirty;
-  }, [calc, existingEntry, totalAdvance, manualEntries])
+    return checks.some(Boolean);
+  }, [calc, existingEntry, totalAdvance, overrideNormal])
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -270,9 +273,17 @@ export default function PayrollEntry() {
         amount_normal: calc.amount_normal,
         amount_shift: calc.amount_shift,
         amount_ot: calc.amount_ot,
+        // Wood/film use the same effectiveWood/Film as calc to stay consistent
+        amount_wood_excess: calc.amount_wood_excess,
+        amount_film: calc.amount_film,
+        // Other manual entries
+        amount_special: manualEntries.amount_special,
+        amount_diligence: manualEntries.amount_diligence,
+        amount_position: manualEntries.amount_position,
+        deduct_safety_equipment: manualEntries.deduct_safety_equipment,
+        deduct_uniform: manualEntries.deduct_uniform,
         override_normal: overrideNormal,
         override_reason: overrideReason,
-        ...manualEntries,
         deduct_social_security: calc.deduct_social_security,
         deduct_advance: totalAdvance,
         entered_by: user?.id
@@ -285,9 +296,9 @@ export default function PayrollEntry() {
       if (error) throw error
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['payroll-entry'] })
-      queryClient.invalidateQueries({ queryKey: ['all-payroll-entries'] })
-      queryClient.invalidateQueries({ queryKey: ['all-period-shifts'] })
+      // Invalidate only payroll-specific data, not shifts (which haven't changed)
+      queryClient.invalidateQueries({ queryKey: ['payroll-entry', selectedEmployeeId, currentPeriod?.id] })
+      queryClient.invalidateQueries({ queryKey: ['all-payroll-entries', currentPeriod?.id] })
       toast.success('บันทึกข้อมูลค่าจ้างสำเร็จ')
     },
     onError: (error: any) => {
@@ -369,35 +380,48 @@ export default function PayrollEntry() {
                 
                 // ── Status Logic (Using central calculatePayroll) ──
                 const empShifts = allPeriodShifts.filter((s: any) => s.employee_id === emp.id)
-                
-                // Prepare input for calculation
                 const normalShifts = empShifts.filter((s: any) => !s.is_holiday_ot)
                 const isEmpClerk = emp.position === 'clerk'
                 
-                const calcInput: PayrollCalculationInput = {
-                  position: emp.position,
-                  wage_type: emp.wage_type,
-                  rate_per_12h: emp.rate_per_12h || 0,
-                  normal_days: isEmpClerk ? normalShifts.length : normalShifts.filter((s: any) => !s.is_half_shift).length,
-                  half_shift_days: isEmpClerk ? 0 : normalShifts.filter((s: any) => s.is_half_shift).length,
-                  holiday_ot_days: empShifts.filter((s: any) => s.is_holiday_ot).length,
-                  clerk_ot_hours: empShifts.reduce((sum: number, s: any) => sum + Number(s.ot_hours || 0), 0),
-                  social_security_rate: socialSecurityRate,
-                  // We don't check advances for the "Outdated" status dot in sidebar for performance, 
-                  // but we check the core income components which are most critical
-                }
-                
-                const currentCalc = calculatePayroll(calcInput)
+                const autoWood = empShifts.reduce((sum: number, s: any) => sum + Number(s.wood_excess || 0), 0)
+                const autoFilm = empShifts.reduce((sum: number, s: any) => sum + Number(s.film_amount || 0), 0)
+                const autoClerkOtHours = empShifts.reduce((sum: number, s: any) => sum + Number(s.ot_hours || 0), 0)
 
                 let status: 'grey' | 'green' | 'orange' = 'grey'
                 if (entry) {
-                  // Compare core income values saved in DB vs currently calculated from shifts
+                  // Only calculate shift-derived amounts (not manual entries like wood/film which user may override)
+                  const calcInput: PayrollCalculationInput = {
+                    position: emp.position,
+                    wage_type: emp.wage_type,
+                    rate_per_12h: emp.rate_per_12h || 0,
+                    normal_days: isEmpClerk ? normalShifts.length : normalShifts.filter((s: any) => !s.is_half_shift).length,
+                    half_shift_days: isEmpClerk ? 0 : normalShifts.filter((s: any) => s.is_half_shift).length,
+                    holiday_ot_days: empShifts.filter((s: any) => s.is_holiday_ot).length,
+                    clerk_ot_hours: autoClerkOtHours,
+                    social_security_rate: socialSecurityRate,
+                    override_normal: entry.override_normal,
+                    // Pass zeroes for manual fields — we only want to check shift-derived amounts
+                    amount_wood_excess: 0,
+                    amount_film: 0,
+                    amount_special: 0,
+                    amount_diligence: 0,
+                    amount_position: 0,
+                    deduct_safety_equipment: 0,
+                    deduct_uniform: 0,
+                    deduct_advance: 0,
+                  }
+                  
+                  const currentCalc = calculatePayroll(calcInput)
+
+                  // Compare only the shift-computed core amounts against DB
                   const diffNormal = Math.abs(currentCalc.amount_normal - Number(entry.amount_normal || 0))
                   const diffShift = Math.abs(currentCalc.amount_shift - Number(entry.amount_shift || 0))
                   const diffOt = Math.abs(currentCalc.amount_ot - Number(entry.amount_ot || 0))
-                  
-                  // Use a very small epsilon for float comparison
-                  if (diffNormal > 0.1 || diffShift > 0.1 || diffOt > 0.1) {
+                  // Also check shift-level wood/film (auto totals from shifts) vs saved
+                  const diffWood = isEmpClerk ? 0 : Math.abs(autoWood - Number(entry.amount_wood_excess || 0))
+                  const diffFilm = isEmpClerk ? 0 : Math.abs(autoFilm - Number(entry.amount_film || 0))
+
+                  if (diffNormal > 0.1 || diffShift > 0.1 || diffOt > 0.1 || diffWood > 0.1 || diffFilm > 0.1) {
                     status = 'orange'
                   } else {
                     status = 'green'

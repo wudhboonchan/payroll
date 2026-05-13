@@ -39,9 +39,18 @@ export interface PayrollCalculationOutput {
   effective_shift: number;
   effective_ot: number;
 
+  amount_wood_excess: number;
+  amount_film: number;
+  amount_special: number;
+  amount_diligence: number;
+  amount_position: number;
+
   total_income: number;
   
   deduct_social_security: number;
+  deduct_safety_equipment: number;
+  deduct_uniform: number;
+  deduct_advance: number;
   total_deductions: number;
 
   net_pay: number;
@@ -120,8 +129,16 @@ export function calculateTraPhetPayroll(input: PayrollCalculationInput): Payroll
     effective_normal,
     effective_shift,
     effective_ot,
+    amount_wood_excess,
+    amount_film,
+    amount_special,
+    amount_diligence,
+    amount_position,
     total_income,
     deduct_social_security,
+    deduct_safety_equipment,
+    deduct_uniform,
+    deduct_advance,
     total_deductions,
     net_pay,
     normal_days: totalNormalDays,
@@ -196,8 +213,16 @@ export function calculateClerkPayroll(input: PayrollCalculationInput): PayrollCa
     effective_normal,
     effective_shift,
     effective_ot,
+    amount_wood_excess,
+    amount_film,
+    amount_special,
+    amount_diligence,
+    amount_position,
     total_income,
     deduct_social_security,
+    deduct_safety_equipment,
+    deduct_uniform,
+    deduct_advance,
     total_deductions,
     net_pay,
     normal_days,

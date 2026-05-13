@@ -317,10 +317,10 @@ export default function ShiftEntry() {
       if (deleteError) throw deleteError
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['shifts-for-date'] })
-      queryClient.invalidateQueries({ queryKey: ['shifts'] })
-      queryClient.invalidateQueries({ queryKey: ['period-progress'] })
-      queryClient.invalidateQueries({ queryKey: ['all-period-shifts'] }) // Update PayrollEntry sidebar status
+      // Invalidate only specific queries needed after save
+      queryClient.invalidateQueries({ queryKey: ['shifts-for-date', workDateStr] })
+      queryClient.invalidateQueries({ queryKey: ['period-progress', currentPeriod?.id] })
+      queryClient.invalidateQueries({ queryKey: ['all-period-shifts', currentPeriod?.id] })
       toast.success(`บันทึกข้อมูลวันที่ ${formattedDate} สำเร็จ`)
     },
     onError: (error: any) => {

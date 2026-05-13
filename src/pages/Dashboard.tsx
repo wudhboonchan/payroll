@@ -321,15 +321,36 @@ export default function Dashboard() {
     queryFn: async () => {
       if (!activePeriod?.id) return null
       const { data } = await supabase.from('payslip_tokens')
-        .select('employee_status')
+        .select('employee_status, created_at, expires_at')
         .eq('period_id', activePeriod.id)
       
       const tokens = data || []
+      let pending = 0
+      let confirmed = 0
+      let disputed = 0
+
+      tokens.forEach(t => {
+        let status = t.employee_status
+        if (status === 'pending') {
+          const createdTime = t.created_at 
+            ? new Date(t.created_at).getTime()
+            : (t.expires_at ? new Date(t.expires_at).getTime() - (30 * 24 * 60 * 60 * 1000) : Date.now())
+          const hoursPassed = (Date.now() - createdTime) / (1000 * 60 * 60)
+          if (hoursPassed >= 24) {
+            status = 'auto_confirmed'
+          }
+        }
+        
+        if (status === 'pending') pending++
+        else if (status === 'confirmed' || status === 'auto_confirmed') confirmed++
+        else if (status === 'disputed') disputed++
+      })
+
       return {
         total: tokens.length,
-        pending: tokens.filter(t => t.employee_status === 'pending').length,
-        confirmed: tokens.filter(t => t.employee_status === 'confirmed' || t.employee_status === 'auto_confirmed').length,
-        disputed: tokens.filter(t => t.employee_status === 'disputed').length,
+        pending,
+        confirmed,
+        disputed
       }
     },
     enabled: !!activePeriod?.id

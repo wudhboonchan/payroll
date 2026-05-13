@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { TopBar } from '../components/layout/TopBar'
 import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
@@ -17,6 +17,7 @@ export default function PaySlipPage() {
   const { user } = useAppStore()
   const [search, setSearch] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const slipWrapRef = useRef<HTMLDivElement>(null)
 
   // Fetch employees — active by default, show inactive only when searching
   const { data: employees = [] } = useQuery({
@@ -180,7 +181,41 @@ export default function PaySlipPage() {
     slipData.net_pay = slipData.total_income - slipData.total_deductions
   }
 
-  const handlePrint = () => window.print()
+  const handlePrint = () => {
+    if (!slipData || !slipWrapRef.current) return
+
+    // ตั้งชื่อไฟล์ PDF: รหัส_ชื่อ_นามสกุล_mmyyyy
+    const mm = String(new Date(currentPeriod!.period_start).getMonth() + 1).padStart(2, '0')
+    const yyyy = new Date(currentPeriod!.period_start).getFullYear()
+    const filename = `${slipData.employee_code}_${slipData.first_name}_${slipData.last_name}_${mm}${yyyy}`
+
+    // เปิด window ใหม่ที่มีแค่สลิป — ไม่มีปัญหา 2 หน้าหรือ CSS ขัดกันอีกต่อไป
+    const content = slipWrapRef.current.innerHTML
+    const win = window.open('', '_blank', 'width=900,height=700')
+    if (!win) { alert('กรุณาอนุญาต popup สำหรับการพิมพ์'); return }
+
+    win.document.write(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>${filename}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 0; background: white; font-family: sans-serif; }
+    @page { size: A4 portrait; margin: 10mm 12mm; }
+    @media print { html, body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+  </style>
+</head>
+<body>${content}</body>
+</html>`)
+    win.document.close()
+    win.focus()
+    // รอให้ render เสร็จก่อน print
+    setTimeout(() => {
+      win.print()
+      win.close()
+    }, 400)
+  }
 
   return (
     <>
@@ -273,7 +308,7 @@ export default function PaySlipPage() {
         {/* Right: Preview */}
         <div className="flex-1 bg-slate-100 overflow-y-auto p-4 md:p-8 print:p-0 print:bg-white flex justify-center items-start">
           {slipData ? (
-            <div className="print-area w-full shadow-lg print:shadow-none overflow-x-auto">
+            <div ref={slipWrapRef} className="w-full shadow-lg overflow-x-auto">
               <PaySlipPreview data={slipData} />
             </div>
           ) : (

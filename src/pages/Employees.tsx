@@ -14,7 +14,7 @@ import {
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
 import { Badge } from '../components/ui/badge'
-import { Search, Plus, User, FileUp, AlertCircle, Filter } from 'lucide-react'
+import { Search, Plus, User, FileUp, AlertCircle, Filter, ArrowUpDown, ArrowDown, ArrowUp } from 'lucide-react'
 import { formatThaiCurrency } from '../lib/formatters'
 import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
@@ -29,6 +29,18 @@ export default function Employees() {
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [isImportOpen, setIsImportOpen] = useState(false)
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null)
+
+  type SortCol = 'employee_code' | 'name' | 'nationality' | 'rate' | 'payment_method' | 'position'
+  const [sortCol, setSortCol] = useState<SortCol>('employee_code')
+  const [sortAsc, setSortAsc] = useState(true)
+
+  const POSITIONS: Record<string, string> = {
+    worker: 'พนักงานทั่วไป',
+    clerk: 'เสมียน',
+    foreman: 'หัวหน้างาน',
+    office: 'พนักงานออฟฟิศ',
+    manager: 'ผู้จัดการ',
+  }
 
   // Fetch current period
   const { data: currentPeriod } = useQuery({
@@ -87,6 +99,24 @@ export default function Employees() {
     return matchesSearch
   }) || []
 
+  const sortedEmployees = [...filteredEmployees].sort((a, b) => {
+    let valA, valB;
+    if (sortCol === 'name') {
+      valA = formatEmployeeName(a);
+      valB = formatEmployeeName(b);
+    } else if (sortCol === 'rate') {
+      valA = Number(a.rate_per_12h || 0);
+      valB = Number(b.rate_per_12h || 0);
+    } else {
+      valA = a[sortCol];
+      valB = b[sortCol];
+    }
+    
+    if (valA < valB) return sortAsc ? -1 : 1;
+    if (valA > valB) return sortAsc ? 1 : -1;
+    return 0;
+  })
+
   const pendingCount = employees?.filter(emp => emp.data_complete === false).length || 0
   const inactiveCount = employees?.filter(emp => emp.status === 'inactive').length || 0
 
@@ -98,6 +128,22 @@ export default function Employees() {
   const handleCreate = () => {
     setSelectedEmployeeId(null)
     setIsModalOpen(true)
+  }
+
+  const toggleSort = (col: SortCol) => {
+    if (sortCol === col) {
+      setSortAsc(!sortAsc)
+    } else {
+      setSortCol(col)
+      setSortAsc(true)
+    }
+  }
+
+  const renderSortIcon = (col: SortCol) => {
+    if (sortCol !== col) return <ArrowUpDown className="ml-1 w-3 h-3 text-slate-300" />
+    return sortAsc 
+      ? <ArrowUp className="ml-1 w-3 h-3 text-[#1D9E75]" />
+      : <ArrowDown className="ml-1 w-3 h-3 text-[#1D9E75]" />
   }
 
   return (
@@ -195,12 +241,24 @@ export default function Employees() {
             <Table className="min-w-[800px]">
               <TableHeader className="bg-slate-50">
                 <TableRow>
-                  <TableHead>รหัส</TableHead>
-                  <TableHead>ชื่อ-นามสกุล</TableHead>
-                  <TableHead>สัญชาติ</TableHead>
-                  <TableHead>ค่าแรง/เงินเดือน</TableHead>
-                  <TableHead>การรับเงิน</TableHead>
-                  <TableHead>สถานะ</TableHead>
+                  <TableHead className="cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => toggleSort('employee_code')}>
+                    <div className="flex items-center">รหัส {renderSortIcon('employee_code')}</div>
+                  </TableHead>
+                  <TableHead className="cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => toggleSort('name')}>
+                    <div className="flex items-center">ชื่อ-นามสกุล {renderSortIcon('name')}</div>
+                  </TableHead>
+                  <TableHead className="cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => toggleSort('nationality')}>
+                    <div className="flex items-center">สัญชาติ {renderSortIcon('nationality')}</div>
+                  </TableHead>
+                  <TableHead className="cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => toggleSort('rate')}>
+                    <div className="flex items-center">ค่าแรง/เงินเดือน {renderSortIcon('rate')}</div>
+                  </TableHead>
+                  <TableHead className="cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => toggleSort('payment_method')}>
+                    <div className="flex items-center">การรับเงิน {renderSortIcon('payment_method')}</div>
+                  </TableHead>
+                  <TableHead className="cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => toggleSort('position')}>
+                    <div className="flex items-center">กลุ่มงาน {renderSortIcon('position')}</div>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -210,14 +268,14 @@ export default function Employees() {
                       กำลังโหลดข้อมูล...
                     </TableCell>
                   </TableRow>
-                ) : filteredEmployees.length === 0 ? (
+                ) : sortedEmployees.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={6} className="text-center py-8 text-slate-500">
                       ไม่พบข้อมูลพนักงาน
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredEmployees.map((emp) => (
+                  sortedEmployees.map((emp) => (
                     <TableRow
                       key={emp.id}
                       className="cursor-pointer hover:bg-slate-50"
@@ -261,9 +319,8 @@ export default function Employees() {
                         )}
                       </TableCell>
                       <TableCell>
-                        <Badge variant={emp.status === 'active' ? 'default' : 'secondary'}
-                          className={emp.status === 'active' ? 'bg-[#1D9E75] hover:bg-[#157a5a]' : 'bg-slate-100 text-slate-500'}>
-                          {emp.status === 'active' ? 'พนักงานปัจจุบัน' : 'พ้นสภาพพนักงาน'}
+                        <Badge variant="outline" className="bg-slate-50 text-slate-700 border-slate-200">
+                          {POSITIONS[emp.position] || emp.position}
                         </Badge>
                       </TableCell>
                     </TableRow>

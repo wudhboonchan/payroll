@@ -33,7 +33,6 @@ export default function PayslipExportModal({ isOpen, onClose, uniqueMonths }: Pr
   const [selectedMonthsIndiv, setSelectedMonthsIndiv] = useState<string[]>([])
   
   const [isGenerating, setIsGenerating] = useState(false)
-  const [printData, setPrintData] = useState<PaySlipData[] | null>(null)
 
   // We need to fetch periods again to map month names back to period IDs
   const { data: periods = [] } = useQuery({
@@ -104,7 +103,6 @@ export default function PayslipExportModal({ isOpen, onClose, uniqueMonths }: Pr
 
     setIsGenerating(true)
     try {
-      // Find period IDs for the selected months
       const targetPeriodIds = periods
         .filter((p: any) => targetMonths.includes(format(new Date(p.period_start), 'MMM yyyy', { locale: th })))
         .map((p: any) => p.id)
@@ -115,13 +113,12 @@ export default function PayslipExportModal({ isOpen, onClose, uniqueMonths }: Pr
         return
       }
 
-      // Fetch payroll entries
       let query = supabase
         .from('payroll_entries')
         .select(`
           *,
           employee:employees(
-            id, employee_code, first_name, last_name, payment_method, bank_name, bank_account
+            id, employee_code, first_name, last_name, payment_method, bank_name, bank_account, position
           ),
           period:payroll_periods(
             period_start, period_end
@@ -134,7 +131,6 @@ export default function PayslipExportModal({ isOpen, onClose, uniqueMonths }: Pr
       }
 
       const { data: entries, error } = await query
-
       if (error) throw error
       if (!entries || entries.length === 0) {
         toast.error('ไม่พบข้อมูลสลิปในเดือนที่เลือก')
@@ -142,17 +138,13 @@ export default function PayslipExportModal({ isOpen, onClose, uniqueMonths }: Pr
         return
       }
 
-      // Fetch advances
       let advanceQuery = supabase.from('advance_payments').select('employee_id, amount').in('period_id', targetPeriodIds)
       if (exportTarget === 'individual') advanceQuery = advanceQuery.eq('employee_id', selectedEmployeeId)
       const { data: advances } = await advanceQuery
 
-      // Map data
       const slips: PaySlipData[] = entries.map((entry: any) => {
         const emp = entry.employee
         const period = entry.period
-        
-        // Sum advances for this employee (note: this is a simplification, ideally it's per period)
         const empAdvances = (advances || []).filter((a: any) => a.employee_id === emp.id)
         const totalAdvance = empAdvances.reduce((sum: number, a: any) => sum + Number(a.amount), 0)
 
@@ -164,11 +156,9 @@ export default function PayslipExportModal({ isOpen, onClose, uniqueMonths }: Pr
         const amount_special = Number(entry.amount_special || 0)
         const amount_diligence = Number(entry.amount_diligence || 0)
         const amount_position = Number(entry.amount_position || 0)
-
         const deduct_social_security = Number(entry.deduct_social_security || 0)
         const deduct_safety_equipment = Number(entry.deduct_safety_equipment || 0)
         const deduct_uniform = Number(entry.deduct_uniform || 0)
-
         const total_income = amount_normal + amount_shift + amount_ot + amount_wood_excess + amount_film + amount_special + amount_diligence + amount_position
         const total_deductions = deduct_social_security + totalAdvance + deduct_safety_equipment + deduct_uniform
 
@@ -180,6 +170,7 @@ export default function PayslipExportModal({ isOpen, onClose, uniqueMonths }: Pr
           period_start: period.period_start,
           period_end: period.period_end,
           generated_at: new Date().toISOString(),
+          position: emp.position || 'worker',
           amount_normal, amount_shift, amount_ot, amount_wood_excess, amount_film, amount_special, amount_diligence, amount_position,
           deduct_social_security, deduct_advance: totalAdvance, deduct_safety_equipment, deduct_uniform,
           total_income, total_deductions,
@@ -190,24 +181,60 @@ export default function PayslipExportModal({ isOpen, onClose, uniqueMonths }: Pr
         }
       })
 
-      // Sort by employee code then period start
       slips.sort((a, b) => {
         if (a.employee_code !== b.employee_code) return String(a.employee_code).localeCompare(String(b.employee_code))
         return new Date(a.period_start).getTime() - new Date(b.period_start).getTime()
       })
 
-      setPrintData(slips)
+      // Build filename
+      const mm = String(new Date(slips[0].period_start).getMonth() + 1).padStart(2, '0')
+      const yyyy = new Date(slips[0].period_start).getFullYear()
+      const filename = exportTarget === 'individual'
+        ? `${slips[0].employee_code}_${slips[0].first_name}_${slips[0].last_name}_${mm}${yyyy}`
+        : `All_Payslip_${mm}${yyyy}`
 
-      // Allow DOM to update and render the print area, then trigger print
+      // Serialize slips to HTML using renderToStaticMarkup
+      const { renderToStaticMarkup } = await import('react-dom/server')
+      const { PaySlipPreview } = await import('./PaySlipPreview')
+      const createElement = (await import('react')).createElement
+
+      const slipsHtml = slips.map(slip =>
+        `<div style="page-break-after:always;padding:0;margin:0;">
+          ${renderToStaticMarkup(createElement(PaySlipPreview, { data: slip }))}
+        </div>`
+      ).join('')
+
+      const win = window.open('', '_blank', 'width=900,height=700')
+      if (!win) { alert('กรุณาอนุญาต popup สำหรับการพิมพ์'); setIsGenerating(false); return }
+
+      win.document.write(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>${filename}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 0; background: white; font-family: sans-serif; }
+    @page { size: A4 portrait; margin: 10mm 12mm; }
+    @media print {
+      html, body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      div[style*="page-break-after:always"]:last-child { page-break-after: auto !important; }
+    }
+  </style>
+</head>
+<body>${slipsHtml}</body>
+</html>`)
+      win.document.close()
+      win.focus()
       setTimeout(() => {
-        window.print()
-        setIsGenerating(false)
-        setPrintData(null)
-      }, 800)
+        win.print()
+        win.close()
+      }, 500)
 
     } catch (error) {
       console.error(error)
       toast.error('เกิดข้อผิดพลาดในการดึงข้อมูล')
+    } finally {
       setIsGenerating(false)
     }
   }
@@ -391,41 +418,6 @@ export default function PayslipExportModal({ isOpen, onClose, uniqueMonths }: Pr
 
       </DialogContent>
     </Dialog>
-
-    {/* Print Area: Hidden from screen, visible only in print mode */}
-    {printData && (
-      <div className="hidden print:block absolute inset-0 bg-white z-[99999] w-full min-h-screen">
-        <style type="text/css" media="print">
-          {`
-            @page { size: A4 portrait; margin: 15mm; }
-            body * { visibility: hidden; }
-            #payslip-print-container, #payslip-print-container * { visibility: visible; }
-            #payslip-print-container { position: absolute; left: 0; top: 0; width: 100%; }
-            .print-page-wrapper {
-              display: flex;
-              flex-direction: column;
-              gap: 15mm;
-              align-items: center;
-              page-break-after: always;
-              width: 100%;
-            }
-            .print-page-wrapper:last-child { page-break-after: auto; }
-          `}
-        </style>
-        <div id="payslip-print-container">
-          {Array.from({ length: Math.ceil(printData.length / 2) }).map((_, i) => {
-            const pair = printData.slice(i * 2, i * 2 + 2)
-            return (
-              <div key={`page-${i}`} className="print-page-wrapper">
-                {pair.map((slip, j) => (
-                  <PaySlipPreview key={`${slip.employee_code}-${i}-${j}`} data={slip} />
-                ))}
-              </div>
-            )
-          })}
-        </div>
-      </div>
-    )}
   </>
   )
 }
