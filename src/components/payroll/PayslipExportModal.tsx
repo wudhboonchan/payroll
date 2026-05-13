@@ -45,16 +45,15 @@ export default function PayslipExportModal({ isOpen, onClose, uniqueMonths }: Pr
     enabled: isOpen && !!user?.factory_id
   })
 
-  // Fetch active employees for selection
+  // Fetch all employees for selection (including inactive ones for search)
   const { data: employees = [] } = useQuery({
-    queryKey: ['employees', user?.factory_id],
+    queryKey: ['employees-all', user?.factory_id],
     queryFn: async () => {
       if (!user?.factory_id) return []
       const { data, error } = await supabase
         .from('employees')
-        .select('id, employee_code, first_name, last_name')
+        .select('id, employee_code, first_name, last_name, status')
         .eq('factory_id', user.factory_id)
-        .eq('status', 'active')
         .order('first_name')
       if (error) throw error
       return data
@@ -62,11 +61,22 @@ export default function PayslipExportModal({ isOpen, onClose, uniqueMonths }: Pr
     enabled: isOpen && !!user?.factory_id && exportTarget === 'individual'
   })
 
-  const filteredEmployees = employees.filter(e => 
-    e.first_name.includes(searchQuery) || 
-    (e.last_name && e.last_name.includes(searchQuery)) || 
-    (e.employee_code && e.employee_code.includes(searchQuery))
-  )
+  const filteredEmployees = employees.filter(e => {
+    const search = searchQuery.toLowerCase().trim()
+    
+    // Search matching logic
+    const isMatch = e.first_name.toLowerCase().includes(search) || 
+                   (e.last_name && e.last_name.toLowerCase().includes(search)) || 
+                   (e.employee_code && e.employee_code.toLowerCase().includes(search))
+
+    if (search === '') {
+      // If no search, show only active employees
+      return e.status === 'active'
+    }
+    
+    // If searching, show all matches regardless of status
+    return isMatch
+  })
 
   const toggleMonth = (month: string) => {
     setSelectedMonthsIndiv(prev => 
