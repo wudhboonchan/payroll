@@ -242,21 +242,21 @@ export default function PayrollEntry() {
   // Check if underlying data changed since last save — compare calc output vs DB entry directly
   const isOutdated = useMemo(() => {
     if (!existingEntry) return false;
-    
+
     // All these come from calc which uses current shifts + form state
     const checks = [
-      Math.abs(calc.amount_normal         - Number(existingEntry.amount_normal         || 0)) > 0.01,
-      Math.abs(calc.amount_shift          - Number(existingEntry.amount_shift          || 0)) > 0.01,
-      Math.abs(calc.amount_ot             - Number(existingEntry.amount_ot             || 0)) > 0.01,
-      Math.abs(calc.amount_wood_excess    - Number(existingEntry.amount_wood_excess    || 0)) > 0.01,
-      Math.abs(calc.amount_film           - Number(existingEntry.amount_film           || 0)) > 0.01,
-      Math.abs(calc.amount_special        - Number(existingEntry.amount_special        || 0)) > 0.01,
-      Math.abs(calc.amount_diligence      - Number(existingEntry.amount_diligence      || 0)) > 0.01,
-      Math.abs(calc.amount_position       - Number(existingEntry.amount_position       || 0)) > 0.01,
-      Math.abs(calc.deduct_social_security- Number(existingEntry.deduct_social_security|| 0)) > 0.01,
-      Math.abs(calc.deduct_safety_equipment-Number(existingEntry.deduct_safety_equipment||0)) > 0.01,
-      Math.abs(calc.deduct_uniform        - Number(existingEntry.deduct_uniform        || 0)) > 0.01,
-      Math.abs(totalAdvance               - Number(existingEntry.deduct_advance        || 0)) > 0.01,
+      Math.abs(calc.amount_normal - Number(existingEntry.amount_normal || 0)) > 0.01,
+      Math.abs(calc.amount_shift - Number(existingEntry.amount_shift || 0)) > 0.01,
+      Math.abs(calc.amount_ot - Number(existingEntry.amount_ot || 0)) > 0.01,
+      Math.abs(calc.amount_wood_excess - Number(existingEntry.amount_wood_excess || 0)) > 0.01,
+      Math.abs(calc.amount_film - Number(existingEntry.amount_film || 0)) > 0.01,
+      Math.abs(calc.amount_special - Number(existingEntry.amount_special || 0)) > 0.01,
+      Math.abs(calc.amount_diligence - Number(existingEntry.amount_diligence || 0)) > 0.01,
+      Math.abs(calc.amount_position - Number(existingEntry.amount_position || 0)) > 0.01,
+      Math.abs(calc.deduct_social_security - Number(existingEntry.deduct_social_security || 0)) > 0.01,
+      Math.abs(calc.deduct_safety_equipment - Number(existingEntry.deduct_safety_equipment || 0)) > 0.01,
+      Math.abs(calc.deduct_uniform - Number(existingEntry.deduct_uniform || 0)) > 0.01,
+      Math.abs(totalAdvance - Number(existingEntry.deduct_advance || 0)) > 0.01,
       (overrideNormal ?? null) !== (existingEntry.override_normal ?? null),
     ];
 
@@ -292,7 +292,7 @@ export default function PayrollEntry() {
       const { error } = await supabase
         .from('payroll_entries')
         .upsert([payload], { onConflict: 'period_id,employee_id' })
-      
+
       if (error) throw error
     },
     onSuccess: () => {
@@ -316,8 +316,8 @@ export default function PayrollEntry() {
 
   return (
     <>
-      <TopBar 
-        title="บันทึกข้อมูลค่าจ้าง" 
+      <TopBar
+        title="บันทึกข้อมูลค่าจ้าง"
         action={
           <div className="flex items-center gap-4">
             <div className="bg-white border border-slate-200 px-5 py-2 rounded-full shadow-sm">
@@ -333,8 +333,8 @@ export default function PayrollEntry() {
               <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border shadow-sm">
                 <span className="text-[10px] font-bold text-slate-500 uppercase">ประกันสังคม:</span>
                 <div className="flex items-center gap-1">
-                  <Input 
-                    type="number" 
+                  <Input
+                    type="number"
                     className="w-14 h-7 text-right text-sm font-bold"
                     value={socialSecurityRate * 100}
                     onChange={(e) => setSocialSecurityRate(Number(e.target.value) / 100)}
@@ -345,7 +345,7 @@ export default function PayrollEntry() {
               </div>
             )}
           </div>
-        } 
+        }
       />
 
       <div className="flex flex-col md:flex-row min-h-[calc(100vh-64px)] md:h-[calc(100vh-64px)]">
@@ -354,22 +354,22 @@ export default function PayrollEntry() {
           <div className="p-4 border-b space-y-3 shrink-0">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
-              <Input 
-                placeholder="ค้นหาพนักงาน..." 
+              <Input
+                placeholder="ค้นหาพนักงาน..."
                 className="pl-9"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
           </div>
-          
+
           <div className="flex-1 overflow-y-auto p-2 space-y-1">
             {employees
               .filter(emp => {
                 const matchesSearch = emp.employee_code.toLowerCase().includes(searchTerm.toLowerCase()) ||
                   emp.first_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                   emp.last_name.toLowerCase().includes(searchTerm.toLowerCase())
-                
+
                 if (searchTerm.trim().length > 0) return matchesSearch
                 return emp.status === 'active' && matchesSearch
               })
@@ -377,12 +377,12 @@ export default function PayrollEntry() {
                 const isInactive = emp.status !== 'active'
                 const isSelected = selectedEmployeeId === emp.id
                 const entry = allPeriodEntries.find((e: any) => e.employee_id === emp.id)
-                
+
                 // ── Status Logic (Using central calculatePayroll) ──
                 const empShifts = allPeriodShifts.filter((s: any) => s.employee_id === emp.id)
                 const normalShifts = empShifts.filter((s: any) => !s.is_holiday_ot)
                 const isEmpClerk = emp.position === 'clerk'
-                
+
                 const autoWood = empShifts.reduce((sum: number, s: any) => sum + Number(s.wood_excess || 0), 0)
                 const autoFilm = empShifts.reduce((sum: number, s: any) => sum + Number(s.film_amount || 0), 0)
                 const autoClerkOtHours = empShifts.reduce((sum: number, s: any) => sum + Number(s.ot_hours || 0), 0)
@@ -410,7 +410,7 @@ export default function PayrollEntry() {
                     deduct_uniform: 0,
                     deduct_advance: 0,
                   }
-                  
+
                   const currentCalc = calculatePayroll(calcInput)
 
                   // Compare only the shift-computed core amounts against DB
@@ -429,13 +429,13 @@ export default function PayrollEntry() {
                 }
 
                 return (
-                  <div 
+                  <div
                     key={emp.id}
                     onClick={() => !isInactive && setSelectedEmployeeId(emp.id)}
                     className={`
                       relative p-3 pl-4 rounded-xl cursor-pointer transition-all flex justify-between items-center border
-                      ${isSelected 
-                        ? 'bg-[#1D9E75]/10 border-[#1D9E75] text-[#1D9E75] font-bold shadow-sm' 
+                      ${isSelected
+                        ? 'bg-[#1D9E75]/10 border-[#1D9E75] text-[#1D9E75] font-bold shadow-sm'
                         : 'bg-white border-slate-100 hover:border-slate-200 text-slate-700'
                       }
                       ${isInactive ? 'opacity-50 grayscale' : ''}
@@ -460,11 +460,10 @@ export default function PayrollEntry() {
                         <span className="text-[9px] font-black text-orange-600 uppercase animate-pulse">Outdated</span>
                       )}
                       {/* Status Dot */}
-                      <div className={`w-3.5 h-3.5 rounded-full shadow-inner border ${
-                        status === 'grey' ? 'bg-slate-200 border-slate-300' :
+                      <div className={`w-3.5 h-3.5 rounded-full shadow-inner border ${status === 'grey' ? 'bg-slate-200 border-slate-300' :
                         status === 'green' ? 'bg-[#1D9E75] border-[#157a5a]' :
-                        'bg-orange-500 border-orange-600'
-                      }`} />
+                          'bg-orange-500 border-orange-600'
+                        }`} />
                     </div>
                   </div>
                 )
@@ -483,7 +482,7 @@ export default function PayrollEntry() {
             </div>
           ) : (
             <div className="max-w-5xl mx-auto space-y-6">
-              
+
               {/* Header Info */}
               <div className="flex flex-col md:flex-row md:justify-between md:items-end gap-3">
                 <div>
@@ -522,7 +521,7 @@ export default function PayrollEntry() {
                       </h3>
                       <div className="mt-1 text-sm text-amber-700">
                         <p>
-                          พบว่าหลังจากที่คุณบันทึกค่าจ้างล่าสุด มีการเข้าไปแก้ไขกะทำงาน (หรือยอดเบิกล่วงหน้า) ของพนักงานคนนี้ 
+                          พบว่าหลังจากที่คุณบันทึกค่าจ้างล่าสุด มีการเข้าไปแก้ไขกะทำงาน (หรือยอดเบิกล่วงหน้า) ของพนักงานคนนี้
                           ระบบได้ดึงข้อมูลใหม่มาแสดงแล้ว <strong>กรุณากด "บันทึกข้อมูลค่าจ้าง" อีกครั้ง</strong> เพื่อให้ยอดเงินอัปเดตเป็นปัจจุบัน
                         </p>
                       </div>
@@ -541,7 +540,7 @@ export default function PayrollEntry() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-5 pt-6">
-                    
+
                     {/* Auto Calculated normal pay */}
                     <div className="space-y-2">
                       <div className="flex justify-between items-center">
@@ -550,15 +549,15 @@ export default function PayrollEntry() {
                         </Label>
                         <span className="text-xs text-slate-500">
                           คำนวณอัตโนมัติ: {normalDays + halfShiftDays} วัน
-                          {halfShiftDays > 0 && <span className="text-amber-600 ml-1">(ทำงาน 8 ชม.: {halfShiftDays} วัน)</span>}
+                          {!isClerk && halfShiftDays > 0 && <span className="text-amber-600 ml-1">(ทำงาน 8 ชม.: {halfShiftDays} วัน)</span>}
                         </span>
                       </div>
-                      
+
                       {isEditingNormal ? (
                         <div className="space-y-3 bg-amber-50 p-3 rounded-lg border border-amber-200">
                           <div className="flex items-center gap-2">
-                            <Input 
-                              type="number" 
+                            <Input
+                              type="number"
                               className="bg-white border-amber-300"
                               value={overrideNormal || ''}
                               onChange={(e) => setOverrideNormal(Number(e.target.value))}
@@ -568,8 +567,8 @@ export default function PayrollEntry() {
                           </div>
                           <div>
                             <Label className="text-xs text-amber-800">เหตุผลที่แก้ไข *</Label>
-                            <Input 
-                              className="mt-1 bg-white h-8 text-sm" 
+                            <Input
+                              className="mt-1 bg-white h-8 text-sm"
                               value={overrideReason}
                               onChange={(e) => setOverrideReason(e.target.value)}
                               placeholder="ระบุเหตุผล..."
@@ -578,13 +577,13 @@ export default function PayrollEntry() {
                         </div>
                       ) : (
                         <div className="flex relative">
-                          <Input 
-                            className="bg-emerald-50 border-emerald-200 text-emerald-900 font-medium pr-10" 
-                            readOnly 
+                          <Input
+                            className="bg-emerald-50 border-emerald-200 text-emerald-900 font-medium pr-10"
+                            readOnly
                             value={formatThaiCurrency(calc.effective_normal)}
                           />
                           {!isApproved && (
-                            <button 
+                            <button
                               onClick={() => setIsEditingNormal(true)}
                               className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-emerald-600 transition-colors"
                             >
@@ -618,15 +617,15 @@ export default function PayrollEntry() {
                         <div className="flex justify-between items-center">
                           <Label className="text-slate-700 font-semibold">ค่าล่วงเวลา OT (1.5เท่า)</Label>
                           <span className="text-xs text-slate-500">
-                            อัตรา: {formatThaiCurrency((selectedEmployee?.rate_per_12h/30/8*1.5))} บาท/ชม.
+                            อัตรา: {formatThaiCurrency((selectedEmployee?.rate_per_12h / 30 / 8 * 1.5))} บาท/ชม.
                           </span>
                         </div>
                         <div className="flex gap-2 items-center">
-                          <div className="w-28 h-9 bg-slate-50 border border-slate-200 rounded-md flex items-center justify-center text-slate-700 font-semibold text-sm">
+                          <div className="w-28 h-8 bg-slate-50 border border-slate-200 rounded-md flex items-center justify-center text-slate-700 font-semibold text-sm shrink-0">
                             {autoClerkOtHours} ชม.
                           </div>
-                          <span className="text-xs text-slate-400">(จากหน้ากะ)</span>
-                          <Input className="bg-slate-50 flex-1" readOnly value={formatThaiCurrency(calc.amount_ot)} />
+                          <span className="text-xs text-slate-400 whitespace-nowrap">(จากหน้ากะ)</span>
+                          <Input className="bg-slate-50 flex-1 h-8" readOnly value={formatThaiCurrency(calc.amount_ot)} />
                         </div>
                         {autoClerkOtHours === 0 && (
                           <p className="text-xs text-slate-400">ยังไม่มีการกรอก OT ในหน้ากะ</p>
@@ -778,7 +777,7 @@ export default function PayrollEntry() {
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-5 pt-6">
-                      
+
                       <div className="space-y-2">
                         <div className="flex justify-between items-center">
                           <Label className="text-slate-700 font-semibold flex items-center">
@@ -802,14 +801,14 @@ export default function PayrollEntry() {
                       <hr className="my-4" />
 
                       <div className="space-y-4">
-                      <div className="space-y-1.5">
-                        <Label>ค่าอุปกรณ์ความปลอดภัย</Label>
-                        <Input type="number" name="deduct_safety_equipment" className="w-full" value={manualEntries.deduct_safety_equipment || ''} onChange={handleInputChange} disabled={isApproved} placeholder="0" />
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label>ค่าเสื้อพนักงาน</Label>
-                        <Input type="number" name="deduct_uniform" className="w-full" value={manualEntries.deduct_uniform || ''} onChange={handleInputChange} disabled={isApproved} placeholder="0" />
-                      </div>
+                        <div className="space-y-1.5">
+                          <Label>ค่าอุปกรณ์ความปลอดภัย</Label>
+                          <Input type="number" name="deduct_safety_equipment" className="w-full" value={manualEntries.deduct_safety_equipment || ''} onChange={handleInputChange} disabled={isApproved} placeholder="0" />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label>ค่าเสื้อพนักงาน</Label>
+                          <Input type="number" name="deduct_uniform" className="w-full" value={manualEntries.deduct_uniform || ''} onChange={handleInputChange} disabled={isApproved} placeholder="0" />
+                        </div>
                       </div>
 
                     </CardContent>
@@ -840,8 +839,8 @@ export default function PayrollEntry() {
 
               {/* Save Button at bottom */}
               <div className="pt-4 pb-8">
-                <Button 
-                  onClick={() => saveMutation.mutate()} 
+                <Button
+                  onClick={() => saveMutation.mutate()}
                   className="w-full md:w-auto md:min-w-[240px] md:float-right h-14 md:h-12 text-base md:text-lg font-bold bg-[#1D9E75] hover:bg-[#157a5a] shadow-md rounded-xl transition-all active:scale-[0.98]"
                   disabled={saveMutation.isPending || !selectedEmployeeId || isApproved}
                 >

@@ -77,7 +77,7 @@ export default function ShiftEntry() {
         .from('employees')
         .select('id, employee_code, first_name, last_name, prefix, nationality, position')
         .eq('factory_id', user.factory_id)
-        .eq('status', 'active')
+        .neq('status', 'inactive')
       if (error) throw error
       return data as any[]
     },
@@ -175,27 +175,29 @@ export default function ShiftEntry() {
     }
 
     const mapped = (existingAssignments && existingAssignments.length > 0)
-      ? existingAssignments.map((a: any) => {
-          const emp = employees.find(e => e.id === a.employee_id)
-          return {
-            employee_id: a.employee_id,
-            code: a.employee?.employee_code || emp?.employee_code || '?',
-            name: formatEmployeeName({
-              prefix: a.employee?.prefix || emp?.prefix,
-              first_name: a.employee?.first_name || emp?.first_name,
-              last_name: a.employee?.last_name || emp?.last_name,
-              nationality: a.employee?.nationality || emp?.nationality,
-            }),
-            shift: a.shift_type as ShiftType,
-            isNew: false,
-            isHolidayOT: a.is_holiday_ot,
-            isHalfShift: a.is_half_shift ?? false,
-            woodExcess: Number(a.wood_excess ?? 0),
-            filmAmount: Number(a.film_amount ?? 0),
-            otHours: Number(a.ot_hours ?? 0),
-            isClerk: emp?.position === 'clerk',
-          }
-        })
+      ? existingAssignments
+          .filter((a: any) => !(isTraPhet && a.shift_type === 'night')) // กรองกะดึกออกถ้าเป็นตราเพชร
+          .map((a: any) => {
+            const emp = employees.find(e => e.id === a.employee_id)
+            return {
+              employee_id: a.employee_id,
+              code: a.employee?.employee_code || emp?.employee_code || '?',
+              name: formatEmployeeName({
+                prefix: a.employee?.prefix || emp?.prefix,
+                first_name: a.employee?.first_name || emp?.first_name,
+                last_name: a.employee?.last_name || emp?.last_name,
+                nationality: a.employee?.nationality || emp?.nationality,
+              }),
+              shift: a.shift_type as ShiftType,
+              isNew: false,
+              isHolidayOT: a.is_holiday_ot,
+              isHalfShift: a.is_half_shift ?? false,
+              woodExcess: Number(a.wood_excess ?? 0),
+              filmAmount: Number(a.film_amount ?? 0),
+              otHours: Number(a.ot_hours ?? 0),
+              isClerk: emp?.position === 'clerk',
+            }
+          })
       : []
 
     setAssignments(prev => {
@@ -217,14 +219,20 @@ export default function ShiftEntry() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workDateStr, existingAssignments, employees.length, currentPeriod?.id])
 
-  // Derived state: available pool (employees not in assignments)
+  // Derived state: available pool (employees not in assignments, or assigned to hidden shifts)
   const availablePool = useMemo(() => {
-    return employees.filter(emp => !assignments.some(a => a.employee_id === emp.id))
+    return employees.filter(emp => {
+      const assignment = assignments.find(a => a.employee_id === emp.id)
+      if (!assignment) return true  // not assigned → show in pool
+      // If assigned to a hidden shift (night for isTraPhet), still show in pool
+      if (isTraPhet && assignment.shift === 'night') return true
+      return false  // assigned to a visible shift → hide from pool
+    })
       .filter(emp => 
         (emp.employee_code || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         (`${emp.first_name || ''} ${emp.last_name || ''}`).toLowerCase().includes(searchTerm.toLowerCase())
       )
-  }, [employees, assignments, searchTerm])
+  }, [employees, assignments, searchTerm, isTraPhet])
 
   const handleSelectEmployee = (id: string) => {
     setSelectedEmployeeIds(prev => 

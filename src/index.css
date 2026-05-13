@@ -110,3 +110,13 @@
   }
 }
 /* Print styles no longer needed — handled via new-window print in PaySlip.tsx */
+
+/* Hide number input spinners (spin buttons) globally */
+input[type=number]::-webkit-outer-spin-button,
+input[type=number]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type=number] {
+  -moz-appearance: textfield;
+}

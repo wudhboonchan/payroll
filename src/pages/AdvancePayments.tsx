@@ -220,16 +220,18 @@ export default function AdvancePayments() {
         onClose={() => setIsModalOpen(false)}
         employees={employees}
         currentPeriod={currentPeriod}
+        advances={advances}
       />
     </>
   )
 }
 
-function AdvanceModal({ isOpen, onClose, employees, currentPeriod }: { 
+function AdvanceModal({ isOpen, onClose, employees, currentPeriod, advances }: { 
   isOpen: boolean, 
   onClose: () => void, 
   employees: Employee[],
-  currentPeriod: PayrollPeriod | null | undefined
+  currentPeriod: PayrollPeriod | null | undefined,
+  advances: Advance[]
 }) {
   const { user } = useAppStore()
   const queryClient = useQueryClient()
@@ -294,6 +296,24 @@ function AdvanceModal({ isOpen, onClose, employees, currentPeriod }: {
       return
     }
 
+    // ── Block if employee already has 2 advances this period ──
+    const countForEmployee = advances.filter(
+      (adv) => adv.employee?.id === employeeId || (adv as any).employee_id === employeeId
+    ).length
+    // fallback: match by employee object id via the joined data
+    const selectedEmp = employees.find(e => e.id === employeeId)
+    const countByCode = selectedEmp
+      ? advances.filter(adv => adv.employee.employee_code === selectedEmp.employee_code).length
+      : countForEmployee
+
+    if (countByCode >= 2) {
+      toast.error('ไม่สามารถเบิกได้', {
+        description: `${selectedEmp ? selectedEmp.employee_code + ' — ' + selectedEmp.first_name : 'พนักงาน'} เบิกล่วงหน้าครบ 2 ครั้งในงวดนี้แล้ว ไม่อนุญาตให้เบิกเพิ่ม`,
+        duration: 5000,
+      })
+      return
+    }
+
     mutation.mutate({
       employee_id: employeeId,
       amount: parseFloat(amount),
@@ -329,7 +349,7 @@ function AdvanceModal({ isOpen, onClose, employees, currentPeriod }: {
             >
               <option value="">ค้นหาและเลือกพนักงาน...</option>
               {employees
-                .filter(emp => emp.status === 'active')
+                .filter(emp => emp.status !== 'inactive')
                 .map(emp => (
                   <option key={emp.id} value={emp.id}>
                     {emp.employee_code} — {formatEmployeeName(emp)}
