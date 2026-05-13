@@ -7,7 +7,7 @@ import { Button } from '../components/ui/button'
 import { Badge } from '../components/ui/badge'
 import {
   Users, Wallet, ShieldCheck, Banknote,
-  CheckCircle2, Clock, XCircle, ChevronDown,
+  CheckCircle2, Clock, ChevronDown,
   Loader2, Calendar, AlertCircle, Link2, RotateCcw
 } from 'lucide-react'
 import { formatThaiCurrency, formatPeriodLabel } from '../lib/formatters'
@@ -19,8 +19,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger
 } from '../components/ui/dropdown-menu'
-import { parseISO, format } from 'date-fns'
-import { th } from 'date-fns/locale'
+
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -165,7 +164,7 @@ function BarChart({ bars, activePeriodId }: { bars: { id: string; label: string;
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function Dashboard() {
-  const { user, companyContext } = useAppStore()
+  const { user } = useAppStore()
   const queryClient = useQueryClient()
   const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(null)
 
@@ -427,12 +426,12 @@ export default function Dashboard() {
   // ── Period selector badge (shown in TopBar action slot) ────────────────
   const PeriodBadge = (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button className="flex items-center gap-2.5 rounded-full border border-slate-200 bg-white px-6 py-2.5 text-base font-bold text-slate-700 shadow-sm hover:bg-slate-50 transition-colors">
+      <DropdownMenuTrigger>
+        <div className="flex items-center gap-2.5 rounded-full border border-slate-200 bg-white px-6 py-2 text-[15px] font-bold text-slate-700 shadow-sm hover:bg-slate-50 transition-colors min-h-[42px] cursor-pointer">
           <Calendar className="w-4 h-4 text-[#1D9E75]" />
-          {activePeriod ? formatPeriodLabel(activePeriod.period_start, activePeriod.period_end) : 'เลือกงวด'}
+          งวด: {activePeriod ? formatPeriodLabel(activePeriod.period_start, activePeriod.period_end) : 'เลือกงวด'}
           <ChevronDown className="w-4 h-4 text-slate-400" />
-        </button>
+        </div>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
         {periods.map(p => (

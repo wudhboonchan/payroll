@@ -94,6 +94,12 @@ export function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
       roles: ['admin', 'superUser', 'normalUser']
     },
     {
+      title: 'ภาพรวมการเข้างาน',
+      href: '/attendance',
+      icon: LayoutDashboard,
+      roles: ['admin', 'superUser', 'normalUser']
+    },
+    {
       title: 'เบิกล่วงหน้า',
       href: '/advances',
       icon: CreditCard,
@@ -208,8 +214,8 @@ export function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
 
       <div className="p-4 border-t border-slate-100">
         <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button className="w-full flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-slate-100 transition-colors group">
+          <DropdownMenuTrigger>
+            <div className="w-full flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-slate-100 transition-colors group cursor-pointer">
               <div className="h-8 w-8 rounded-full bg-[#1D9E75]/10 flex items-center justify-center text-[#1D9E75] font-bold text-sm flex-shrink-0">
                 {user?.full_name?.charAt(0) || 'U'}
               </div>
@@ -222,10 +228,10 @@ export function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
                 </p>
               </div>
               <ChevronDown className="w-4 h-4 text-slate-400 group-hover:text-slate-600 flex-shrink-0" />
-            </button>
+            </div>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" side="top" className="w-52 mb-1">
-            <DropdownMenuItem asChild>
+            <DropdownMenuItem>
               <Link to="/settings" onClick={() => setIsOpen(false)} className="flex items-center gap-2 cursor-pointer">
                 <KeyRound className="w-4 h-4 text-slate-400" />
                 เปลี่ยนรหัสผ่าน

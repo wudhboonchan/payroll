@@ -13,6 +13,7 @@ import ExportPage from './pages/Export'
 import ShareLinksPage from './pages/ShareLinks'
 import EmployeeSlipPage from './pages/EmployeeSlip'
 import SettingsPage from './pages/Settings'
+import AttendanceOverview from './pages/AttendanceOverview'
 import { AppLayout, RequireAuth } from './components/layout/AppLayout'
 
 // Created once outside component to prevent re-instantiation on re-render
@@ -49,6 +50,7 @@ function App() {
                   <Route path="/dashboard" element={<Dashboard />} />
                   <Route path="/employees" element={<Employees />} />
                   <Route path="/shifts" element={<ShiftEntry />} />
+                  <Route path="/attendance" element={<AttendanceOverview />} />
                   <Route path="/payroll" element={<PayrollEntry />} />
                   <Route path="/advances" element={<AdvancePaymentsList />} />
                   <Route path="/payslip" element={<PaySlipPage />} />

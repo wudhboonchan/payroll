@@ -22,10 +22,11 @@ export function formatPeriodLabel(start: string, end: string): string {
   const startDate = parseISO(start)
   const endDate = parseISO(end)
   
-  const startDay = format(startDate, 'd')
-  const endDay = format(endDate, 'd')
-  const month = format(endDate, 'MMM', { locale: th })
   const thaiYear = toThaiYear(endDate.getFullYear())
-  
-  return `${startDay}-${endDay} ${month} ${thaiYear}`
+  const sameMonth = format(startDate, 'MMMM') === format(endDate, 'MMMM')
+
+  if (sameMonth) {
+    return `${format(startDate, 'd')} - ${format(endDate, 'd MMMM', { locale: th })} ${thaiYear}`
+  }
+  return `${format(startDate, 'd MMMM', { locale: th })} - ${format(endDate, 'd MMMM', { locale: th })} ${thaiYear}`
 }

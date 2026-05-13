@@ -320,10 +320,17 @@ export default function PayrollEntry() {
         title="บันทึกข้อมูลค่าจ้าง"
         action={
           <div className="flex items-center gap-4">
-            <div className="bg-white border border-slate-200 px-5 py-2 rounded-full shadow-sm">
-              <span className="text-base font-bold text-slate-600">
+            <div className="bg-white border border-slate-200 px-5 py-2 rounded-full shadow-sm flex items-center min-h-[42px]">
+              <span className="text-[15px] font-bold text-slate-700">
                 งวด: {currentPeriod ? (
-                  `${format(new Date(currentPeriod.period_start), 'd', { locale: th })} - ${format(new Date(currentPeriod.period_end), 'd MMMM yyyy', { locale: th })}`
+                  (() => {
+                    const start = new Date(currentPeriod.period_start)
+                    const end = new Date(currentPeriod.period_end)
+                    const thaiYear = start.getFullYear() + 543
+                    return format(start, 'MMMM', { locale: th }) === format(end, 'MMMM', { locale: th })
+                      ? `${format(start, 'd', { locale: th })} - ${format(end, 'd MMMM', { locale: th })} ${thaiYear}`
+                      : `${format(start, 'd MMMM', { locale: th })} - ${format(end, 'd MMMM', { locale: th })} ${thaiYear}`
+                  })()
                 ) : (
                   'ยังไม่ได้สร้างงวด'
                 )}
@@ -492,7 +499,7 @@ export default function PayrollEntry() {
                   <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-2 text-sm text-slate-500">
                     <span>รหัสพนักงาน: <strong className="text-slate-700">{selectedEmployee?.employee_code}</strong></span>
                     <span>อัตราค่าจ้าง: <strong className="text-slate-700">{formatThaiCurrency(selectedEmployee?.rate_per_12h)} บาท/{selectedEmployee?.wage_type === 'monthly' ? 'เดือน' : 'วัน'}</strong></span>
-                    <span>กลุ่มงาน: <strong className={isClerk ? 'text-red-600' : 'text-slate-700'}>{isClerk ? 'เสมียน' : 'พนักงาน'}</strong></span>
+                    <span>กลุ่มงาน: <strong className={isClerk ? 'text-red-600' : 'text-slate-700'}>{isClerk ? 'เสมียน' : 'พนักงานทั่วไป'}</strong></span>
                     {selectedEmployee?.job_title && (
                       <span>ตำแหน่ง: <strong className="text-slate-700">{selectedEmployee.job_title}</strong></span>
                     )}

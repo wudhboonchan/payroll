@@ -301,7 +301,16 @@ export default function ShareLinks() {
 
   return (
     <>
-      <TopBar title="สร้างลิงก์ดูสลิป" />
+      <TopBar 
+        title="สร้างลิงก์ดูสลิป" 
+        action={
+          <div className="bg-white border border-slate-200 px-5 py-2 rounded-full shadow-sm flex items-center min-h-[42px]">
+            <span className="text-[15px] font-bold text-slate-700">
+              งวด: {selectedPeriod ? periodLabel : 'เลือกงวด'}
+            </span>
+          </div>
+        }
+      />
 
       <div className="p-4 md:p-8 space-y-4 md:space-y-6 max-w-6xl mx-auto">
         <div className="bg-white rounded-xl border p-4 md:p-5 flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between shadow-sm">

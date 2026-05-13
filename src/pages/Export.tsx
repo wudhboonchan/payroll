@@ -53,7 +53,9 @@ export default function Export() {
 
   // Extract unique months from periods
   const uniqueMonths = Array.from(new Set(periods.map((p: any) => {
-    return format(new Date(p.period_start), 'MMM yyyy', { locale: th })
+    const d = new Date(p.period_start)
+    const thaiYear = d.getFullYear() + 543
+    return `${format(d, 'MMMM', { locale: th })} ${thaiYear}`
   })))
 
   useEffect(() => {
@@ -71,7 +73,12 @@ export default function Export() {
       return selectedPeriodId ? [selectedPeriodId] : []
     } else {
       return periods
-        .filter((p: any) => format(new Date(p.period_start), 'MMM yyyy', { locale: th }) === selectedMonth)
+        .filter((p: any) => {
+          const d = new Date(p.period_start)
+          const thaiYear = d.getFullYear() + 543
+          const mLabel = `${format(d, 'MMMM', { locale: th })} ${thaiYear}`
+          return mLabel === selectedMonth
+        })
         .map((p: any) => p.id)
     }
   }
@@ -81,7 +88,7 @@ export default function Export() {
       const p = periods.find((p: any) => p.id === selectedPeriodId)
       return p ? formatPeriodLabel(p.period_start, p.period_end) : '—'
     } else {
-      return `เดือน_${selectedMonth}`
+      return selectedMonth
     }
   }
 
@@ -165,7 +172,6 @@ export default function Export() {
       const workbook = XLSX.utils.book_new()
 
       for (const [nationality, employeesData] of Object.entries(groupedData)) {
-        // Sanitize sheet name: Excel allows max 31 characters and restricts some symbols
         let safeSheetName = nationality.replace(/[\\/*?:[\]]/g, '').substring(0, 31)
         if (!safeSheetName) safeSheetName = 'Sheet'
 
@@ -308,7 +314,6 @@ export default function Export() {
         return String(a['รหัสพนักงาน']).localeCompare(String(b['รหัสพนักงาน']))
       })
 
-      // Start JSON data at row 2 so we can add a title on row 1
       const exportLabel = getExportLabel()
       const worksheet = XLSX.utils.json_to_sheet(exportData, { origin: 'A2' })
       XLSX.utils.sheet_add_aoa(worksheet, [[`ค่าแรง ${exportLabel}`]], { origin: 'A1' })
@@ -335,10 +340,9 @@ export default function Export() {
       <TopBar
         title="Export ข้อมูล"
         action={
-          <div className="bg-white border border-slate-200 px-5 py-2 rounded-full shadow-sm flex items-center gap-2">
-            <Calendar className="w-4 h-4 text-[#1D9E75]" />
-            <span className="text-base font-bold text-slate-600">
-              {exportType === 'month' ? 'รายเดือน' : 'รายงวด'}: {displayLabel.replace('เดือน_', '')}
+          <div className="bg-white border border-slate-200 px-5 py-2 rounded-full shadow-sm flex items-center min-h-[42px]">
+            <span className="text-[15px] font-bold text-slate-700">
+              งวด: {displayLabel}
             </span>
           </div>
         }
@@ -421,8 +425,6 @@ export default function Export() {
               <Download className="w-4 h-4 mr-2" /> Download PDF
             </Button>
           </div>
-
-
 
           {/* Card 4: SSO */}
           <div className="bg-white rounded-2xl border border-slate-200 p-5 md:p-8 shadow-sm flex flex-col items-start">

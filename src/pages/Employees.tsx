@@ -151,10 +151,17 @@ export default function Employees() {
       <TopBar
         title="ฐานข้อมูลพนักงาน"
         action={
-          <div className="bg-white border border-slate-200 px-5 py-2 rounded-full shadow-sm">
-            <span className="text-base font-bold text-slate-600">
+          <div className="bg-white border border-slate-200 px-5 py-2 rounded-full shadow-sm flex items-center min-h-[42px]">
+            <span className="text-[15px] font-bold text-slate-700">
               งวด: {currentPeriod ? (
-                `${format(new Date(currentPeriod.period_start), 'd', { locale: th })} - ${format(new Date(currentPeriod.period_end), 'd MMMM yyyy', { locale: th })}`
+                (() => {
+                  const start = new Date(currentPeriod.period_start)
+                  const end = new Date(currentPeriod.period_end)
+                  const thaiYear = start.getFullYear() + 543
+                  return format(start, 'MMMM', { locale: th }) === format(end, 'MMMM', { locale: th })
+                    ? `${format(start, 'd', { locale: th })} - ${format(end, 'd MMMM', { locale: th })} ${thaiYear}`
+                    : `${format(start, 'd MMMM', { locale: th })} - ${format(end, 'd MMMM', { locale: th })} ${thaiYear}`
+                })()
               ) : (
                 'ยังไม่ได้สร้างงวด'
               )}
