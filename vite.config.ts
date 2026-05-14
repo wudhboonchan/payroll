@@ -11,4 +11,14 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  server: {
+    proxy: {
+      '/supabase-api': {
+        target: 'https://nlyumhbzlruhpcorwswk.supabase.co',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/supabase-api/, ''),
+        ws: true, // proxy WebSocket สำหรับ Realtime
+      },
+    },
+  },
 })

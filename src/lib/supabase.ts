@@ -1,7 +1,8 @@
 import { createClient } from '@supabase/supabase-js'
 import type { Database } from '../types/database'
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || ''
+// ใช้ proxy ผ่าน domain ของเราเอง เพื่อหลีกเลี่ยง AdGuard/extension block
+const supabaseUrl = `${window.location.origin}/supabase-api`
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || ''
 
 export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
