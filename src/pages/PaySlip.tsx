@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react'
 import { TopBar } from '../components/layout/TopBar'
-import { format } from 'date-fns'
+import { format, isWeekend } from 'date-fns'
 import { th } from 'date-fns/locale'
 import { PaySlipPreview } from '../components/payroll/PaySlipPreview'
 import type { PaySlipData } from '../components/payroll/PaySlipPreview'
@@ -11,7 +11,7 @@ import { Printer, Search, UserX } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
-import { formatEmployeeName } from '@/lib/formatters'
+import { formatEmployeeName } from '../lib/formatters'
 
 interface Employee {
   id: string
@@ -25,12 +25,14 @@ interface Employee {
   bank_name: string
   bank_account: string
   position: string
+  rate_per_12h: number
 }
 
 interface Shift {
   is_holiday_ot: boolean
   is_half_shift: boolean
   ot_hours: number
+  work_date: string
 }
 
 export default function PaySlipPage() {
@@ -46,7 +48,7 @@ export default function PaySlipPage() {
       if (!user?.factory_id) return []
       const { data, error } = await supabase
         .from('employees')
-        .select('id, employee_code, first_name, last_name, prefix, nationality, status, payment_method, bank_name, bank_account, position')
+        .select('id, employee_code, first_name, last_name, prefix, nationality, status, payment_method, bank_name, bank_account, position, rate_per_12h')
         .eq('factory_id', user.factory_id)
         .order('employee_code')
       if (error) throw error
@@ -79,13 +81,13 @@ export default function PaySlipPage() {
     queryFn: async () => {
       if (!selectedId || !currentPeriod?.id) return null
       const { data, error } = await supabase
-        .from('payroll_entries')
+        .from('payroll_entries' as any)
         .select('*')
         .eq('period_id', currentPeriod.id)
         .eq('employee_id', selectedId)
         .single()
       if (error && error.code !== 'PGRST116') throw error
-      return data
+      return data as any
     },
     enabled: !!selectedId && !!currentPeriod?.id
   })
@@ -115,7 +117,7 @@ export default function PaySlipPage() {
       if (!selectedId || !currentPeriod?.id) return []
       const { data, error } = await supabase
         .from('shift_assignments')
-        .select('is_holiday_ot, is_half_shift, ot_hours')
+        .select('is_holiday_ot, is_half_shift, ot_hours, work_date')
         .eq('employee_id', selectedId)
         .eq('period_id', currentPeriod.id)
       if (error) throw error
@@ -130,10 +132,23 @@ export default function PaySlipPage() {
   const normalShiftsForSlip = slipShifts.filter((s) => !s.is_holiday_ot)
   const days_normal = normalShiftsForSlip.length
   const days_shift = normalShiftsForSlip.filter((s) => !s.is_half_shift).length
-  // Workers: count holiday OT days; Clerks: sum ot_hours
-  const days_ot = isClerkSlip
-    ? slipShifts.reduce((sum: number, s) => sum + Number(s.ot_hours || 0), 0)
-    : slipShifts.filter((s) => s.is_holiday_ot).length
+  
+  // Workers: sum hours for holiday; Clerks: sum ot_hours
+  const autoClerkOt1_5x = slipShifts.filter((s) => !isWeekend(new Date(s.work_date))).reduce((sum: number, s) => sum + Number(s.ot_hours || 0), 0)
+  const autoClerkOt1x = slipShifts.filter((s) => isWeekend(new Date(s.work_date))).reduce((sum: number, s) => sum + Number(s.ot_hours || 0), 0)
+
+  const days_ot = isClerkSlip 
+    ? autoClerkOt1_5x
+    : slipShifts.filter(s => s.is_holiday_ot).reduce((sum, s) => {
+        const base = s.is_half_shift ? 8 : 12
+        return sum + base + Number(s.ot_hours || 0)
+      }, 0)
+
+  const days_ot_1x = isClerkSlip ? autoClerkOt1x : 0
+
+  const clerkMonthly = selectedEmpForSlip?.rate_per_12h || 0
+  const clerkHourly = (clerkMonthly / 30) / 8
+  const computed_ot_1x = isClerkSlip ? clerkHourly * 1.0 * autoClerkOt1x : 0
 
   const isSearching = search.trim().length > 0
 
@@ -165,15 +180,18 @@ export default function PaySlipPage() {
         position: selectedEmp.position || 'worker',
         amount_normal: Number(payrollEntry?.amount_normal || 0),
         amount_shift: Number(payrollEntry?.amount_shift || 0),
-        amount_ot: Number(payrollEntry?.amount_ot || 0),
+        amount_ot: isClerkSlip ? Math.max(0, Number(payrollEntry?.amount_ot || 0) - computed_ot_1x) : Number(payrollEntry?.amount_ot || 0),
+        amount_ot_1x: computed_ot_1x,
         amount_wood_excess: Number(payrollEntry?.amount_wood_excess || 0),
         amount_film: Number(payrollEntry?.amount_film || 0),
         amount_special: Number(payrollEntry?.amount_special || 0),
+        special_note: payrollEntry?.special_note || undefined,
         amount_diligence: Number(payrollEntry?.amount_diligence || 0),
         amount_position: Number(payrollEntry?.amount_position || 0),
         days_normal: slipShifts.length > 0 ? days_normal : undefined,
         days_shift: slipShifts.length > 0 ? days_shift : undefined,
         days_ot: slipShifts.length > 0 && days_ot > 0 ? days_ot : undefined,
+        days_ot_1x: slipShifts.length > 0 && days_ot_1x > 0 ? days_ot_1x : undefined,
         deduct_social_security: Number(payrollEntry?.deduct_social_security || 0),
         deduct_advance: totalAdvance,
         deduct_safety_equipment: Number(payrollEntry?.deduct_safety_equipment || 0),
@@ -190,7 +208,7 @@ export default function PaySlipPage() {
   // Calculate totals if we have data
   if (slipData) {
     slipData.total_income = 
-      slipData.amount_normal + slipData.amount_shift + slipData.amount_ot +
+      slipData.amount_normal + slipData.amount_shift + slipData.amount_ot + (slipData.amount_ot_1x || 0) +
       slipData.amount_wood_excess + slipData.amount_film + slipData.amount_special +
       slipData.amount_diligence + slipData.amount_position
     

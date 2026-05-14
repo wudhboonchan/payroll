@@ -16,6 +16,9 @@ export interface AssignedEmployee {
   filmAmount: number
   otHours: number
   isClerk: boolean
+  isCrossPosition?: boolean
+  crossPositionTitle?: string
+  crossPositionExtraPay?: number
 }
 
 interface ShiftColumnProps {
@@ -97,6 +100,12 @@ export function ShiftColumn({
                   )}
                   {!emp.isClerk && emp.filmAmount > 0 && (
                     <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 border-none text-[10px] px-1.5 py-0 h-4">+ค่าฟิล์ม</Badge>
+                  )}
+                  {emp.isHolidayOT && (
+                    <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100 border-none text-[10px] px-1.5 py-0 h-4">Holiday OT</Badge>
+                  )}
+                  {emp.isCrossPosition && (
+                    <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100 border-none text-[10px] px-1.5 py-0 h-4">สลับตำแหน่ง</Badge>
                   )}
                 </div>
               </div>

@@ -41,6 +41,10 @@ interface PayrollPeriod {
   period_start: string
   period_end: string
   status: string
+  approved_by?: string
+  approver?: {
+    full_name: string
+  }
 }
 
 
@@ -198,7 +202,7 @@ export default function Dashboard() {
       if (!user?.factory_id) return []
       const { data, error } = await supabase
         .from('payroll_periods')
-        .select('*')
+        .select('*, approver:profiles!payroll_periods_approved_by_fkey(full_name)')
         .eq('factory_id', user.factory_id)
         .order('period_start', { ascending: false })
       if (error) throw error
@@ -261,6 +265,7 @@ export default function Dashboard() {
         totalNetPay: net - totalAdv,
         periodStatus: activePeriod.status as string,
         periodLabel: formatPeriodLabel(activePeriod.period_start, activePeriod.period_end),
+        approverName: activePeriod.approver?.full_name,
         daysFilled: uniqueDays,
         totalDays,
         entryCount,
@@ -669,7 +674,11 @@ export default function Dashboard() {
                   <div>
                     <p className="text-sm font-semibold text-slate-800">อนุมัติโดย Admin</p>
                     <p className="text-xs text-slate-500 mt-0.5">
-                      {isApproved ? 'อนุมัติแล้ว' : 'รอการอนุมัติ'}
+                      {isApproved ? (
+                        <span className="text-[#1D9E75] font-semibold">
+                          อนุมัติแล้ว โดย {activePeriod?.approver?.full_name || 'แอดมิน'}
+                        </span>
+                      ) : 'รอการอนุมัติ'}
                     </p>
                   </div>
                 </div>
@@ -738,6 +747,7 @@ interface DashboardStats {
   totalNetPay: number
   periodStatus: string
   periodLabel: string
+  approverName?: string
   daysFilled: number
   totalDays: number
   entryCount: number
@@ -809,7 +819,12 @@ function UserDashboardView({ stats, linkStats, isLoading, PeriodBadge }: {
             {isApproved ? (
               <div className="flex items-center gap-3 text-emerald-600 bg-emerald-50 p-3 rounded-lg border border-emerald-100">
                 <CheckCircle2 className="w-5 h-5" />
-                <span className="font-medium">แอดมินอนุมัติงวดนี้แล้ว</span>
+                <div className="flex flex-col">
+                  <span className="font-medium">แอดมินอนุมัติงวดนี้แล้ว</span>
+                  {stats?.approverName && (
+                    <span className="text-[11px] opacity-70">โดย {stats.approverName}</span>
+                  )}
+                </div>
               </div>
             ) : (
               <div className="flex items-center gap-3 text-slate-500 bg-slate-50 p-3 rounded-lg border border-slate-200">

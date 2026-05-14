@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
+import { isWeekend } from 'date-fns'
 import { useParams } from 'react-router-dom'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
@@ -55,6 +56,7 @@ interface ShiftAssignment {
   is_holiday_ot: boolean
   is_half_shift: boolean
   ot_hours: number
+  work_date: string
 }
 
 export default function EmployeeSlip() {
@@ -94,7 +96,7 @@ export default function EmployeeSlip() {
       if (!tokenData?.employee_id || !tokenData?.period_id) return []
       const { data, error } = await supabase
         .from('shift_assignments')
-        .select('is_holiday_ot, is_half_shift, ot_hours')
+        .select('is_holiday_ot, is_half_shift, ot_hours, work_date')
         .eq('employee_id', tokenData.employee_id)
         .eq('period_id', tokenData.period_id)
       if (error) throw error
@@ -118,9 +120,16 @@ export default function EmployeeSlip() {
   const normalShiftsForSlip = slipShifts.filter((s: ShiftAssignment) => !s.is_holiday_ot)
   const days_normal = normalShiftsForSlip.length
   const days_shift = normalShiftsForSlip.filter((s: ShiftAssignment) => !s.is_half_shift).length
+  const autoClerkOt1_5x = slipShifts.filter((s: ShiftAssignment) => !isWeekend(new Date(s.work_date))).reduce((sum: number, s: ShiftAssignment) => sum + Number(s.ot_hours || 0), 0)
+  const autoClerkOt1x = slipShifts.filter((s: ShiftAssignment) => isWeekend(new Date(s.work_date))).reduce((sum: number, s: ShiftAssignment) => sum + Number(s.ot_hours || 0), 0)
+
   const days_ot = isClerkSlip
-    ? slipShifts.reduce((sum: number, s: ShiftAssignment) => sum + Number(s.ot_hours || 0), 0)
-    : slipShifts.filter((s: ShiftAssignment) => s.is_holiday_ot).length
+    ? autoClerkOt1_5x
+    : slipShifts.filter((s: ShiftAssignment) => s.is_holiday_ot).reduce((sum, s) => {
+        const base = s.is_half_shift ? 8 : 12
+        return sum + base + Number(s.ot_hours || 0)
+      }, 0)
+  const days_ot_1x = isClerkSlip ? autoClerkOt1x : 0
 
   const slipData = useMemo(() => {
     if (!rawData) return null
@@ -146,8 +155,13 @@ export default function EmployeeSlip() {
 
     if (!e || !p) return null
 
+    const clerkMonthly = e?.rate_per_12h || 0
+    const clerkHourly = (clerkMonthly / 30) / 8
+    const computed_ot_1x = isClerkSlip ? clerkHourly * 1.0 * autoClerkOt1x : 0
+    const amount_ot_1_5x = isClerkSlip ? Math.max(0, (entry.amount_ot || 0) - computed_ot_1x) : (entry.amount_ot || 0)
+
     const totalIncome = 
-      (entry.amount_normal || 0) + (entry.amount_shift || 0) + (entry.amount_ot || 0) + 
+      (entry.amount_normal || 0) + (entry.amount_shift || 0) + amount_ot_1_5x + computed_ot_1x + 
       (entry.amount_wood_excess || 0) + (entry.amount_film || 0) + (entry.amount_special || 0) + 
       (entry.amount_diligence || 0) + (entry.amount_position || 0)
 
@@ -164,15 +178,18 @@ export default function EmployeeSlip() {
       period_end: p.period_end,
       amount_normal: entry.amount_normal || 0,
       amount_shift: entry.amount_shift || 0,
-      amount_ot: entry.amount_ot || 0,
+      amount_ot: amount_ot_1_5x,
+      amount_ot_1x: computed_ot_1x,
       amount_wood_excess: entry.amount_wood_excess || 0,
       amount_film: entry.amount_film || 0,
       amount_special: entry.amount_special || 0,
+      special_note: entry.special_note || undefined,
       amount_diligence: entry.amount_diligence || 0,
       amount_position: entry.amount_position || 0,
       days_normal: slipShifts.length > 0 ? days_normal : undefined,
       days_shift: slipShifts.length > 0 ? days_shift : undefined,
       days_ot: slipShifts.length > 0 && days_ot > 0 ? days_ot : undefined,
+      days_ot_1x: slipShifts.length > 0 && days_ot_1x > 0 ? days_ot_1x : undefined,
       position: empPosition,
       deduct_social_security: entry.deduct_social_security || 0,
       deduct_advance: entry.deduct_advance || 0,
@@ -185,7 +202,7 @@ export default function EmployeeSlip() {
       bank_name: e.bank_name,
       bank_account: e.bank_account_no || e.bank_account, 
     } as PaySlipData
-  }, [rawData, slipShifts, days_normal, days_shift, days_ot, empPosition])
+  }, [rawData, slipShifts, days_normal, days_shift, days_ot, days_ot_1x, empPosition])
 
   const [autoStatus, setAutoStatus] = useState<string>('')
 

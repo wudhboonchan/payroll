@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { format } from 'date-fns'
+import { format, isWeekend, parseISO } from 'date-fns'
 import { th } from 'date-fns/locale'
 import { supabase } from '../lib/supabase'
 import { useAppStore } from '../store/useAppStore'
@@ -10,12 +10,12 @@ import { Input } from '../components/ui/input'
 import { Button } from '../components/ui/button'
 import { Label } from '../components/ui/label'
 import { Badge } from '../components/ui/badge'
-import { Search, Save, Lock, Edit2, AlertCircle } from 'lucide-react'
+import { Search, Save, Lock, Edit2, AlertCircle, RotateCcw } from 'lucide-react'
 import { toast } from 'sonner'
-import { formatThaiCurrency } from '@/lib/formatters'
-import { calculatePayroll } from '@/lib/payrollCalc'
-import type { PayrollCalculationInput } from '@/lib/payrollCalc'
-import { formatEmployeeName } from '@/lib/formatters'
+import { formatThaiCurrency } from '../lib/formatters'
+import { calculatePayroll } from '../lib/payrollCalc'
+import type { PayrollCalculationInput } from '../lib/payrollCalc'
+import { formatEmployeeName } from '../lib/formatters'
 
 interface Employee {
   id: string
@@ -30,42 +30,56 @@ interface Employee {
   payment_method: string
   status: string
   job_title?: string
+  factory_id?: string
 }
 
 interface ShiftAssignment {
-  employee_id: string
-  work_date: string
-  shift_type: string
-  is_holiday_ot: boolean
-  is_half_shift: boolean
-  wood_excess: number
-  film_amount: number
-  ot_hours: number
+  id?: string
+  employee_id?: string
+  work_date?: string
+  shift_type?: string
+  is_holiday_ot?: boolean
+  is_half_shift?: boolean
+  wood_excess?: number
+  film_amount?: number
+  ot_hours?: number
+  is_cross_position?: boolean
+  cross_position_title?: string | null
+  cross_position_extra_pay?: number
+  employee?: {
+    employee_code?: string
+    first_name?: string
+    last_name?: string
+    prefix?: string | null
+    nationality?: string | null
+  }
 }
 
 interface AdvancePayment {
-  id: string
-  employee_id: string
-  amount: number
-  period_id: string
+  id?: string
+  employee_id?: string
+  amount?: number
+  period_id?: string
 }
 
 interface PayrollEntryRow {
-  employee_id: string
-  amount_normal: number
-  amount_shift: number
-  amount_ot: number
-  amount_wood_excess: number
-  amount_film: number
-  amount_special: number
-  amount_diligence: number
-  amount_position: number
-  deduct_social_security: number
-  deduct_safety_equipment: number
-  deduct_uniform: number
-  deduct_advance: number
-  override_normal: number | null
-  override_reason: string | null
+  employee_id?: string
+  amount_normal?: number
+  amount_shift?: number
+  amount_ot?: number
+  amount_wood_excess?: number
+  amount_film?: number
+  amount_special?: number
+  override_special?: number | null
+  special_note?: string | null
+  amount_diligence?: number
+  amount_position?: number
+  deduct_social_security?: number
+  deduct_safety_equipment?: number
+  deduct_uniform?: number
+  deduct_advance?: number
+  override_normal?: number | null
+  override_reason?: string | null
 }
 
 export default function PayrollEntry() {
@@ -85,6 +99,9 @@ export default function PayrollEntry() {
   const [overrideFilm, setOverrideFilm] = useState<number | null>(null)
   const [isEditingWood, setIsEditingWood] = useState(false)
   const [isEditingFilm, setIsEditingFilm] = useState(false)
+  const [overrideSpecial, setOverrideSpecial] = useState<number | null>(null)
+  const [specialNote, setSpecialNote] = useState('')
+  const [isEditingSpecial, setIsEditingSpecial] = useState(false)
 
   const [manualEntries, setManualEntries] = useState({
     amount_wood_excess: 0,
@@ -137,9 +154,9 @@ export default function PayrollEntry() {
         .from('shift_assignments')
         .select('*')
         .eq('employee_id', selectedEmployeeId)
-        .eq('period_id', currentPeriod.id)
+        .eq('period_id', currentPeriod?.id)
       if (error) throw error
-      return data as ShiftAssignment[]
+      return (data as unknown) as ShiftAssignment[]
     },
     enabled: !!selectedEmployeeId && !!currentPeriod?.id
   })
@@ -153,9 +170,9 @@ export default function PayrollEntry() {
         .from('advance_payments')
         .select('id, amount, period_id')
         .eq('employee_id', selectedEmployeeId)
-        .eq('period_id', currentPeriod.id)
+        .eq('period_id', currentPeriod?.id)
       if (error) throw error
-      return data as AdvancePayment[]
+      return (data as unknown) as AdvancePayment[]
     },
     enabled: !!selectedEmployeeId && !!currentPeriod?.id,
     staleTime: 30_000,
@@ -169,10 +186,10 @@ export default function PayrollEntry() {
       if (!currentPeriod?.id) return []
       const { data, error } = await supabase
         .from('payroll_entries')
-        .select('employee_id, amount_normal, amount_shift, amount_ot, amount_wood_excess, amount_film, amount_special, amount_diligence, amount_position, deduct_social_security, deduct_safety_equipment, deduct_uniform, deduct_advance, override_normal, override_reason')
-        .eq('period_id', currentPeriod.id)
+        .select('employee_id, amount_normal, amount_shift, amount_ot, amount_wood_excess, amount_film, amount_special, amount_diligence, amount_position, deduct_social_security, deduct_safety_equipment, deduct_uniform, deduct_advance, override_normal, override_reason, override_special, special_note')
+        .eq('period_id', currentPeriod?.id)
       if (error) throw error
-      return data as PayrollEntryRow[]
+      return (data as unknown) as PayrollEntryRow[]
     },
     enabled: !!currentPeriod?.id,
     staleTime: 30_000,
@@ -185,10 +202,10 @@ export default function PayrollEntry() {
       if (!currentPeriod?.id) return []
       const { data, error } = await supabase
         .from('advance_payments')
-        .select('employee_id, amount')
-        .eq('period_id', currentPeriod.id)
+        .select('id, employee_id, amount, period_id')
+        .eq('period_id', currentPeriod?.id)
       if (error) throw error
-      return data as AdvancePayment[]
+      return (data as unknown) as AdvancePayment[]
     },
     enabled: !!currentPeriod?.id,
     staleTime: 30_000,
@@ -200,11 +217,16 @@ export default function PayrollEntry() {
     queryFn: async () => {
       if (!currentPeriod?.id) return []
       const { data, error } = await supabase
-        .from('shift_assignments')
-        .select('employee_id, work_date, shift_type, is_holiday_ot, is_half_shift, wood_excess, film_amount, ot_hours')
-        .eq('period_id', currentPeriod.id)
+        .from('shift_assignments' as any)
+        .select(`
+          id, employee_id, shift_type, is_holiday_ot,
+          is_half_shift, wood_excess, film_amount, ot_hours, work_date,
+          is_cross_position, cross_position_title, cross_position_extra_pay,
+          employee:employees(employee_code, first_name, last_name, prefix, nationality)
+        `)
+        .eq('period_id', currentPeriod?.id)
       if (error) throw error
-      return data as ShiftAssignment[]
+      return (data as unknown) as ShiftAssignment[]
     },
     enabled: !!currentPeriod?.id,
     staleTime: 30_000,
@@ -216,13 +238,13 @@ export default function PayrollEntry() {
     queryFn: async () => {
       if (!selectedEmployeeId || !currentPeriod?.id) return null
       const { data, error } = await supabase
-        .from('payroll_entries')
+        .from('payroll_entries' as any)
         .select('*')
+        .eq('period_id', currentPeriod?.id)
         .eq('employee_id', selectedEmployeeId)
-        .eq('period_id', currentPeriod.id)
         .single()
       if (error && error.code !== 'PGRST116') throw error
-      return data as PayrollEntryRow | null
+      return (data as unknown) as PayrollEntryRow | null
     },
     enabled: !!selectedEmployeeId && !!currentPeriod?.id
   })
@@ -240,8 +262,10 @@ export default function PayrollEntry() {
           deduct_safety_equipment: Number(existingEntry.deduct_safety_equipment || 0),
           deduct_uniform: Number(existingEntry.deduct_uniform || 0)
         })
-        setOverrideNormal(existingEntry.override_normal ? Number(existingEntry.override_normal) : null)
+        setOverrideNormal(existingEntry.override_normal != null ? Number(existingEntry.override_normal) : null)
         setOverrideReason(existingEntry.override_reason || '')
+        setOverrideSpecial(existingEntry.override_special != null ? Number(existingEntry.override_special) : null)
+        setSpecialNote(existingEntry.special_note || '')
       } else {
         setManualEntries({
           amount_wood_excess: 0,
@@ -265,22 +289,42 @@ export default function PayrollEntry() {
   // Consolidated calculations for stability
   const { 
     calc, totalAdvance, effectiveWood, effectiveFilm, 
-    isClerk, normalDays, halfShiftDays, holidayOtDays, 
-    autoClerkOtHours, autoWood, autoFilm 
+    isClerk, normalDays, halfShiftDays, holidayOtHours, 
+    autoClerkOtHours, autoClerkOt1xHours, autoWood, autoFilm,
+    autoSpecial, autoSpecialNote, effectiveSpecial
   } = useMemo(() => {
     const isClerk = selectedEmployee?.position === 'clerk'
     const advTotal = advances.reduce((sum: number, adv) => sum + Number(adv.amount), 0)
     const normShifts = shifts.filter(s => !s.is_holiday_ot)
     const normDays = normShifts.filter(s => !s.is_half_shift).length
     const halfDays = normShifts.filter(s => s.is_half_shift).length
-    const holDays = shifts.filter(s => s.is_holiday_ot).length
+    const holHours = shifts.filter(s => s.is_holiday_ot).reduce((sum: number, s) => {
+      const base = s.is_half_shift ? 8 : 12
+      return sum + base + Number(s.ot_hours || 0)
+    }, 0)
     const clerkNormDays = normShifts.length
-    const autoClerkOt = shifts.reduce((sum: number, s) => sum + Number(s.ot_hours || 0), 0)
+    const isWeekendDay = (dateStr: string) => {
+      const d = parseISO(dateStr);
+      const day = d.getDay();
+      return day === 0 || day === 6; // 0=Sunday, 6=Saturday
+    };
+
+    const autoClerkOt = shifts.filter(s => !isWeekendDay(s.work_date)).reduce((sum: number, s) => sum + Number(s.ot_hours || 0), 0)
+    const autoClerkOt1x = shifts.filter(s => isWeekendDay(s.work_date)).reduce((sum: number, s) => sum + Number(s.ot_hours || 0), 0)
     const autoW = shifts.reduce((sum: number, s) => sum + Number(s.wood_excess || 0), 0)
     const autoF = shifts.reduce((sum: number, s) => sum + Number(s.film_amount || 0), 0)
+    
+    // Auto Special from Cross Position (Job Rotation)
+    const crossPosShifts = shifts.filter(s => s.is_cross_position)
+    const autoSpecial = crossPosShifts.reduce((sum: number, s) => sum + Number(s.cross_position_extra_pay || 0), 0)
+    
+    // Generate auto special note
+    const autoSpecialNote = crossPosShifts.length > 0 
+      ? crossPosShifts.map(s => `${s.cross_position_title || 'สลับตำแหน่ง'} (${s.cross_position_extra_pay}฿)`).join(', ')
+      : ''
 
-    const woodVal = overrideWood !== null ? overrideWood : autoW
-    const filmVal = overrideFilm !== null ? overrideFilm : autoF
+    const woodVal: number = overrideWood !== null ? overrideWood : autoW
+    const filmVal: number = overrideFilm !== null ? overrideFilm : autoF
 
     const input: PayrollCalculationInput = {
       position: (selectedEmployee?.position as 'worker' | 'clerk') || 'worker',
@@ -288,14 +332,16 @@ export default function PayrollEntry() {
       rate_per_12h: selectedEmployee?.rate_per_12h || 0,
       normal_days: isClerk ? clerkNormDays : normDays,
       half_shift_days: isClerk ? 0 : halfDays,
-      holiday_ot_days: holDays,
+      holiday_ot_hours: holHours,
       clerk_ot_hours: autoClerkOt,
+      clerk_ot_1x_hours: autoClerkOt1x,
       override_normal: overrideNormal,
       social_security_rate: socialSecurityRate,
       deduct_advance: advTotal,
       amount_wood_excess: isClerk ? 0 : woodVal,
       amount_film: isClerk ? 0 : filmVal,
-      amount_special: manualEntries.amount_special,
+      amount_special: autoSpecial,
+      override_special: overrideSpecial,
       amount_diligence: manualEntries.amount_diligence,
       amount_position: manualEntries.amount_position,
       deduct_safety_equipment: manualEntries.deduct_safety_equipment,
@@ -310,10 +356,14 @@ export default function PayrollEntry() {
       isClerk,
       normalDays: normDays,
       halfShiftDays: halfDays,
-      holidayOtDays: holDays,
+      holidayOtHours: holHours,
       autoClerkOtHours: autoClerkOt,
+      autoClerkOt1xHours: autoClerkOt1x,
       autoWood: autoW,
-      autoFilm: autoF
+      autoFilm: autoF,
+      autoSpecial,
+      autoSpecialNote,
+      effectiveSpecial: overrideSpecial !== null ? overrideSpecial : autoSpecial,
     }
   }, [
     selectedEmployee?.position,
@@ -324,8 +374,9 @@ export default function PayrollEntry() {
     overrideWood,
     overrideFilm,
     overrideNormal,
+    overrideSpecial,
+    specialNote,
     socialSecurityRate,
-    manualEntries.amount_special,
     manualEntries.amount_diligence,
     manualEntries.amount_position,
     manualEntries.deduct_safety_equipment,
@@ -336,25 +387,28 @@ export default function PayrollEntry() {
   const isOutdated = useMemo(() => {
     if (!existingEntry) return false;
 
-    // All these come from calc which uses current shifts + form state
+    const r = (v: number) => Math.round(v * 100) / 100  // round to 2dp to avoid float drift
+
     const checks = [
-      Math.abs(calc.amount_normal - Number(existingEntry.amount_normal || 0)) > 0.01,
-      Math.abs(calc.amount_shift - Number(existingEntry.amount_shift || 0)) > 0.01,
-      Math.abs(calc.amount_ot - Number(existingEntry.amount_ot || 0)) > 0.01,
-      Math.abs(calc.amount_wood_excess - Number(existingEntry.amount_wood_excess || 0)) > 0.01,
-      Math.abs(calc.amount_film - Number(existingEntry.amount_film || 0)) > 0.01,
-      Math.abs(calc.amount_special - Number(existingEntry.amount_special || 0)) > 0.01,
-      Math.abs(calc.amount_diligence - Number(existingEntry.amount_diligence || 0)) > 0.01,
-      Math.abs(calc.amount_position - Number(existingEntry.amount_position || 0)) > 0.01,
-      Math.abs(calc.deduct_social_security - Number(existingEntry.deduct_social_security || 0)) > 0.01,
-      Math.abs(calc.deduct_safety_equipment - Number(existingEntry.deduct_safety_equipment || 0)) > 0.01,
-      Math.abs(calc.deduct_uniform - Number(existingEntry.deduct_uniform || 0)) > 0.01,
+      Math.abs(r(calc.amount_normal) - r(Number(existingEntry.amount_normal || 0))) > 0.01,
+      Math.abs(r(calc.amount_shift)  - r(Number(existingEntry.amount_shift  || 0))) > 0.01,
+      Math.abs(r(calc.amount_ot + calc.amount_ot_1x) - r(Number(existingEntry.amount_ot || 0))) > 0.01,
+      Math.abs(r(calc.amount_wood_excess) - r(Number(existingEntry.amount_wood_excess || 0))) > 0.01,
+      Math.abs(r(calc.amount_film)        - r(Number(existingEntry.amount_film        || 0))) > 0.01,
+      Math.abs(r(calc.amount_special)     - r(Number(existingEntry.amount_special || 0))) > 0.01,
+      Math.abs(manualEntries.amount_diligence - Number(existingEntry.amount_diligence || 0)) > 0.01,
+      Math.abs(manualEntries.amount_position  - Number(existingEntry.amount_position  || 0)) > 0.01,
+      Math.abs(r(calc.deduct_social_security) - r(Number(existingEntry.deduct_social_security || 0))) > 0.01,
+      Math.abs(manualEntries.deduct_safety_equipment - Number(existingEntry.deduct_safety_equipment || 0)) > 0.01,
+      Math.abs(manualEntries.deduct_uniform          - Number(existingEntry.deduct_uniform          || 0)) > 0.01,
       Math.abs(totalAdvance - Number(existingEntry.deduct_advance || 0)) > 0.01,
-      (overrideNormal ?? null) !== (existingEntry.override_normal ?? null),
+      (overrideNormal ?? null) !== (existingEntry.override_normal != null ? Number(existingEntry.override_normal) : null),
+      (overrideSpecial ?? null) !== (existingEntry.override_special != null ? Number(existingEntry.override_special) : null),
+      (specialNote || autoSpecialNote) !== (existingEntry.special_note || ''),
     ];
 
     return checks.some(Boolean);
-  }, [calc, existingEntry, totalAdvance, overrideNormal])
+  }, [calc, existingEntry, totalAdvance, overrideNormal, overrideSpecial, specialNote, autoSpecialNote, manualEntries])
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -363,27 +417,32 @@ export default function PayrollEntry() {
       const payload = {
         period_id: currentPeriod.id,
         employee_id: selectedEmployeeId,
-        amount_normal: calc.amount_normal,
-        amount_shift: calc.amount_shift,
-        amount_ot: calc.amount_ot,
-        // Wood/film use the same effectiveWood/Film as calc to stay consistent
-        amount_wood_excess: calc.amount_wood_excess,
-        amount_film: calc.amount_film,
-        // Other manual entries
-        amount_special: manualEntries.amount_special,
-        amount_diligence: manualEntries.amount_diligence,
-        amount_position: manualEntries.amount_position,
-        deduct_safety_equipment: manualEntries.deduct_safety_equipment,
-        deduct_uniform: manualEntries.deduct_uniform,
+        amount_normal: Math.round(calc.amount_normal * 100) / 100,
+        amount_shift: Math.round(calc.amount_shift * 100) / 100,
+        amount_ot: Math.round((calc.amount_ot + calc.amount_ot_1x) * 100) / 100,
+        amount_wood_excess: isClerk ? 0 : Math.round(effectiveWood * 100) / 100,
+        amount_film: isClerk ? 0 : Math.round(effectiveFilm * 100) / 100,
+        amount_special: Math.round(autoSpecial * 100) / 100,
+        override_special: overrideSpecial,
+        special_note: (specialNote || autoSpecialNote || '').trim(),
+        amount_diligence: Math.round(manualEntries.amount_diligence * 100) / 100,
+        amount_position: Math.round(manualEntries.amount_position * 100) / 100,
+        deduct_safety_equipment: Math.round(manualEntries.deduct_safety_equipment * 100) / 100,
+        deduct_uniform: Math.round(manualEntries.deduct_uniform * 100) / 100,
         override_normal: overrideNormal,
         override_reason: overrideReason,
-        deduct_social_security: calc.deduct_social_security,
-        deduct_advance: totalAdvance,
+        deduct_social_security: Math.round(calc.deduct_social_security * 100) / 100,
+        deduct_advance: Math.round(totalAdvance * 100) / 100,
         entered_by: user?.id
       }
 
+      // Mandatory note validation
+      if (calc.effective_special > 0 && !(specialNote || autoSpecialNote)) {
+        throw new Error("กรุณากรอกหมายเหตุสำหรับเงินพิเศษ")
+      }
+
       const { error } = await supabase
-        .from('payroll_entries')
+        .from('payroll_entries' as any)
         .upsert([payload], { onConflict: 'period_id,employee_id' })
 
       if (error) throw error
@@ -485,53 +544,74 @@ export default function PayrollEntry() {
 
                 const sidebarWood = empShifts.reduce((sum: number, s) => sum + Number(s.wood_excess || 0), 0)
                 const sidebarFilm = empShifts.reduce((sum: number, s) => sum + Number(s.film_amount || 0), 0)
-                const sidebarClerkOt = empShifts.reduce((sum: number, s) => sum + Number(s.ot_hours || 0), 0)
-
                 let status: 'grey' | 'green' | 'orange' = 'grey'
-                if (entry) {
-                  // Only calculate shift-derived amounts (not manual entries like wood/film which user may override)
-                  const calcInput: PayrollCalculationInput = {
-                    position: (emp.position as 'worker' | 'clerk') || 'worker',
-                    wage_type: (emp.wage_type as 'daily' | 'monthly') || 'daily',
-                    rate_per_12h: emp.rate_per_12h || 0,
-                    normal_days: isEmpClerk ? normalShifts.length : normalShifts.filter(s => !s.is_half_shift).length,
-                    half_shift_days: isEmpClerk ? 0 : normalShifts.filter(s => s.is_half_shift).length,
-                    holiday_ot_days: empShifts.filter(s => s.is_holiday_ot).length,
-                    clerk_ot_hours: sidebarClerkOt,
-                    social_security_rate: socialSecurityRate,
-                    override_normal: entry.override_normal,
-                    // Pass zeroes for manual fields — we only want to check shift-derived amounts
-                    amount_wood_excess: 0,
-                    amount_film: 0,
-                    amount_special: 0,
-                    amount_diligence: 0,
-                    amount_position: 0,
-                    deduct_safety_equipment: 0,
-                    deduct_uniform: 0,
-                    deduct_advance: 0,
+                try {
+                  if (entry) {
+                    const isWeekendDay = (dateStr: string) => {
+                      if (!dateStr) return false
+                      const d = parseISO(dateStr);
+                      const day = d.getDay();
+                      return day === 0 || day === 6;
+                    };
+
+                    const sidebarClerkOt = empShifts.filter(s => !isWeekendDay(s.work_date)).reduce((sum: number, s) => sum + Number(s.ot_hours || 0), 0)
+                    const sidebarClerkOt1x = empShifts.filter(s => isWeekendDay(s.work_date)).reduce((sum: number, s) => sum + Number(s.ot_hours || 0), 0)
+
+                    const sidebarHolHours = empShifts.filter(s => s.is_holiday_ot).reduce((sum: number, s) => {
+                      const base = s.is_half_shift ? 8 : 12
+                      return sum + base + Number(s.ot_hours || 0)
+                    }, 0)
+
+                    const sidebarWood = empShifts.reduce((sum: number, s) => sum + Number(s.wood_excess || 0), 0)
+                    const sidebarFilm = empShifts.reduce((sum: number, s) => sum + Number(s.film_amount || 0), 0)
+                    const sidebarAutoSpecial = empShifts
+                      .filter(s => s.is_cross_position)
+                      .reduce((sum: number, s) => sum + Number(s.cross_position_extra_pay || 0), 0)
+                    
+                    const crossPosShifts = empShifts.filter(s => s.is_cross_position)
+                    const sidebarAutoSpecialNote = crossPosShifts.length > 0 
+                      ? crossPosShifts.map(s => `${s.cross_position_title || 'สลับตำแหน่ง'} (${s.cross_position_extra_pay}฿)`).join(', ')
+                      : ''
+
+                    const calcInput: PayrollCalculationInput = {
+                      position: (emp.position as 'worker' | 'clerk') || 'worker',
+                      wage_type: (emp.wage_type as 'daily' | 'monthly') || 'daily',
+                      rate_per_12h: Number(emp.rate_per_12h || 0),
+                      normal_days: isEmpClerk ? normalShifts.length : normalShifts.filter(s => !s.is_half_shift).length,
+                      half_shift_days: isEmpClerk ? 0 : normalShifts.filter(s => s.is_half_shift).length,
+                      holiday_ot_hours: sidebarHolHours,
+                      clerk_ot_hours: sidebarClerkOt,
+                      clerk_ot_1x_hours: sidebarClerkOt1x,
+                      social_security_rate: socialSecurityRate,
+                      override_normal: entry.override_normal != null ? Number(entry.override_normal) : null,
+                      amount_wood_excess: isEmpClerk ? 0 : sidebarWood,
+                      amount_film: isEmpClerk ? 0 : sidebarFilm,
+                      amount_special: sidebarAutoSpecial,
+                      override_special: entry.override_special != null ? Number(entry.override_special) : null,
+                      deduct_advance: allPeriodAdvances
+                        .filter(a => a.employee_id === emp.id)
+                        .reduce((sum: number, a) => sum + Number(a.amount), 0),
+                    }
+
+                    const currentCalc = calculatePayroll(calcInput)
+                    const r = (v: number) => Math.round(v * 100) / 100
+
+                    const diffs = [
+                      Math.abs(r(currentCalc.amount_normal) - r(Number(entry.amount_normal || 0))) > 0.01,
+                      Math.abs(r(currentCalc.amount_shift) - r(Number(entry.amount_shift || 0))) > 0.01,
+                      Math.abs(r(currentCalc.amount_ot + (currentCalc.amount_ot_1x || 0)) - r(Number(entry.amount_ot || 0))) > 0.01,
+                      Math.abs(r(currentCalc.amount_wood_excess) - r(Number(entry.amount_wood_excess || 0))) > 0.01,
+                      Math.abs(r(currentCalc.amount_film) - r(Number(entry.amount_film || 0))) > 0.01,
+                      Math.abs(r(currentCalc.amount_special) - r(Number(entry.amount_special || 0))) > 0.01,
+                      Math.abs(r(currentCalc.deduct_advance) - r(Number(entry.deduct_advance || 0))) > 0.01,
+                      (entry.special_note || '').trim() !== (sidebarAutoSpecialNote || '').trim() && !(entry.special_note || '').includes(sidebarAutoSpecialNote)
+                    ]
+
+                    status = diffs.some(Boolean) ? 'orange' : 'green'
                   }
-
-                  const currentCalc = calculatePayroll(calcInput)
-
-                  // Compare only the shift-computed core amounts against DB
-                  const diffNormal = Math.abs(currentCalc.amount_normal - Number(entry.amount_normal || 0))
-                  const diffShift = Math.abs(currentCalc.amount_shift - Number(entry.amount_shift || 0))
-                  const diffOt = Math.abs(currentCalc.amount_ot - Number(entry.amount_ot || 0))
-                  // Also check shift-level wood/film (auto totals from shifts) vs saved
-                  const diffWood = isEmpClerk ? 0 : Math.abs(sidebarWood - Number(entry.amount_wood_excess || 0))
-                  const diffFilm = isEmpClerk ? 0 : Math.abs(sidebarFilm - Number(entry.amount_film || 0))
-
-                  // NEW: Check Advance Payments
-                  const currentTotalAdvance = allPeriodAdvances
-                    .filter(a => a.employee_id === emp.id)
-                    .reduce((sum: number, a) => sum + Number(a.amount), 0)
-                  const diffAdvance = Math.abs(currentTotalAdvance - Number(entry.deduct_advance || 0))
-
-                  if (diffNormal > 0.1 || diffShift > 0.1 || diffOt > 0.1 || diffWood > 0.1 || diffFilm > 0.1 || diffAdvance > 0.1) {
-                    status = 'orange'
-                  } else {
-                    status = 'green'
-                  }
+                } catch (err) {
+                  console.error('Sidebar status error for', emp.employee_code, err)
+                  status = 'orange' // Show as outdated if calculation fails
                 }
 
                 return (
@@ -631,6 +711,24 @@ export default function PayrollEntry() {
                           ระบบได้ดึงข้อมูลใหม่มาแสดงแล้ว <strong>กรุณากด "บันทึกข้อมูลค่าจ้าง" อีกครั้ง</strong> เพื่อให้ยอดเงินอัปเดตเป็นปัจจุบัน
                         </p>
                       </div>
+                      <div className="mt-3">
+                        <Button 
+                          size="sm" 
+                          variant="outline"
+                          className="bg-amber-100 hover:bg-amber-200 border-amber-300 text-amber-800 h-8 text-xs font-bold"
+                          onClick={() => {
+                            setOverrideNormal(null);
+                            setOverrideWood(null);
+                            setOverrideFilm(null);
+                            setOverrideSpecial(null);
+                            setSpecialNote('');
+                            toast.success('รีเซ็ตยอดเป็นค่าเริ่มต้นตามกะทำงานแล้ว');
+                          }}
+                        >
+                          <RotateCcw className="w-3.5 h-3.5 mr-2" />
+                          รีเซ็ตและปรับยอดตามกะปัจจุบัน
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -689,12 +787,14 @@ export default function PayrollEntry() {
                             value={formatThaiCurrency(calc.effective_normal)}
                           />
                           {!isApproved && (
-                            <button
-                              onClick={() => setIsEditingNormal(true)}
-                              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-emerald-600 transition-colors"
-                            >
-                              <Edit2 className="w-4 h-4" />
-                            </button>
+                            <div className="absolute inset-y-0 right-0 flex items-center pr-3">
+                              <button
+                                onClick={() => setIsEditingNormal(true)}
+                                className="text-slate-400 hover:text-emerald-600 transition-colors"
+                              >
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                            </div>
                           )}
                         </div>
                       )}
@@ -719,21 +819,42 @@ export default function PayrollEntry() {
 
                     {/* Clerk OT — read-only, pulled from shift entries (item 4) */}
                     {isClerk && (
-                      <div className="space-y-2">
-                        <div className="flex justify-between items-center">
-                          <Label className="text-slate-700 font-semibold">ค่าล่วงเวลา OT (1.5เท่า)</Label>
-                          <span className="text-xs text-slate-500">
-                            อัตรา: {formatThaiCurrency((selectedEmployee?.rate_per_12h / 30 / 8 * 1.5))} บาท/ชม.
-                          </span>
-                        </div>
-                        <div className="flex gap-2 items-center">
-                          <div className="w-28 h-8 bg-slate-50 border border-slate-200 rounded-md flex items-center justify-center text-slate-700 font-semibold text-sm shrink-0">
-                            {autoClerkOtHours} ชม.
+                      <div className="space-y-4">
+                        {/* 1.5x OT (Weekday) */}
+                        <div className="space-y-2">
+                          <div className="flex justify-between items-center">
+                            <Label className="text-slate-700 font-semibold">ค่าล่วงเวลา OT ปกติ (1.5เท่า)</Label>
+                            <span className="text-xs text-slate-500">
+                              อัตรา: {formatThaiCurrency(((selectedEmployee?.rate_per_12h || 0) / 30 / 8 * 1.5))} บาท/ชม.
+                            </span>
                           </div>
-                          <span className="text-xs text-slate-400 whitespace-nowrap">(จากหน้ากะ)</span>
-                          <Input className="bg-slate-50 flex-1 h-8" readOnly value={formatThaiCurrency(calc.amount_ot)} />
+                          <div className="flex gap-2 items-center">
+                            <div className="w-28 h-8 bg-slate-50 border border-slate-200 rounded-md flex items-center justify-center text-slate-700 font-semibold text-sm shrink-0">
+                              {autoClerkOtHours} ชม.
+                            </div>
+                            <span className="text-xs text-slate-400 whitespace-nowrap">(จากหน้ากะ)</span>
+                            <Input className="bg-slate-50 flex-1 h-8" readOnly value={formatThaiCurrency(calc.amount_ot)} />
+                          </div>
                         </div>
-                        {autoClerkOtHours === 0 && (
+
+                        {/* 1.0x OT (Weekend) */}
+                        <div className="space-y-2 pt-2 border-t border-slate-100">
+                          <div className="flex justify-between items-center">
+                            <Label className="text-purple-700 font-semibold">ค่าล่วงเวลา OT วันหยุด (1เท่า)</Label>
+                            <span className="text-xs text-slate-500">
+                              อัตรา: {formatThaiCurrency(((selectedEmployee?.rate_per_12h || 0) / 30 / 8 * 1.0))} บาท/ชม.
+                            </span>
+                          </div>
+                          <div className="flex gap-2 items-center">
+                            <div className="w-28 h-8 bg-purple-50 border border-purple-200 rounded-md flex items-center justify-center text-purple-700 font-semibold text-sm shrink-0">
+                              {autoClerkOt1xHours} ชม.
+                            </div>
+                            <span className="text-xs text-slate-400 whitespace-nowrap">(จากหน้ากะเสาร์-อาทิตย์)</span>
+                            <Input className="bg-purple-50 text-purple-900 border-purple-200 flex-1 h-8" readOnly value={formatThaiCurrency(calc.amount_ot_1x || 0)} />
+                          </div>
+                        </div>
+                        
+                        {(autoClerkOtHours === 0 && autoClerkOt1xHours === 0) && (
                           <p className="text-xs text-slate-400">ยังไม่มีการกรอก OT ในหน้ากะ</p>
                         )}
                       </div>
@@ -744,7 +865,7 @@ export default function PayrollEntry() {
                       <div className="space-y-2">
                         <div className="flex justify-between items-center">
                           <Label className="text-slate-700 font-semibold">OT วันหยุด</Label>
-                          <span className="text-xs text-slate-500">คำนวณอัตโนมัติ: {holidayOtDays} วัน</span>
+                          <span className="text-xs text-slate-500">คำนวณอัตโนมัติ: {holidayOtHours} ชม.</span>
                         </div>
                         <Input className="bg-slate-50" readOnly value={formatThaiCurrency(calc.amount_ot)} />
                       </div>
@@ -791,12 +912,14 @@ export default function PayrollEntry() {
                                 value={formatThaiCurrency(effectiveWood)}
                               />
                               {!isApproved && (
-                                <button
-                                  onClick={() => { setOverrideWood(overrideWood ?? autoWood); setIsEditingWood(true) }}
-                                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-[#1D9E75] p-1"
-                                >
-                                  <Edit2 className="w-4 h-4" />
-                                </button>
+                                <div className="absolute inset-y-0 right-0 flex items-center pr-3">
+                                  <button
+                                    onClick={() => { setOverrideWood(overrideWood ?? autoWood); setIsEditingWood(true) }}
+                                    className="text-slate-400 hover:text-[#1D9E75]"
+                                  >
+                                    <Edit2 className="w-4 h-4" />
+                                  </button>
+                                </div>
                               )}
                             </div>
                           )}
@@ -830,19 +953,88 @@ export default function PayrollEntry() {
                                 value={formatThaiCurrency(effectiveFilm)}
                               />
                               {!isApproved && (
-                                <button
-                                  onClick={() => { setOverrideFilm(overrideFilm ?? autoFilm); setIsEditingFilm(true) }}
-                                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-[#1D9E75] p-1"
-                                >
-                                  <Edit2 className="w-4 h-4" />
-                                </button>
+                                <div className="absolute inset-y-0 right-0 flex items-center pr-3">
+                                  <button
+                                    onClick={() => { setOverrideFilm(overrideFilm ?? autoFilm); setIsEditingFilm(true) }}
+                                    className="text-slate-400 hover:text-[#1D9E75]"
+                                  >
+                                    <Edit2 className="w-4 h-4" />
+                                  </button>
+                                </div>
                               )}
                             </div>
                           )}
                         </div>
                         <div className="space-y-1.5">
-                          <Label>เงินพิเศษ</Label>
-                          <Input type="number" name="amount_special" className="w-full" value={manualEntries.amount_special || ''} onChange={handleInputChange} disabled={isApproved} placeholder="0" />
+                          <div className="flex justify-between items-center">
+                            <Label>เงินพิเศษ</Label>
+                            {autoSpecial > 0 && (
+                              <span className="text-[10px] text-slate-400">จากสลับตำแหน่ง: {formatThaiCurrency(autoSpecial)}</span>
+                            )}
+                          </div>
+                          
+                          {isEditingSpecial ? (
+                            <div className="space-y-2 p-3 border border-[#1D9E75]/30 bg-[#1D9E75]/5 rounded-lg animate-in fade-in">
+                              <div className="space-y-1">
+                                <Label className="text-[10px] text-[#1D9E75] font-bold uppercase">จำนวนเงิน (บาท)</Label>
+                                <Input
+                                  type="number"
+                                  value={overrideSpecial ?? autoSpecial}
+                                  onChange={e => setOverrideSpecial(Number(e.target.value) || 0)}
+                                  className="border-[#1D9E75]/30 bg-white"
+                                  autoFocus
+                                  disabled={isApproved}
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-[10px] text-[#1D9E75] font-bold uppercase">หมายเหตุ (จำเป็น)</Label>
+                                <Input
+                                  placeholder="ระบุเหตุผล เช่น ค่าสลับตำแหน่ง, เบี้ยขยันพิเศษ..."
+                                  value={specialNote || autoSpecialNote}
+                                  onChange={e => setSpecialNote(e.target.value)}
+                                  className="border-[#1D9E75]/30 bg-white"
+                                  disabled={isApproved}
+                                />
+                              </div>
+                              <div className="flex gap-2 pt-1">
+                                <Button size="sm" className="bg-[#1D9E75] hover:bg-[#157a5a]" onClick={() => setIsEditingSpecial(false)}>ตกลง</Button>
+                                <Button size="sm" variant="ghost" className="text-slate-500" onClick={() => { 
+                                  setOverrideSpecial(null); 
+                                  setSpecialNote(''); 
+                                  setIsEditingSpecial(false) 
+                                }}>รีเซ็ต</Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="space-y-1">
+                              <div className="relative group">
+                                <Input
+                                  className={`pr-10 ${overrideSpecial !== null ? 'border-amber-300 bg-amber-50 text-amber-800' : 'bg-emerald-50 border-emerald-200 text-emerald-800 font-bold'}`}
+                                  readOnly
+                                  value={formatThaiCurrency(effectiveSpecial)}
+                                />
+                                {!isApproved && (
+                                  <div className="absolute inset-y-0 right-0 flex items-center pr-3 group-hover:opacity-100 opacity-100 md:opacity-0 transition-opacity">
+                                    <button
+                                      onClick={() => { 
+                                        setOverrideSpecial(overrideSpecial ?? autoSpecial); 
+                                        setSpecialNote(specialNote || autoSpecialNote);
+                                        setIsEditingSpecial(true) 
+                                      }}
+                                      className="text-slate-400 hover:text-[#1D9E75]"
+                                    >
+                                      <Edit2 className="w-4 h-4" />
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                              {(specialNote || autoSpecialNote) && (
+                                <p className="text-[10px] text-slate-500 mt-1 italic line-clamp-1">
+                                  📝 {specialNote || autoSpecialNote}
+                                </p>
+                              )}
+                            </div>
+                          )}
                         </div>
                         <div className="space-y-1.5">
                           <Label>เบี้ยขยัน</Label>
@@ -857,8 +1049,73 @@ export default function PayrollEntry() {
                       /* Clerk: only special/diligence/position bonuses */
                       <div className="grid grid-cols-1 gap-3">
                         <div className="space-y-1.5">
-                          <Label>เงินพิเศษ</Label>
-                          <Input type="number" name="amount_special" className="w-full" value={manualEntries.amount_special || ''} onChange={handleInputChange} disabled={isApproved} placeholder="0" />
+                          <div className="flex justify-between items-center">
+                            <Label>เงินพิเศษ</Label>
+                            {autoSpecial > 0 && (
+                              <span className="text-[10px] text-slate-400">จากสลับตำแหน่ง: {formatThaiCurrency(autoSpecial)}</span>
+                            )}
+                          </div>
+                          
+                          {isEditingSpecial ? (
+                            <div className="space-y-2 p-3 border border-[#1D9E75]/30 bg-[#1D9E75]/5 rounded-lg animate-in fade-in">
+                              <div className="space-y-1">
+                                <Label className="text-[10px] text-[#1D9E75] font-bold uppercase">จำนวนเงิน (บาท)</Label>
+                                <Input
+                                  type="number"
+                                  value={overrideSpecial ?? autoSpecial}
+                                  onChange={e => setOverrideSpecial(Number(e.target.value) || 0)}
+                                  className="border-[#1D9E75]/30 bg-white"
+                                  autoFocus
+                                  disabled={isApproved}
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-[10px] text-[#1D9E75] font-bold uppercase">หมายเหตุ (จำเป็น)</Label>
+                                <Input
+                                  placeholder="ระบุเหตุผล เช่น ค่าสลับตำแหน่ง, เบี้ยขยันพิเศษ..."
+                                  value={specialNote || autoSpecialNote}
+                                  onChange={e => setSpecialNote(e.target.value)}
+                                  className="border-[#1D9E75]/30 bg-white"
+                                  disabled={isApproved}
+                                />
+                              </div>
+                              <div className="flex gap-2 pt-1">
+                                <Button size="sm" className="bg-[#1D9E75] hover:bg-[#157a5a]" onClick={() => setIsEditingSpecial(false)}>ตกลง</Button>
+                                <Button size="sm" variant="ghost" className="text-slate-500" onClick={() => { 
+                                  setOverrideSpecial(null); 
+                                  setSpecialNote(''); 
+                                  setIsEditingSpecial(false) 
+                                }}>รีเซ็ต</Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="space-y-1">
+                              <div className="relative group">
+                                <Input
+                                  className={`pr-10 ${overrideSpecial !== null ? 'border-amber-300 bg-amber-50 text-amber-800' : 'bg-emerald-50 border-emerald-200 text-emerald-800 font-bold'}`}
+                                  readOnly
+                                  value={formatThaiCurrency(effectiveSpecial)}
+                                />
+                                {!isApproved && (
+                                  <button
+                                    onClick={() => { 
+                                      setOverrideSpecial(overrideSpecial ?? autoSpecial); 
+                                      setSpecialNote(specialNote || autoSpecialNote);
+                                      setIsEditingSpecial(true) 
+                                    }}
+                                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-[#1D9E75] p-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
+                                  >
+                                    <Edit2 className="w-4 h-4" />
+                                  </button>
+                                )}
+                              </div>
+                              {(specialNote || autoSpecialNote) && (
+                                <p className="text-[10px] text-slate-500 mt-1 italic line-clamp-1">
+                                  📝 {specialNote || autoSpecialNote}
+                                </p>
+                              )}
+                            </div>
+                          )}
                         </div>
                         <div className="space-y-1.5">
                           <Label>เบี้ยขยัน</Label>

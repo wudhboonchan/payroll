@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -66,6 +66,8 @@ export default function PayslipExportModal({ isOpen, onClose, uniqueMonths }: Pr
   const { user } = useAppStore()
   const [exportTarget, setExportTarget] = useState<'all' | 'individual'>('individual')
   const [selectedMonthAll, setSelectedMonthAll] = useState<string>(uniqueMonths[0] || '')
+  const [selectionModeAll, setSelectionModeAll] = useState<'month' | 'period'>('month')
+  const [selectedPeriodId, setSelectedPeriodId] = useState<string>('')
   
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null)
@@ -78,11 +80,23 @@ export default function PayslipExportModal({ isOpen, onClose, uniqueMonths }: Pr
     queryKey: ['periods', user?.factory_id],
     queryFn: async () => {
       if (!user?.factory_id) return []
-      const { data } = await supabase.from('payroll_periods').select('*').eq('factory_id', user.factory_id)
+      const { data } = await supabase
+        .from('payroll_periods')
+        .select('*')
+        .eq('factory_id', user.factory_id)
+        .order('period_start', { ascending: false })
+      
       return data as PayrollPeriod[]
     },
     enabled: isOpen && !!user?.factory_id
   })
+
+  // Initialize selectedPeriodId when data loads
+  useEffect(() => {
+    if (periods.length > 0 && !selectedPeriodId) {
+      setSelectedPeriodId(periods[0].id)
+    }
+  }, [periods, selectedPeriodId])
 
   // Fetch all employees for selection (including inactive ones for search)
   const { data: employees = [] } = useQuery({
@@ -133,11 +147,19 @@ export default function PayslipExportModal({ isOpen, onClose, uniqueMonths }: Pr
     let targetMonths: string[] = []
 
     if (exportTarget === 'all') {
-      if (!selectedMonthAll) {
-        toast.error('กรุณาเลือกเดือนที่ต้องการพิมพ์')
-        return
+      if (selectionModeAll === 'month') {
+        if (!selectedMonthAll) {
+          toast.error('กรุณาเลือกเดือนที่ต้องการพิมพ์')
+          return
+        }
+        targetMonths = [selectedMonthAll]
+      } else {
+        if (!selectedPeriodId) {
+          toast.error('กรุณาเลือกงวดที่ต้องการพิมพ์')
+          return
+        }
+        // In period mode, we'll use selectedPeriodId directly below
       }
-      targetMonths = [selectedMonthAll]
     } else {
       if (!selectedEmployeeId) {
         toast.error('กรุณาเลือกพนักงาน')
@@ -152,12 +174,18 @@ export default function PayslipExportModal({ isOpen, onClose, uniqueMonths }: Pr
 
     setIsGenerating(true)
     try {
-      const targetPeriodIds = periods
-        .filter((p: PayrollPeriod) => targetMonths.includes(format(new Date(p.period_start), 'MMM yyyy', { locale: th })))
-        .map((p: PayrollPeriod) => p.id)
+      let targetPeriodIds: string[] = []
+      
+      if (exportTarget === 'all' && selectionModeAll === 'period') {
+        targetPeriodIds = [selectedPeriodId]
+      } else {
+        targetPeriodIds = periods
+          .filter((p: PayrollPeriod) => targetMonths.includes(format(new Date(p.period_start), 'MMM yyyy', { locale: th })))
+          .map((p: PayrollPeriod) => p.id)
+      }
 
       if (targetPeriodIds.length === 0) {
-        toast.error('ไม่พบรอบการจ่ายเงินในเดือนที่เลือก')
+        toast.error('ไม่พบรอบการจ่ายเงินที่เลือก')
         setIsGenerating(false)
         return
       }
@@ -356,21 +384,66 @@ export default function PayslipExportModal({ isOpen, onClose, uniqueMonths }: Pr
           <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-6">
             
             {exportTarget === 'all' ? (
-              <div className="space-y-3">
-                <Label className="text-sm font-semibold text-slate-700">เลือกเดือนที่ต้องการพิมพ์</Label>
-                <select 
-                  className="w-full h-12 rounded-xl border border-slate-200 px-4 text-base bg-white focus:border-[#1D9E75] outline-none"
-                  value={selectedMonthAll}
-                  onChange={e => setSelectedMonthAll(e.target.value)}
-                >
-                  {uniqueMonths.map(m => (
-                    <option key={m} value={m}>{m}</option>
-                  ))}
-                </select>
-                <p className="text-xs text-slate-500 flex items-center gap-1.5 mt-2">
-                  <User className="w-3.5 h-3.5" />
-                  ระบบจะสร้าง PDF 1 ไฟล์ที่มีสลิปของพนักงานทุกคนในเดือน {selectedMonthAll} เรียงตามรหัสพนักงาน
-                </p>
+              <div className="space-y-5">
+                {/* Mode Selector for All Employees */}
+                <div className="flex gap-1 p-1 bg-slate-100 rounded-lg w-fit">
+                  <button
+                    type="button"
+                    onClick={() => setSelectionModeAll('month')}
+                    className={`px-4 py-1.5 text-xs font-bold rounded-md transition-all ${selectionModeAll === 'month' ? 'bg-white text-[#1D9E75] shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                  >
+                    รายเดือน
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectionModeAll('period')}
+                    className={`px-4 py-1.5 text-xs font-bold rounded-md transition-all ${selectionModeAll === 'period' ? 'bg-white text-[#1D9E75] shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                  >
+                    รายงวด
+                  </button>
+                </div>
+
+                {selectionModeAll === 'month' ? (
+                  <div className="space-y-3">
+                    <Label className="text-sm font-semibold text-slate-700">เลือกเดือนที่ต้องการพิมพ์</Label>
+                    <select 
+                      className="w-full h-12 rounded-xl border border-slate-200 px-4 text-base bg-white focus:border-[#1D9E75] outline-none"
+                      value={selectedMonthAll}
+                      onChange={e => setSelectedMonthAll(e.target.value)}
+                    >
+                      {uniqueMonths.map(m => (
+                        <option key={m} value={m}>{m}</option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-slate-500 flex items-center gap-1.5 mt-2">
+                      <User className="w-3.5 h-3.5" />
+                      ระบบจะสร้าง PDF 1 ไฟล์ที่มีสลิปของพนักงานทุกคนในเดือน {selectedMonthAll}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <Label className="text-sm font-semibold text-slate-700">เลือกงวดที่ต้องการพิมพ์</Label>
+                    <select 
+                      className="w-full h-12 rounded-xl border border-slate-200 px-4 text-base bg-white focus:border-[#1D9E75] outline-none"
+                      value={selectedPeriodId}
+                      onChange={e => setSelectedPeriodId(e.target.value)}
+                    >
+                      {periods.map(p => {
+                        const start = new Date(p.period_start)
+                        const end = new Date(p.period_end)
+                        const thaiYear = start.getFullYear() + 543
+                        const label = `${format(start, 'd', { locale: th })} - ${format(end, 'd MMMM', { locale: th })} ${thaiYear}`
+                        return (
+                          <option key={p.id} value={p.id}>{label}</option>
+                        )
+                      })}
+                    </select>
+                    <p className="text-xs text-slate-500 flex items-center gap-1.5 mt-2">
+                      <CheckSquare className="w-3.5 h-3.5 text-emerald-500" />
+                      ระบบจะสร้าง PDF 1 ไฟล์ที่มีสลิปของพนักงานทุกคนเฉพาะงวดที่เลือก
+                    </p>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="space-y-6">

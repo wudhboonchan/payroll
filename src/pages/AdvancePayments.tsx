@@ -89,7 +89,7 @@ export default function AdvancePayments() {
         .order('period_start', { ascending: false })
         .limit(1)
         .single()
-      
+
       if (error && error.code !== 'PGRST116') throw error
       return data
     },
@@ -112,7 +112,7 @@ export default function AdvancePayments() {
         `)
         .eq('employees.factory_id', user.factory_id)
         .eq('period_id', period_id)
-      
+
       if (error) throw error
       return data as Advance[]
     },
@@ -126,7 +126,7 @@ export default function AdvancePayments() {
     return acc
   }, {})
 
-  const filteredAdvances = advances.filter((adv: Advance) => 
+  const filteredAdvances = advances.filter((adv: Advance) =>
     adv.employee.employee_code.toLowerCase().includes(searchTerm.toLowerCase()) ||
     `${adv.employee.first_name} ${adv.employee.last_name}`.toLowerCase().includes(searchTerm.toLowerCase())
   )
@@ -143,8 +143,8 @@ export default function AdvancePayments() {
 
   return (
     <>
-      <TopBar 
-        title="เบิกล่วงหน้า (Advance Payments)" 
+      <TopBar
+        title="เบิกล่วงหน้า (Advance Payments)"
         action={
           <div className="bg-white border border-slate-200 px-5 py-2 rounded-full shadow-sm flex items-center min-h-[42px]">
             <span className="text-[15px] font-bold text-slate-700">
@@ -162,16 +162,16 @@ export default function AdvancePayments() {
               )}
             </span>
           </div>
-        } 
+        }
       />
-      
+
       <div className="p-8">
         <div className="flex justify-between items-center mb-6">
           <div className="flex items-center gap-4">
             <div className="relative w-80">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
-              <Input 
-                placeholder="ค้นหารหัส หรือชื่อพนักงาน..." 
+              <Input
+                placeholder="ค้นหารหัส หรือชื่อพนักงาน..."
                 className="pl-9 h-11"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
@@ -207,8 +207,8 @@ export default function AdvancePayments() {
                 filteredAdvances.map((adv: Advance) => {
                   const count = advanceCounts[adv.employee.employee_code]
                   return (
-                    <TableRow 
-                      key={adv.id} 
+                    <TableRow
+                      key={adv.id}
                       className="cursor-pointer hover:bg-slate-50 transition-colors"
                       onClick={() => handleEdit(adv)}
                     >
@@ -237,7 +237,7 @@ export default function AdvancePayments() {
         </div>
       </div>
 
-      <AdvanceModal 
+      <AdvanceModal
         isOpen={isModalOpen}
         onClose={() => {
           setIsModalOpen(false)
@@ -252,9 +252,9 @@ export default function AdvancePayments() {
   )
 }
 
-function AdvanceModal({ isOpen, onClose, employees, currentPeriod, advances, initialData }: { 
-  isOpen: boolean, 
-  onClose: () => void, 
+function AdvanceModal({ isOpen, onClose, employees, currentPeriod, advances, initialData }: {
+  isOpen: boolean,
+  onClose: () => void,
   employees: Employee[],
   currentPeriod: PayrollPeriod | null | undefined,
   advances: Advance[],
@@ -315,13 +315,13 @@ function AdvanceModal({ isOpen, onClose, employees, currentPeriod, advances, ini
             period_end: format(new Date(), 'yyyy-MM-15'),
             status: 'draft' as const
           }
-          
+
           const { data: newPeriod, error: periodError } = await supabase
             .from('payroll_periods')
             .insert([newPeriodPayload])
             .select()
             .single()
-          
+
           if (periodError) throw new Error('กรุณาสร้างงวดการจ่ายเงินก่อน: ' + periodError.message)
           periodId = newPeriod.id
         }
@@ -419,7 +419,7 @@ function AdvanceModal({ isOpen, onClose, employees, currentPeriod, advances, ini
         <form onSubmit={handleSubmit} className="p-6 bg-white space-y-6">
           <div className="space-y-2">
             <Label className="text-sm font-semibold text-slate-700">เลือกพนักงาน *</Label>
-            <select 
+            <select
               className="flex h-10 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
               value={employeeId}
               onChange={(e) => setEmployeeId(e.target.value)}
@@ -445,7 +445,7 @@ function AdvanceModal({ isOpen, onClose, employees, currentPeriod, advances, ini
 
           <div className="space-y-2">
             <Label className="text-sm font-semibold text-slate-700">วันที่ทำรายการ *</Label>
-            <Input 
+            <Input
               type="date"
               className="w-full"
               value={requestDate}
@@ -458,7 +458,7 @@ function AdvanceModal({ isOpen, onClose, employees, currentPeriod, advances, ini
             <Label className="text-sm font-semibold text-slate-700">จำนวนเงินที่เบิก (บาท) *</Label>
             <div className="relative group">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium text-slate-400">฿</span>
-              <Input 
+              <Input
                 type="number"
                 className="pl-8 text-base font-semibold text-[#1D9E75] w-full"
                 placeholder="0.00"
@@ -471,7 +471,7 @@ function AdvanceModal({ isOpen, onClose, employees, currentPeriod, advances, ini
 
           <div className="space-y-2">
             <Label className="text-sm font-semibold text-slate-700">หมายเหตุ / รายละเอียดเพิ่มเติม</Label>
-            <textarea 
+            <textarea
               className="flex min-h-[80px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 resize-y"
               placeholder="ระบุเหตุผลการเบิก..."
               value={notes}
@@ -482,9 +482,9 @@ function AdvanceModal({ isOpen, onClose, employees, currentPeriod, advances, ini
           <div className="flex justify-between items-center pt-6 border-t border-slate-100">
             <div>
               {isEdit && isAdmin && (
-                <Button 
-                  type="button" 
-                  variant="destructive" 
+                <Button
+                  type="button"
+                  variant="destructive"
                   className="bg-rose-50 text-rose-600 hover:bg-rose-100 border-none shadow-none"
                   onClick={() => {
                     if (confirm('คุณต้องการลบรายการเบิกนี้ใช่หรือไม่?')) {
@@ -498,15 +498,15 @@ function AdvanceModal({ isOpen, onClose, employees, currentPeriod, advances, ini
               )}
             </div>
             <div className="flex gap-3">
-              <Button 
-                type="button" 
-                variant="outline" 
+              <Button
+                type="button"
+                variant="outline"
                 onClick={onClose}
               >
                 ยกเลิก
               </Button>
-              <Button 
-                type="submit" 
+              <Button
+                type="submit"
                 className="bg-[#1D9E75] hover:bg-[#157a5a]"
                 disabled={mutation.isPending}
               >

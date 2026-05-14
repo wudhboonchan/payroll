@@ -17,9 +17,11 @@ export interface PaySlipData {
   amount_normal: number
   amount_shift: number
   amount_ot: number
+  amount_ot_1x?: number
   amount_wood_excess: number
   amount_film: number
   amount_special: number
+  special_note?: string
   amount_diligence: number
   amount_position: number
 
@@ -27,6 +29,7 @@ export interface PaySlipData {
   days_normal?: number
   days_shift?: number
   days_ot?: number
+  days_ot_1x?: number
 
   // Deductions
   deduct_social_security: number
@@ -68,15 +71,16 @@ export const PaySlipPreview = forwardRef<HTMLDivElement, PaySlipPreviewProps>(({
     ? formatDateThai(data.generated_at)
     : formatDateThai(new Date().toISOString())
 
-  const otUnit = isClerk ? 'ชม.' : 'วัน'
+  const otUnit = 'ชม.'
 
   const incomeRows = [
     { label: `ค่าจ้างปกติ${data.days_normal != null ? ` (${data.days_normal} วัน)` : ''}`, value: data.amount_normal },
     { label: `ค่ากะ${data.days_shift != null ? ` (${data.days_shift} วัน)` : ''}`, value: data.amount_shift },
     { label: `ค่าล่วงเวลา (OT)${data.days_ot != null && data.days_ot > 0 ? ` (${data.days_ot} ${otUnit})` : ''}`, value: data.amount_ot },
+    { label: `ค่าล่วงเวลา (OT วันหยุด 1 เท่า)${data.days_ot_1x != null && data.days_ot_1x > 0 ? ` (${data.days_ot_1x} ${otUnit})` : ''}`, value: data.amount_ot_1x || 0 },
     { label: 'ค่าไม้ส่วนเกิน',  value: data.amount_wood_excess },
     { label: 'ค่าฟิล์ม',        value: data.amount_film },
-    { label: 'เงินพิเศษ',       value: data.amount_special },
+    { label: 'เงินพิเศษ' + (data.special_note ? ` (${data.special_note})` : ''), value: data.amount_special },
     { label: 'เบี้ยขยัน',       value: data.amount_diligence },
     { label: 'ค่าตำแหน่ง',      value: data.amount_position },
   ].filter(r => r.value > 0)

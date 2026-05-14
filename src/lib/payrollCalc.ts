@@ -7,16 +7,18 @@ export interface PayrollCalculationInput {
   rate_per_12h: number;       // daily rate for workers, monthly salary for clerks
   normal_days: number;        // full 12h shifts
   half_shift_days?: number;   // 8h only shifts (no shift pay for these)
-  holiday_ot_days: number;
+  holiday_ot_hours: number;
 
   // For clerk (position === 'clerk')
   // rate_per_12h stores monthly salary
   // ot_hours: hours worked beyond 8h per day (sum of all OT hours in period)
   clerk_ot_hours?: number;
+  clerk_ot_1x_hours?: number;
 
   override_normal?: number | null;
   override_shift?: number | null;
   override_ot?: number | null;
+  override_special?: number | null;
 
   amount_wood_excess?: number;
   amount_film?: number;
@@ -34,10 +36,13 @@ export interface PayrollCalculationOutput {
   amount_normal: number;
   amount_shift: number;
   amount_ot: number;
+  amount_ot_1x: number; // Weekend 1x OT (0 for workers)
 
   effective_normal: number;
   effective_shift: number;
   effective_ot: number;
+  effective_ot_1x: number;
+  effective_special: number;
 
   amount_wood_excess: number;
   amount_film: number;
@@ -71,7 +76,7 @@ export function calculateTraPhetPayroll(input: PayrollCalculationInput): Payroll
     rate_per_12h,
     normal_days,
     half_shift_days = 0,
-    holiday_ot_days,
+    holiday_ot_hours,
     override_normal,
     override_shift,
     override_ot,
@@ -81,6 +86,7 @@ export function calculateTraPhetPayroll(input: PayrollCalculationInput): Payroll
     amount_diligence = 0,
     amount_position = 0,
     social_security_rate,
+    override_special,
     deduct_advance = 0,
     deduct_safety_equipment = 0,
     deduct_uniform = 0,
@@ -91,16 +97,21 @@ export function calculateTraPhetPayroll(input: PayrollCalculationInput): Payroll
   // Half shift days (8h only) contribute only normal pay, no shift pay
   const totalNormalDays = fullShiftDays + half_shift_days;
 
-  // Normal pay = rate * (8/12) * totalNormalDays (8h portion of rate)
-  const amount_normal = (rate_per_12h / 12) * 8 * totalNormalDays;
-  // Shift pay = rate * (4/12) * fullShiftDays ONLY (no shift pay for 8h days)
-  const amount_shift = (rate_per_12h / 12) * 4 * fullShiftDays;
-  // OT = full rate * 2 (holiday overtime)
-  const amount_ot = rate_per_12h * 2 * holiday_ot_days;
+  // New Logic: Normal pay is fixed at 357 THB per 8h. Shift pay is the remainder of the daily rate.
+  const base_normal_rate = 357;
+  const base_shift_rate = Math.max(0, rate_per_12h - base_normal_rate);
+
+  // Normal pay = 357 * totalNormalDays (including half shift days which only get 8h)
+  const amount_normal = base_normal_rate * totalNormalDays;
+  // Shift pay = Remainder * fullShiftDays ONLY (no shift pay for half/8h days)
+  const amount_shift = base_shift_rate * fullShiftDays;
+  // OT = (rate_per_12h / 12) * holiday_ot_hours * 2 (holiday overtime)
+  const amount_ot = (rate_per_12h / 12) * holiday_ot_hours * 2;
 
   const effective_normal = override_normal ?? amount_normal;
   const effective_shift = override_shift ?? amount_shift;
   const effective_ot = override_ot ?? amount_ot;
+  const effective_special = override_special ?? amount_special;
 
   const total_income = 
     effective_normal + 
@@ -108,7 +119,7 @@ export function calculateTraPhetPayroll(input: PayrollCalculationInput): Payroll
     effective_ot +
     amount_wood_excess + 
     amount_film + 
-    amount_special +
+    effective_special +
     amount_diligence + 
     amount_position;
 
@@ -126,12 +137,15 @@ export function calculateTraPhetPayroll(input: PayrollCalculationInput): Payroll
     amount_normal,
     amount_shift,
     amount_ot,
+    amount_ot_1x: 0,
     effective_normal,
     effective_shift,
     effective_ot,
+    effective_ot_1x: 0,
     amount_wood_excess,
     amount_film,
     amount_special,
+    effective_special,
     amount_diligence,
     amount_position,
     total_income,
@@ -157,6 +171,7 @@ export function calculateClerkPayroll(input: PayrollCalculationInput): PayrollCa
     rate_per_12h: monthly_salary,
     normal_days,
     clerk_ot_hours = 0,
+    clerk_ot_1x_hours = 0,
     override_normal,
     override_ot,
     amount_wood_excess = 0,
@@ -165,6 +180,7 @@ export function calculateClerkPayroll(input: PayrollCalculationInput): PayrollCa
     amount_diligence = 0,
     amount_position = 0,
     social_security_rate,
+    override_special,
     deduct_advance = 0,
     deduct_safety_equipment = 0,
     deduct_uniform = 0,
@@ -183,16 +199,22 @@ export function calculateClerkPayroll(input: PayrollCalculationInput): PayrollCa
   const ot_rate_per_hour = hourly_rate * 1.5;
   const amount_ot = ot_rate_per_hour * clerk_ot_hours;
 
+  // Weekend OT rate: daily_rate / 8 * 1.0
+  const amount_ot_1x = hourly_rate * clerk_ot_1x_hours;
+
   const effective_normal = override_normal ?? amount_normal;
   const effective_shift = 0;
   const effective_ot = override_ot ?? amount_ot;
+  const effective_ot_1x = amount_ot_1x;
+  const effective_special = override_special ?? amount_special;
 
   const total_income =
     effective_normal +
     effective_ot +
+    effective_ot_1x +
     amount_wood_excess +
     amount_film +
-    amount_special +
+    effective_special +
     amount_diligence +
     amount_position;
 
@@ -210,12 +232,15 @@ export function calculateClerkPayroll(input: PayrollCalculationInput): PayrollCa
     amount_normal,
     amount_shift,
     amount_ot,
+    amount_ot_1x,
     effective_normal,
     effective_shift,
     effective_ot,
+    effective_ot_1x,
     amount_wood_excess,
     amount_film,
     amount_special,
+    effective_special,
     amount_diligence,
     amount_position,
     total_income,

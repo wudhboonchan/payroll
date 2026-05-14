@@ -16,6 +16,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
+import { Badge } from '@/components/ui/badge'
 import { UserPlus } from 'lucide-react'
 
 
@@ -125,6 +126,7 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
   const dataComplete = watch('data_complete')
   const wageType = watch('wage_type')
   const position = watch('position')
+  const currentRate = watch('rate_per_12h') || 0
   const isThai = !nationality || nationality === 'ไทย'
 
   // Fetch single employee if editing
@@ -417,6 +419,12 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
                   <p className="text-xs text-slate-400">
                     ระบบจะคำนวณ OT อัตโนมัติจากเงินเดือน ÷ 30 ÷ 8 × 1.5
                   </p>
+                )}
+                {wageType === 'daily' && position === 'worker' && currentRate > 0 && (
+                  <div className="flex gap-2 mt-2">
+                    <Badge variant="secondary" className="bg-[#1D9E75]/10 text-[#1D9E75] hover:bg-[#1D9E75]/20 font-medium border-0">ค่าจ้างปกติ: 357 ฿</Badge>
+                    <Badge variant="secondary" className="bg-blue-50 text-blue-600 hover:bg-blue-100 font-medium border-0">ค่ากะ: {Math.max(0, currentRate - 357)} ฿</Badge>
+                  </div>
                 )}
                 {errors.rate_per_12h && (
                   <p className="text-xs text-red-500">{errors.rate_per_12h.message}</p>
