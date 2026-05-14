@@ -8,6 +8,9 @@ export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
   auth: {
     autoRefreshToken: true,
     persistSession: true,
-    detectSessionInUrl: true
-  }
+    detectSessionInUrl: false, // app ใช้ email/password เท่านั้น ไม่ใช้ magic link หรือ OAuth
+  },
+  realtime: {
+    params: { eventsPerSecond: 2 }, // ลด WebSocket load ไม่ให้ Chrome throttle
+  },
 })

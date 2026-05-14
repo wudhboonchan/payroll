@@ -7,6 +7,7 @@ export function useAuth() {
   const { setUser, setCompanyContext } = useAppStore()
   const [loading, setLoading] = useState(true)
   const initialized = useRef(false)
+  const loadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   interface Company {
     id: string;
@@ -80,6 +81,15 @@ export function useAuth() {
   useEffect(() => {
     let isMounted = true;
 
+    // Safety net: ถ้า auth ไม่ตอบใน 6 วินาที (เช่น Chrome extension block) ให้ปลด loading ออก
+    loadingTimerRef.current = setTimeout(() => {
+      if (!isMounted) return;
+      if (!initialized.current) {
+        initialized.current = true;
+        setLoading(false);
+      }
+    }, 6000);
+
     // Fallback getSession to guarantee loading resolves if INITIAL_SESSION is delayed/missed
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!isMounted) return;
@@ -100,8 +110,7 @@ export function useAuth() {
       async (event, session) => {
         if (!isMounted) return;
         if (event === 'INITIAL_SESSION' && initialized.current) return;
-        
-        // Let getSession handle the initial mount if it hasn't fired yet
+
         if (event === 'INITIAL_SESSION') {
           initialized.current = true;
         }
@@ -111,6 +120,7 @@ export function useAuth() {
 
     return () => {
       isMounted = false;
+      if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current);
       subscription.unsubscribe();
     }
   }, [handleSession]);
