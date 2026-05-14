@@ -81,7 +81,7 @@ export function useAuth() {
   useEffect(() => {
     let isMounted = true;
 
-    // Safety net: ถ้า auth ไม่ตอบใน 6 วินาที (เช่น Chrome extension block) ให้ปลด loading ออก
+    // Safety net: ถ้า auth ไม่ตอบใน 6 วินาที ให้ปลด loading ออก
     loadingTimerRef.current = setTimeout(() => {
       if (!isMounted) return;
       if (!initialized.current) {
@@ -90,7 +90,6 @@ export function useAuth() {
       }
     }, 6000);
 
-    // Fallback getSession to guarantee loading resolves if INITIAL_SESSION is delayed/missed
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!isMounted) return;
       if (!initialized.current) {
@@ -107,14 +106,18 @@ export function useAuth() {
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
+      // *** ไม่ใช้ async *** เพราะ Supabase await ทุก callback ก่อน signInWithPassword จะ return
+      // ถ้า callback เป็น async และ handleSession ค้าง → signInWithPassword ค้างด้วย
+      (event, session) => {
         if (!isMounted) return;
         if (event === 'INITIAL_SESSION' && initialized.current) return;
 
         if (event === 'INITIAL_SESSION') {
           initialized.current = true;
         }
-        await handleSession(session);
+
+        // Fire-and-forget: ไม่ block Supabase auth flow
+        handleSession(session).catch(console.error);
       }
     );
 

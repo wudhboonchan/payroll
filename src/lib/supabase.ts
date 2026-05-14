@@ -5,6 +5,12 @@ import type { Database } from '../types/database'
 const supabaseUrl = `${window.location.origin}/supabase-api`
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || ''
 
+// ลบ session เก่าที่ถูก key แบบเดิม (direct URL) เพื่อไม่ให้ conflict กับ proxy key ใหม่
+const OLD_SESSION_KEY = 'sb-nlyumhbzlruhpcorwswk-auth-token'
+if (typeof window !== 'undefined' && localStorage.getItem(OLD_SESSION_KEY)) {
+  localStorage.removeItem(OLD_SESSION_KEY)
+}
+
 export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
   auth: {
     autoRefreshToken: true,
