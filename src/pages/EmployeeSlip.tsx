@@ -124,10 +124,17 @@ export default function EmployeeSlip() {
 
   const slipData = useMemo(() => {
     if (!rawData) return null
-    
-    let parsedData = rawData
+
+    interface ParsedData {
+      employee: any
+      period: any
+      entry: any
+      factory?: { name: string }
+    }
+
+    let parsedData: ParsedData
     try {
-      if (typeof rawData === 'string') parsedData = JSON.parse(rawData)
+      parsedData = typeof rawData === 'string' ? JSON.parse(rawData) : rawData
     } catch (err) {
       console.error('Failed to parse RPC data', err)
       return null
@@ -180,25 +187,30 @@ export default function EmployeeSlip() {
     } as PaySlipData
   }, [rawData, slipShifts, days_normal, days_shift, days_ot, empPosition])
 
-  const currentStatus = useMemo(() => {
-    if (manuallyUpdatedStatus) return manuallyUpdatedStatus
-    
+  const [autoStatus, setAutoStatus] = useState<string>('')
+
+  useEffect(() => {
     if (tokenData?.employee_status) {
       let statusToSet = tokenData.employee_status as string
       if (statusToSet === 'pending') {
+        const now = Date.now()
         const createdTime = tokenData.created_at 
           ? new Date(tokenData.created_at).getTime()
-          : (tokenData.expires_at ? new Date(tokenData.expires_at).getTime() - (30 * 24 * 60 * 60 * 1000) : Date.now())
+          : (tokenData.expires_at ? new Date(tokenData.expires_at).getTime() - (30 * 24 * 60 * 60 * 1000) : now)
         
-        const hoursPassed = (Date.now() - createdTime) / (1000 * 60 * 60)
+        const hoursPassed = (now - createdTime) / (1000 * 60 * 60)
         if (hoursPassed >= 24) {
           statusToSet = 'auto_confirmed'
         }
       }
-      return statusToSet
+      const frame = requestAnimationFrame(() => {
+        setAutoStatus(statusToSet)
+      })
+      return () => cancelAnimationFrame(frame)
     }
-    return ''
-  }, [tokenData, manuallyUpdatedStatus])
+  }, [tokenData])
+
+  const currentStatus = manuallyUpdatedStatus || autoStatus
 
   const confirmMutation = useMutation({
     mutationFn: async () => {

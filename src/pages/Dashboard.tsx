@@ -10,7 +10,7 @@ import {
   CheckCircle2, Clock, ChevronDown,
   Loader2, Calendar, AlertCircle, Link2, RotateCcw
 } from 'lucide-react'
-import { formatThaiCurrency, formatPeriodLabel } from '../lib/formatters'
+import { formatThaiCurrency, formatPeriodLabel } from '../lib/formatters.ts'
 import { supabase } from '../lib/supabase'
 import { toast } from 'sonner'
 import {
@@ -286,7 +286,7 @@ export default function Dashboard() {
       const allAdvances = advancesRes.data ?? []
 
       return last4.map(p => {
-        const periodEntries = (allEntries as PayrollEntryRow[]).filter((e) => e.period_id === p.id)
+        const periodEntries = (allEntries as any[]).filter((e) => e.period_id === p.id)
         const periodAdvances = allAdvances.filter((a) => a.period_id === p.id)
         const { net } = sumEntries(periodEntries)
         const totalAdv = periodAdvances.reduce((s, a) => s + Number(a.amount), 0)

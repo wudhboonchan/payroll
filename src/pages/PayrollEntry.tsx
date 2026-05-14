@@ -12,10 +12,10 @@ import { Label } from '../components/ui/label'
 import { Badge } from '../components/ui/badge'
 import { Search, Save, Lock, Edit2, AlertCircle } from 'lucide-react'
 import { toast } from 'sonner'
-import { formatThaiCurrency } from '../lib/formatters'
-import { calculatePayroll } from '../lib/payrollCalc'
-import type { PayrollCalculationInput } from '../lib/payrollCalc'
-import { formatEmployeeName } from '../lib/formatters'
+import { formatThaiCurrency } from '../lib/formatters.ts'
+import { calculatePayroll } from '../lib/payrollCalc.ts'
+import type { PayrollCalculationInput } from '../lib/payrollCalc.ts'
+import { formatEmployeeName } from '../lib/formatters.ts'
 
 interface Employee {
   id: string
@@ -229,7 +229,6 @@ export default function PayrollEntry() {
 
   // Update form when existing entry is loaded
   useEffect(() => {
-    // Use requestAnimationFrame to avoid synchronous setState in effect
     const frame = requestAnimationFrame(() => {
       if (existingEntry) {
         setManualEntries({
@@ -267,7 +266,7 @@ export default function PayrollEntry() {
   const { 
     calc, totalAdvance, effectiveWood, effectiveFilm, 
     isClerk, normalDays, halfShiftDays, holidayOtDays, 
-    clerkNormalDays, autoClerkOtHours, autoWood, autoFilm 
+    autoClerkOtHours, autoWood, autoFilm 
   } = useMemo(() => {
     const isClerk = selectedEmployee?.position === 'clerk'
     const advTotal = advances.reduce((sum: number, adv) => sum + Number(adv.amount), 0)
@@ -312,7 +311,6 @@ export default function PayrollEntry() {
       normalDays: normDays,
       halfShiftDays: halfDays,
       holidayOtDays: holDays,
-      clerkNormalDays: clerkNormDays,
       autoClerkOtHours: autoClerkOt,
       autoWood: autoW,
       autoFilm: autoF

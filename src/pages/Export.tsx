@@ -64,13 +64,20 @@ export default function Export() {
   useEffect(() => {
     if (periods.length > 0 && !selectedPeriodId) {
       const approved = periods.find((p: PayrollPeriod) => p.status === 'approved')
-      setSelectedPeriodId(approved?.id || periods[0].id)
+      const frame = requestAnimationFrame(() => {
+        setSelectedPeriodId(approved?.id || periods[0].id)
+      })
+      return () => cancelAnimationFrame(frame)
     }
   }, [periods, selectedPeriodId])
 
   useEffect(() => {
     if (uniqueMonths.length > 0 && !selectedMonth) {
-      setSelectedMonth(uniqueMonths[0])
+      // Use requestAnimationFrame to avoid synchronous setState in effect
+      const frame = requestAnimationFrame(() => {
+        setSelectedMonth(uniqueMonths[0])
+      })
+      return () => cancelAnimationFrame(frame)
     }
   }, [uniqueMonths, selectedMonth])
 

@@ -1,3 +1,4 @@
+// Employee management modal component
 import { useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -17,8 +18,8 @@ import { Button } from '../components/ui/button'
 import { Label } from '../components/ui/label'
 import { UserPlus } from 'lucide-react'
 
-import { formatEmployeeName } from '../lib/formatters'
-import { NATIONALITIES } from '../lib/constants'
+import { formatEmployeeName } from '../lib/formatters.ts'
+import { NATIONALITIES } from '../lib/constants.ts'
 
 const employeeSchema = z
   .object({
@@ -110,7 +111,7 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
     setValue,
     formState: { errors },
   } = useForm<EmployeeFormValues>({
-    resolver: zodResolver(employeeSchema),
+    resolver: zodResolver(employeeSchema) as any,
     defaultValues: {
       payment_method: 'bank_transfer',
       status: 'active',

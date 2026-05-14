@@ -117,8 +117,8 @@ export default function Employees() {
   }) || []
 
   const sortedEmployees = [...filteredEmployees].sort((a, b) => {
-    let valA: string | number = '';
-    let valB: string | number = '';
+    let valA: string | number;
+    let valB: string | number;
 
     switch (sortCol) {
       case 'name':

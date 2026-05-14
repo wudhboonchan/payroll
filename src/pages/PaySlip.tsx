@@ -11,7 +11,7 @@ import { Printer, Search, UserX } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
-import { formatEmployeeName } from '../lib/formatters'
+import { formatEmployeeName } from '../lib/formatters.ts'
 
 interface Employee {
   id: string
@@ -181,9 +181,9 @@ export default function PaySlipPage() {
         total_income: 0,
         total_deductions: 0,
         net_pay: 0,
-        payment_method: selectedEmp.payment_method || 'cash',
-        bank_name: selectedEmp.bank_name,
-        bank_account: selectedEmp.bank_account,
+        payment_method: (selectedEmp.payment_method as 'cash' | 'bank_transfer') || 'cash',
+        bank_name: selectedEmp.bank_name || undefined,
+        bank_account: selectedEmp.bank_account || undefined,
       }
     : null
 
