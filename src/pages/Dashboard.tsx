@@ -10,7 +10,7 @@ import {
   CheckCircle2, Clock, ChevronDown,
   Loader2, Calendar, AlertCircle, Link2, RotateCcw
 } from 'lucide-react'
-import { formatThaiCurrency, formatPeriodLabel } from '../lib/formatters.ts'
+import { formatThaiCurrency, formatPeriodLabel } from '@/lib/formatters'
 import { supabase } from '../lib/supabase'
 import { toast } from 'sonner'
 import {

@@ -12,10 +12,10 @@ import { Label } from '../components/ui/label'
 import { Badge } from '../components/ui/badge'
 import { Search, Save, Lock, Edit2, AlertCircle } from 'lucide-react'
 import { toast } from 'sonner'
-import { formatThaiCurrency } from '../lib/formatters.ts'
-import { calculatePayroll } from '../lib/payrollCalc.ts'
-import type { PayrollCalculationInput } from '../lib/payrollCalc.ts'
-import { formatEmployeeName } from '../lib/formatters.ts'
+import { formatThaiCurrency } from '@/lib/formatters'
+import { calculatePayroll } from '@/lib/payrollCalc'
+import type { PayrollCalculationInput } from '@/lib/payrollCalc'
+import { formatEmployeeName } from '@/lib/formatters'
 
 interface Employee {
   id: string

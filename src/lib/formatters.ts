@@ -1,7 +1,21 @@
 import { format, parseISO } from 'date-fns'
 import { th } from 'date-fns/locale'
 
-export function formatThaiCurrency(amount: number | null | undefined): string {
+export const formatEmployeeName = (emp: {
+  prefix?: string | null
+  first_name: string
+  last_name?: string | null
+  nationality?: string | null
+}) => {
+  // Prefix is hidden in the UI as requested (kept only in DB for forms)
+  const lastName = emp.last_name?.trim() ? ` ${emp.last_name.trim()}` : ''
+  const name = `${emp.first_name}${lastName}`
+  const nat = emp.nationality
+  if (!nat || nat === 'ไทย') return name
+  return `${name} (${nat})`
+}
+
+export const formatThaiCurrency = (amount: number | null | undefined): string => {
   if (amount == null) return '0.00'
   return new Intl.NumberFormat('th-TH', {
     minimumFractionDigits: 2,
@@ -9,16 +23,16 @@ export function formatThaiCurrency(amount: number | null | undefined): string {
   }).format(amount)
 }
 
-export function formatThaiDate(date: Date | string): string {
+export const formatThaiDate = (date: Date | string): string => {
   const d = typeof date === 'string' ? parseISO(date) : date
   return format(d, 'd MMM yyyy', { locale: th })
 }
 
-export function toThaiYear(year: number): number {
+export const toThaiYear = (year: number): number => {
   return year + 543
 }
 
-export function formatPeriodLabel(start: string, end: string): string {
+export const formatPeriodLabel = (start: string, end: string): string => {
   const startDate = parseISO(start)
   const endDate = parseISO(end)
   
@@ -29,18 +43,4 @@ export function formatPeriodLabel(start: string, end: string): string {
     return `${format(startDate, 'd')} - ${format(endDate, 'd MMMM', { locale: th })} ${thaiYear}`
   }
   return `${format(startDate, 'd MMMM', { locale: th })} - ${format(endDate, 'd MMMM', { locale: th })} ${thaiYear}`
-}
-
-export function formatEmployeeName(emp: {
-  prefix?: string | null
-  first_name: string
-  last_name?: string | null
-  nationality?: string | null
-}) {
-  // Prefix is hidden in the UI as requested (kept only in DB for forms)
-  const lastName = emp.last_name?.trim() ? ` ${emp.last_name.trim()}` : ''
-  const name = `${emp.first_name}${lastName}`
-  const nat = emp.nationality
-  if (!nat || nat === 'ไทย') return name
-  return `${name} (${nat})`
 }

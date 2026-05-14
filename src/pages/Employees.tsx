@@ -18,7 +18,7 @@ import { Search, Plus, User, FileUp, AlertCircle, Filter, ArrowUpDown, ArrowDown
 import { formatThaiCurrency } from '../lib/formatters'
 import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
-import { formatEmployeeName } from '../lib/formatters'
+import { formatEmployeeName } from '@/lib/formatters'
 import EmployeeFormModal from './EmployeeFormModal'
 import EmployeeImportModal from '../components/employees/EmployeeImportModal'
 

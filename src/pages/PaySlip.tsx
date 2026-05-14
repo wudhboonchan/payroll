@@ -11,7 +11,7 @@ import { Printer, Search, UserX } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
-import { formatEmployeeName } from '../lib/formatters.ts'
+import { formatEmployeeName } from '@/lib/formatters'
 
 interface Employee {
   id: string

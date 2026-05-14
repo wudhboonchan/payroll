@@ -4,22 +4,22 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { supabase } from '../lib/supabase'
-import { useAppStore } from '../store/useAppStore'
+import { supabase } from '@/lib/supabase'
+import { useAppStore } from '@/store/useAppStore'
 import { toast } from 'sonner'
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
-} from '../components/ui/dialog'
-import { Input } from '../components/ui/input'
-import { Button } from '../components/ui/button'
-import { Label } from '../components/ui/label'
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
+import { Label } from '@/components/ui/label'
 import { UserPlus } from 'lucide-react'
 
-import { formatEmployeeName } from '../lib/formatters.ts'
-import { NATIONALITIES } from '../lib/constants.ts'
+
+import { NATIONALITIES } from '@/lib/constants'
 
 const employeeSchema = z
   .object({
