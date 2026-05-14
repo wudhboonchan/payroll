@@ -6,7 +6,6 @@ import type { Session } from '@supabase/supabase-js'
 export function useAuth() {
   const { setUser, setCompanyContext } = useAppStore()
   const [loading, setLoading] = useState(true)
-  const initialized = useRef(false)
   const loadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   interface Company {
@@ -80,40 +79,38 @@ export function useAuth() {
 
   useEffect(() => {
     let isMounted = true;
+    // ใช้ local variable แทน ref เพื่อ track ว่า initial session ถูก handle แล้วหรือยัง
+    let initialSessionHandled = false;
 
-    // Safety net: ถ้า auth ไม่ตอบใน 6 วินาที ให้ปลด loading ออก
+    // Safety net: ปลดแค่ spinner ไม่บล็อก session restore
+    // ถ้า getSession() ตอบช้า (AdGuard หน่วง) — หน้าจะโหลดได้ก่อน
+    // และพอ session กลับมา handleSession ยังถูกเรียกได้ปกติ
     loadingTimerRef.current = setTimeout(() => {
       if (!isMounted) return;
-      if (!initialized.current) {
-        initialized.current = true;
-        setLoading(false);
-      }
+      setLoading(false);
     }, 6000);
 
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!isMounted) return;
-      if (!initialized.current) {
-        initialized.current = true;
-        handleSession(session);
-      }
+      if (initialSessionHandled) return; // onAuthStateChange handle ไปก่อนแล้ว
+      initialSessionHandled = true;
+      if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current);
+      handleSession(session).catch(console.error);
     }).catch(err => {
       console.error('getSession error:', err);
-      if (!isMounted) return;
-      if (!initialized.current) {
-        initialized.current = true;
-        setLoading(false);
-      }
+      if (!isMounted || initialSessionHandled) return;
+      initialSessionHandled = true;
+      setLoading(false);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      // *** ไม่ใช้ async *** เพราะ Supabase await ทุก callback ก่อน signInWithPassword จะ return
-      // ถ้า callback เป็น async และ handleSession ค้าง → signInWithPassword ค้างด้วย
       (event, session) => {
         if (!isMounted) return;
-        if (event === 'INITIAL_SESSION' && initialized.current) return;
 
         if (event === 'INITIAL_SESSION') {
-          initialized.current = true;
+          if (initialSessionHandled) return;
+          initialSessionHandled = true;
+          if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current);
         }
 
         // Fire-and-forget: ไม่ block Supabase auth flow
