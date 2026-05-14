@@ -485,9 +485,9 @@ export default function PayrollEntry() {
                 const normalShifts = empShifts.filter(s => !s.is_holiday_ot)
                 const isEmpClerk = emp.position === 'clerk'
 
-                const autoWood = empShifts.reduce((sum: number, s) => sum + Number(s.wood_excess || 0), 0)
-                const autoFilm = empShifts.reduce((sum: number, s) => sum + Number(s.film_amount || 0), 0)
-                const autoClerkOtHours = empShifts.reduce((sum: number, s) => sum + Number(s.ot_hours || 0), 0)
+                const sidebarWood = empShifts.reduce((sum: number, s) => sum + Number(s.wood_excess || 0), 0)
+                const sidebarFilm = empShifts.reduce((sum: number, s) => sum + Number(s.film_amount || 0), 0)
+                const sidebarClerkOt = empShifts.reduce((sum: number, s) => sum + Number(s.ot_hours || 0), 0)
 
                 let status: 'grey' | 'green' | 'orange' = 'grey'
                 if (entry) {
@@ -499,7 +499,7 @@ export default function PayrollEntry() {
                     normal_days: isEmpClerk ? normalShifts.length : normalShifts.filter(s => !s.is_half_shift).length,
                     half_shift_days: isEmpClerk ? 0 : normalShifts.filter(s => s.is_half_shift).length,
                     holiday_ot_days: empShifts.filter(s => s.is_holiday_ot).length,
-                    clerk_ot_hours: autoClerkOtHours,
+                    clerk_ot_hours: sidebarClerkOt,
                     social_security_rate: socialSecurityRate,
                     override_normal: entry.override_normal,
                     // Pass zeroes for manual fields — we only want to check shift-derived amounts
@@ -520,8 +520,8 @@ export default function PayrollEntry() {
                   const diffShift = Math.abs(currentCalc.amount_shift - Number(entry.amount_shift || 0))
                   const diffOt = Math.abs(currentCalc.amount_ot - Number(entry.amount_ot || 0))
                   // Also check shift-level wood/film (auto totals from shifts) vs saved
-                  const diffWood = isEmpClerk ? 0 : Math.abs(autoWood - Number(entry.amount_wood_excess || 0))
-                  const diffFilm = isEmpClerk ? 0 : Math.abs(autoFilm - Number(entry.amount_film || 0))
+                  const diffWood = isEmpClerk ? 0 : Math.abs(sidebarWood - Number(entry.amount_wood_excess || 0))
+                  const diffFilm = isEmpClerk ? 0 : Math.abs(sidebarFilm - Number(entry.amount_film || 0))
 
                   // NEW: Check Advance Payments
                   const currentTotalAdvance = allPeriodAdvances
