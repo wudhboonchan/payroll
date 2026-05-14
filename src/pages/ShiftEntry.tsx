@@ -107,10 +107,12 @@ export default function ShiftEntry() {
     queryKey: ['periods-for-date', workDateStr, user?.factory_id],
     queryFn: async () => {
       if (!user?.factory_id) return []
+      const PERIOD_COLS = 'id, factory_id, label, period_start, period_end, status'
+
       // Find period where workDate is between start and end
       const { data, error } = await supabase
         .from('payroll_periods')
-        .select('*')
+        .select(PERIOD_COLS)
         .eq('factory_id', user.factory_id)
         .lte('period_start', workDateStr)
         .gte('period_end', workDateStr)
@@ -122,7 +124,7 @@ export default function ShiftEntry() {
       if (!data || data.length === 0) {
         const { data: latest, error: latestErr } = await supabase
           .from('payroll_periods')
-          .select('*')
+          .select(PERIOD_COLS)
           .eq('factory_id', user.factory_id)
           .order('period_start', { ascending: false })
           .limit(1)

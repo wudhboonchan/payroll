@@ -202,7 +202,7 @@ export default function Dashboard() {
       if (!user?.factory_id) return []
       const { data, error } = await supabase
         .from('payroll_periods')
-        .select('*, approver:profiles!payroll_periods_approved_by_fkey(full_name)')
+        .select('id, period_start, period_end, status, approved_by, approver:profiles!payroll_periods_approved_by_fkey(full_name)')
         .eq('factory_id', user.factory_id)
         .order('period_start', { ascending: false })
       if (error) throw error

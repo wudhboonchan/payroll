@@ -69,7 +69,7 @@ export default function AdvancePayments() {
       if (!user?.factory_id) return []
       const { data, error } = await supabase
         .from('employees')
-        .select('*')
+        .select('id, employee_code, first_name, last_name, factory_id, status')
         .eq('factory_id', user.factory_id)
       if (error) throw error
       return data as Employee[]
@@ -84,7 +84,7 @@ export default function AdvancePayments() {
       if (!user?.factory_id) return null
       const { data, error } = await supabase
         .from('payroll_periods')
-        .select('*')
+        .select('id, factory_id, label, period_start, period_end, status')
         .eq('factory_id', user.factory_id)
         .order('period_start', { ascending: false })
         .limit(1)

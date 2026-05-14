@@ -119,7 +119,7 @@ export default function PayrollEntry() {
       if (!user?.factory_id) return []
       const { data, error } = await supabase
         .from('employees')
-        .select('*')
+        .select('id, employee_code, first_name, last_name, prefix, nationality, position, wage_type, rate_per_12h, payment_method, status, job_title, factory_id')
         .eq('factory_id', user.factory_id)
       if (error) throw error
       return data as Employee[]
@@ -134,7 +134,7 @@ export default function PayrollEntry() {
       if (!user?.factory_id) return []
       const { data, error } = await supabase
         .from('payroll_periods')
-        .select('*')
+        .select('id, factory_id, label, period_start, period_end, status, social_security_rate')
         .eq('factory_id', user.factory_id)
         .order('period_start', { ascending: false })
       if (error) throw error
@@ -152,7 +152,7 @@ export default function PayrollEntry() {
       if (!selectedEmployeeId || !currentPeriod?.id) return []
       const { data, error } = await supabase
         .from('shift_assignments')
-        .select('*')
+        .select('id, employee_id, shift_type, is_holiday_ot, is_half_shift, wood_excess, film_amount, ot_hours, work_date, is_cross_position, cross_position_title, cross_position_extra_pay')
         .eq('employee_id', selectedEmployeeId)
         .eq('period_id', currentPeriod?.id)
       if (error) throw error
@@ -239,7 +239,7 @@ export default function PayrollEntry() {
       if (!selectedEmployeeId || !currentPeriod?.id) return null
       const { data, error } = await supabase
         .from('payroll_entries' as any)
-        .select('*')
+        .select('employee_id, amount_normal, amount_shift, amount_ot, amount_wood_excess, amount_film, amount_special, override_special, special_note, amount_diligence, amount_position, deduct_social_security, deduct_safety_equipment, deduct_uniform, deduct_advance, override_normal, override_reason')
         .eq('period_id', currentPeriod?.id)
         .eq('employee_id', selectedEmployeeId)
         .single()

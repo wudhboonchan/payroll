@@ -66,7 +66,7 @@ export default function Employees() {
       if (!user?.factory_id) return null
       const { data, error } = await supabase
         .from('payroll_periods')
-        .select('*')
+        .select('id, factory_id, label, period_start, period_end, status')
         .eq('factory_id', user.factory_id)
         .eq('status', 'draft')
         .order('period_end', { ascending: false })
@@ -85,7 +85,7 @@ export default function Employees() {
       if (!user?.factory_id) return []
       const { data, error } = await supabase
         .from('employees')
-        .select('*')
+        .select('id, employee_code, first_name, last_name, prefix, nationality, status, rate_per_12h, payment_method, bank_name, bank_account, position, data_complete')
         .eq('factory_id', user.factory_id)
         .order('employee_code', { ascending: true })
 
