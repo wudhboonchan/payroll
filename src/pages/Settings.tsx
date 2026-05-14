@@ -41,10 +41,11 @@ export default function Settings() {
       setIsSuccess(true)
       setNewPassword('')
       setConfirmPassword('')
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err)
+      const error = err as Error
       toast.error('ไม่สามารถเปลี่ยนรหัสผ่านได้', {
-        description: err.message
+        description: error.message
       })
     } finally {
       setIsLoading(false)

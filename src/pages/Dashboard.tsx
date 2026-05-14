@@ -20,10 +20,33 @@ import {
   DropdownMenuTrigger
 } from '../components/ui/dropdown-menu'
 
+interface PayrollEntryRow {
+  amount_normal: number
+  amount_shift: number
+  amount_ot: number
+  amount_wood_excess: number
+  amount_film: number
+  amount_special: number
+  amount_diligence: number
+  amount_position: number
+  deduct_social_security: number
+  deduct_advance: number
+  deduct_safety_equipment: number
+  deduct_uniform: number
+  period_id?: string
+}
+
+interface PayrollPeriod {
+  id: string
+  period_start: string
+  period_end: string
+  status: string
+}
+
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
-function sumEntries(rows: any[]): { gross: number; ss: number; net: number } {
+function sumEntries(rows: PayrollEntryRow[]): { gross: number; ss: number; net: number } {
   let gross = 0, ss = 0, totalDeduct = 0
   rows?.forEach(e => {
     const inc =
@@ -50,7 +73,7 @@ const PAYROLL_COLS = `
 
 // ─── Month label helpers ─────────────────────────────────────────────────────
 
-function periodShortLabel(period: any): string {
+function periodShortLabel(period: PayrollPeriod): string {
   try { return formatPeriodLabel(period.period_start, period.period_end) }
   catch { return '' }
 }
@@ -179,7 +202,7 @@ export default function Dashboard() {
         .eq('factory_id', user.factory_id)
         .order('period_start', { ascending: false })
       if (error) throw error
-      return data as any[]
+      return data as PayrollPeriod[]
     },
     enabled: !!user?.factory_id
   })
@@ -201,11 +224,11 @@ export default function Dashboard() {
       ] = await Promise.all([
         supabase.from('employees')
           .select('*', { count: 'exact', head: true })
-          .eq('factory_id', user?.factory_id!)
+          .eq('factory_id', user?.factory_id)
           .eq('status', 'active'),
         supabase.from('employees')
           .select('*', { count: 'exact', head: true })
-          .eq('factory_id', user?.factory_id!)
+          .eq('factory_id', user?.factory_id)
           .eq('status', 'active')
           .eq('data_complete', false),
         supabase.from('payroll_entries')
@@ -263,8 +286,8 @@ export default function Dashboard() {
       const allAdvances = advancesRes.data ?? []
 
       return last4.map(p => {
-        const periodEntries = allEntries.filter((e: any) => e.period_id === p.id)
-        const periodAdvances = allAdvances.filter((a: any) => a.period_id === p.id)
+        const periodEntries = (allEntries as PayrollEntryRow[]).filter((e) => e.period_id === p.id)
+        const periodAdvances = allAdvances.filter((a) => a.period_id === p.id)
         const { net } = sumEntries(periodEntries)
         const totalAdv = periodAdvances.reduce((s, a) => s + Number(a.amount), 0)
         
@@ -293,7 +316,10 @@ export default function Dashboard() {
       queryClient.invalidateQueries({ queryKey: ['dashboard-stats', activePeriod?.id] })
       toast.success('อนุมัติงวดเรียบร้อยแล้ว')
     },
-    onError: (err: any) => toast.error('ไม่สามารถอนุมัติงวดได้', { description: err.message })
+    onError: (err: unknown) => {
+      const error = err as Error
+      toast.error('ไม่สามารถอนุมัติงวดได้', { description: error.message })
+    }
   })
 
   // ── Unapprove mutation ───────────────────────────────────────────────────
@@ -311,7 +337,10 @@ export default function Dashboard() {
       queryClient.invalidateQueries({ queryKey: ['dashboard-stats', activePeriod?.id] })
       toast.success('ยกเลิกการอนุมัติงวดเรียบร้อยแล้ว')
     },
-    onError: (err: any) => toast.error('ไม่สามารถยกเลิกการอนุมัติได้', { description: err.message })
+    onError: (err: unknown) => {
+      const error = err as Error
+      toast.error('ไม่สามารถยกเลิกการอนุมัติได้', { description: error.message })
+    }
   })
 
   // ── User Link Stats ──────────────────────────────────────────────────────
@@ -694,7 +723,33 @@ export default function Dashboard() {
 }
 
 // ─── User Dashboard View ──────────────────────────────────────────────────────
-function UserDashboardView({ stats, linkStats, isLoading, PeriodBadge }: any) {
+interface LinkStats {
+  total: number
+  pending: number
+  confirmed: number
+  disputed: number
+}
+
+interface DashboardStats {
+  totalEmployees: number
+  pendingEmpCount: number
+  totalGrossPay: number
+  totalSocialSecurity: number
+  totalNetPay: number
+  periodStatus: string
+  periodLabel: string
+  daysFilled: number
+  totalDays: number
+  entryCount: number
+  isExported: boolean
+}
+
+function UserDashboardView({ stats, linkStats, isLoading, PeriodBadge }: {
+  stats: DashboardStats | null | undefined
+  linkStats: LinkStats | null | undefined
+  isLoading: boolean
+  PeriodBadge: React.ReactNode
+}) {
   const totalDays = stats?.totalDays ?? 15
   const daysFilled = stats?.daysFilled ?? 0
   const pendingEmpCount = stats?.pendingEmpCount ?? 0

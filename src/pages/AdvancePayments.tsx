@@ -26,7 +26,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '../components/ui/dialog'
-import { formatEmployeeName } from './EmployeeFormModal'
+import { formatEmployeeName } from '../lib/formatters'
 
 interface Employee {
   id: string
@@ -272,7 +272,7 @@ function AdvanceModal({ isOpen, onClose, employees, currentPeriod, advances, ini
   // Set initial data when editing
   useState(() => {
     if (initialData) {
-      setEmployeeId(initialData.employee.id || (initialData as any).employee_id)
+      setEmployeeId(initialData.employee.id)
       setAmount(initialData.amount.toString())
       setRequestDate(initialData.request_date.split('T')[0])
       setNotes(initialData.notes || '')
@@ -283,7 +283,7 @@ function AdvanceModal({ isOpen, onClose, employees, currentPeriod, advances, ini
   const [prevInitialData, setPrevInitialData] = useState<Advance | null>(null)
   if (initialData !== prevInitialData) {
     if (initialData) {
-      setEmployeeId(initialData.employee.id || (initialData as any).employee_id)
+      setEmployeeId(initialData.employee.id)
       setAmount(initialData.amount.toString())
       setRequestDate(initialData.request_date.split('T')[0])
       setNotes(initialData.notes || '')

@@ -8,19 +8,58 @@ import {
 import { Button } from '../ui/button'
 import { Label } from '../ui/label'
 import { Input } from '../ui/input'
-import { FileText, Search, User, Calendar, CheckSquare, Square } from 'lucide-react'
+import { FileText, Search, User, CheckSquare, Square } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
 import { useAppStore } from '../../store/useAppStore'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
-import { PaySlipPreview, type PaySlipData } from './PaySlipPreview'
+import type { PaySlipData } from './PaySlipPreview'
 
 type Props = {
   isOpen: boolean
   onClose: () => void
   uniqueMonths: string[]
+}
+
+interface PayrollPeriod {
+  id: string
+  period_start: string
+  period_end: string
+  status: string | null
+  factory_id: string
+}
+
+interface PayrollEntryRow {
+  id: string
+  period_id: string
+  employee_id: string
+  amount_normal: number
+  amount_shift: number
+  amount_ot: number
+  amount_wood_excess: number
+  amount_film: number
+  amount_special: number
+  amount_diligence: number
+  amount_position: number
+  deduct_social_security: number
+  deduct_safety_equipment: number
+  deduct_uniform: number
+  employee: {
+    id: string
+    employee_code: string
+    first_name: string
+    last_name: string
+    payment_method: string
+    bank_name: string
+    bank_account: string
+    position: string
+  }
+  period: {
+    period_start: string
+    period_end: string
+  }
 }
 
 export default function PayslipExportModal({ isOpen, onClose, uniqueMonths }: Props) {
@@ -40,7 +79,7 @@ export default function PayslipExportModal({ isOpen, onClose, uniqueMonths }: Pr
     queryFn: async () => {
       if (!user?.factory_id) return []
       const { data } = await supabase.from('payroll_periods').select('*').eq('factory_id', user.factory_id)
-      return data as any[]
+      return data as PayrollPeriod[]
     },
     enabled: isOpen && !!user?.factory_id
   })
@@ -114,8 +153,8 @@ export default function PayslipExportModal({ isOpen, onClose, uniqueMonths }: Pr
     setIsGenerating(true)
     try {
       const targetPeriodIds = periods
-        .filter((p: any) => targetMonths.includes(format(new Date(p.period_start), 'MMM yyyy', { locale: th })))
-        .map((p: any) => p.id)
+        .filter((p: PayrollPeriod) => targetMonths.includes(format(new Date(p.period_start), 'MMM yyyy', { locale: th })))
+        .map((p: PayrollPeriod) => p.id)
 
       if (targetPeriodIds.length === 0) {
         toast.error('ไม่พบรอบการจ่ายเงินในเดือนที่เลือก')
@@ -140,7 +179,8 @@ export default function PayslipExportModal({ isOpen, onClose, uniqueMonths }: Pr
         query = query.eq('employee_id', selectedEmployeeId)
       }
 
-      const { data: entries, error } = await query
+      const { data: entriesData, error } = await query
+      const entries = entriesData as unknown as PayrollEntryRow[]
       if (error) throw error
       if (!entries || entries.length === 0) {
         toast.error('ไม่พบข้อมูลสลิปในเดือนที่เลือก')
@@ -148,15 +188,21 @@ export default function PayslipExportModal({ isOpen, onClose, uniqueMonths }: Pr
         return
       }
 
+      interface AdvanceRow {
+        employee_id: string
+        amount: number
+      }
+
       let advanceQuery = supabase.from('advance_payments').select('employee_id, amount').in('period_id', targetPeriodIds)
       if (exportTarget === 'individual') advanceQuery = advanceQuery.eq('employee_id', selectedEmployeeId)
-      const { data: advances } = await advanceQuery
+      const { data: advancesData } = await advanceQuery
+      const advances = (advancesData as unknown as AdvanceRow[]) || []
 
-      const slips: PaySlipData[] = entries.map((entry: any) => {
+      const slips: PaySlipData[] = entries.map((entry) => {
         const emp = entry.employee
         const period = entry.period
-        const empAdvances = (advances || []).filter((a: any) => a.employee_id === emp.id)
-        const totalAdvance = empAdvances.reduce((sum: number, a: any) => sum + Number(a.amount), 0)
+        const empAdvances = advances.filter((a) => a.employee_id === emp.id)
+        const totalAdvance = empAdvances.reduce((sum: number, a: AdvanceRow) => sum + Number(a.amount), 0)
 
         const amount_normal = Number(entry.amount_normal || 0)
         const amount_shift = Number(entry.amount_shift || 0)
@@ -185,7 +231,7 @@ export default function PayslipExportModal({ isOpen, onClose, uniqueMonths }: Pr
           deduct_social_security, deduct_advance: totalAdvance, deduct_safety_equipment, deduct_uniform,
           total_income, total_deductions,
           net_pay: total_income - total_deductions,
-          payment_method: emp.payment_method || 'cash',
+          payment_method: (emp.payment_method as 'cash' | 'bank_transfer') || 'cash',
           bank_name: emp.bank_name,
           bank_account: emp.bank_account,
         }

@@ -31,10 +31,26 @@ interface SidebarProps {
   setIsOpen: (isOpen: boolean) => void
 }
 
+interface Factory {
+  id: string
+  name: string
+  companies: {
+    id: string
+    name: string
+    short_name: string
+    company_type: string
+  } | {
+    id: string
+    name: string
+    short_name: string
+    company_type: string
+  }[]
+}
+
 export function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
   const { user, companyContext, setUser, setCompanyContext } = useAppStore()
   const location = useLocation()
-  const [factories, setFactories] = useState<any[]>([])
+  const [factories, setFactories] = useState<Factory[]>([])
 
   useEffect(() => {
     if (user?.role === 'admin' || user?.role === 'superUser') {

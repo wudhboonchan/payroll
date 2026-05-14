@@ -11,17 +11,62 @@ import { Label } from '../components/ui/label'
 
 import { CheckCircle2, AlertCircle, Clock, Loader2, ShieldAlert, Eye, Lock } from 'lucide-react'
 
+interface PayslipRPCResponse {
+  token_data: {
+    employee_id: string
+    period_id: string
+    employee_status: string
+    created_at: string
+    expires_at: string
+  }
+  employee: {
+    employee_code: string
+    first_name: string
+    last_name: string
+    payment_method: string
+    bank_name: string
+    bank_account_no: string
+    bank_account: string
+  }
+  period: {
+    period_start: string
+    period_end: string
+  }
+  entry: {
+    amount_normal: number
+    amount_shift: number
+    amount_ot: number
+    amount_wood_excess: number
+    amount_film: number
+    amount_special: number
+    amount_diligence: number
+    amount_position: number
+    deduct_social_security: number
+    deduct_advance: number
+    deduct_safety_equipment: number
+    deduct_uniform: number
+  }
+  factory: {
+    name: string
+  }
+}
+
+interface ShiftAssignment {
+  is_holiday_ot: boolean
+  is_half_shift: boolean
+  ot_hours: number
+}
+
 export default function EmployeeSlip() {
   const { token } = useParams<{ token: string }>()
-  const [localStatus, setLocalStatus] = useState<string>('')
+  const [manuallyUpdatedStatus, setManuallyUpdatedStatus] = useState<string | null>(null)
   const [disputeReason, setDisputeReason] = useState('')
   const [hasAcceptedWarning, setHasAcceptedWarning] = useState(false)
 
-  const { data: rawData, isLoading: isLoadingToken, error: errorToken } = useQuery<any>({
+  const { data: rawData, isLoading: isLoadingToken, error: errorToken } = useQuery<PayslipRPCResponse | string>({
     queryKey: ['slip_token_data', token],
     queryFn: async () => {
       if (!token) throw new Error('No token provided')
-      // @ts-ignore
       const { data, error } = await supabase.rpc('get_payslip_data', { p_token: token })
       
       if (error) {
@@ -30,17 +75,20 @@ export default function EmployeeSlip() {
       }
       if (!data) throw new Error('ไม่พบข้อมูลสลิป (Token ไม่ถูกต้อง หรือหมดอายุ)')
       
-      return data
+      return data as PayslipRPCResponse | string
     },
     enabled: !!token,
     retry: false
   })
 
   // Extract the structured data
-  const tokenData = typeof rawData === 'string' ? JSON.parse(rawData)?.token_data : rawData?.token_data
+  const tokenData = useMemo(() => {
+    if (!rawData) return null
+    return typeof rawData === 'string' ? JSON.parse(rawData)?.token_data : rawData?.token_data
+  }, [rawData])
 
   // Fetch shifts for day counts
-  const { data: slipShifts = [] } = useQuery({
+  const { data: slipShifts = [] } = useQuery<ShiftAssignment[]>({
     queryKey: ['shifts-for-slip-public', tokenData?.employee_id, tokenData?.period_id],
     queryFn: async () => {
       if (!tokenData?.employee_id || !tokenData?.period_id) return []
@@ -50,7 +98,7 @@ export default function EmployeeSlip() {
         .eq('employee_id', tokenData.employee_id)
         .eq('period_id', tokenData.period_id)
       if (error) throw error
-      return data as any[]
+      return data as ShiftAssignment[]
     },
     enabled: !!tokenData?.employee_id && !!tokenData?.period_id
   })
@@ -67,12 +115,12 @@ export default function EmployeeSlip() {
   })
 
   const isClerkSlip = empPosition === 'clerk'
-  const normalShiftsForSlip = slipShifts.filter((s: any) => !s.is_holiday_ot)
+  const normalShiftsForSlip = slipShifts.filter((s: ShiftAssignment) => !s.is_holiday_ot)
   const days_normal = normalShiftsForSlip.length
-  const days_shift = normalShiftsForSlip.filter((s: any) => !s.is_half_shift).length
+  const days_shift = normalShiftsForSlip.filter((s: ShiftAssignment) => !s.is_half_shift).length
   const days_ot = isClerkSlip
-    ? slipShifts.reduce((sum: number, s: any) => sum + Number(s.ot_hours || 0), 0)
-    : slipShifts.filter((s: any) => s.is_holiday_ot).length
+    ? slipShifts.reduce((sum: number, s: ShiftAssignment) => sum + Number(s.ot_hours || 0), 0)
+    : slipShifts.filter((s: ShiftAssignment) => s.is_holiday_ot).length
 
   const slipData = useMemo(() => {
     if (!rawData) return null
@@ -132,10 +180,11 @@ export default function EmployeeSlip() {
     } as PaySlipData
   }, [rawData, slipShifts, days_normal, days_shift, days_ot, empPosition])
 
-  // Sync local status when data loads
-  useEffect(() => {
+  const currentStatus = useMemo(() => {
+    if (manuallyUpdatedStatus) return manuallyUpdatedStatus
+    
     if (tokenData?.employee_status) {
-      let statusToSet = tokenData.employee_status
+      let statusToSet = tokenData.employee_status as string
       if (statusToSet === 'pending') {
         const createdTime = tokenData.created_at 
           ? new Date(tokenData.created_at).getTime()
@@ -146,26 +195,25 @@ export default function EmployeeSlip() {
           statusToSet = 'auto_confirmed'
         }
       }
-      setLocalStatus(statusToSet)
+      return statusToSet
     }
-  }, [tokenData?.employee_status, tokenData?.created_at, tokenData?.expires_at])
+    return ''
+  }, [tokenData, manuallyUpdatedStatus])
 
   const confirmMutation = useMutation({
     mutationFn: async () => {
-      // @ts-ignore
       const { error } = await supabase.rpc('update_payslip_status', { p_token: token, p_status: 'confirmed' })
       if (error) throw error
     },
-    onSuccess: () => setLocalStatus('confirmed')
+    onSuccess: () => setManuallyUpdatedStatus('confirmed')
   })
 
   const disputeMutation = useMutation({
     mutationFn: async () => {
-      // @ts-ignore
       const { error } = await supabase.rpc('update_payslip_status', { p_token: token, p_status: 'disputed', p_reason: disputeReason })
       if (error) throw error
     },
-    onSuccess: () => setLocalStatus('disputed')
+    onSuccess: () => setManuallyUpdatedStatus('disputed')
   })
 
   const handleConfirm = () => confirmMutation.mutate()
@@ -209,7 +257,7 @@ export default function EmployeeSlip() {
     <>
     <div className="min-h-screen bg-slate-100 flex flex-col items-center py-8 px-4">
       
-      {localStatus === 'pending' && (
+      {currentStatus === 'pending' && (
         <div className="w-full max-w-[600px] bg-blue-50 border border-blue-200 text-blue-800 px-6 py-4 rounded-xl flex items-start gap-4 mb-6 shadow-sm">
           <Clock className="w-6 h-6 text-blue-500 mt-0.5 flex-shrink-0" />
           <div>
@@ -219,17 +267,17 @@ export default function EmployeeSlip() {
         </div>
       )}
 
-      {(localStatus === 'confirmed' || localStatus === 'auto_confirmed') && (
+      {(currentStatus === 'confirmed' || currentStatus === 'auto_confirmed') && (
         <div className="w-full max-w-[600px] bg-green-50 border border-green-200 text-green-800 px-6 py-4 rounded-xl flex items-start gap-4 mb-6 shadow-sm animate-in fade-in slide-in-from-top-2">
           <CheckCircle2 className="w-8 h-8 text-green-500 flex-shrink-0" />
           <div className="flex flex-col">
             <h3 className="font-bold text-lg">
-              {localStatus === 'auto_confirmed' 
+              {currentStatus === 'auto_confirmed' 
                 ? 'ระบบยืนยันรับทราบข้อมูลให้อัตโนมัติ ขอบคุณค่ะ' 
                 : 'ยืนยันรับทราบข้อมูลเรียบร้อย ขอบคุณค่ะ'}
             </h3>
             <p className="text-sm mt-1 text-green-700">
-              {localStatus === 'auto_confirmed' 
+              {currentStatus === 'auto_confirmed' 
                 ? '* เนื่องจากท่านไม่ได้ตรวจสอบและยืนยันภายใน 24 ชั่วโมง ระบบจึงถือว่าข้อมูลถูกต้องและทำการยืนยันให้อัตโนมัติ หากมีข้อสงสัย กรุณาติดต่อบริษัทผ่านช่องทางแชทนะคะ'
                 : '* ปุ่มยืนยันถูกปิดการใช้งานแล้ว หากต้องการทักท้วงหรือแก้ไขข้อมูล กรุณาติดต่อกลับหาบริษัทตามช่องทางแชทที่ได้รับข้อความแจ้งไปนะคะ'}
             </p>
@@ -237,7 +285,7 @@ export default function EmployeeSlip() {
         </div>
       )}
 
-      {localStatus === 'disputed' && (
+      {currentStatus === 'disputed' && (
         <div className="w-full max-w-[600px] bg-rose-50 border border-rose-200 text-rose-800 px-6 py-4 rounded-xl flex items-start gap-4 mb-6 shadow-sm animate-in fade-in slide-in-from-top-2">
           <AlertCircle className="w-6 h-6 text-rose-500 mt-0.5 flex-shrink-0" />
           <div>
@@ -253,7 +301,7 @@ export default function EmployeeSlip() {
         <PaySlipPreview data={slipData} />
       </div>
 
-      {localStatus === 'pending' && (
+      {currentStatus === 'pending' && (
         <div className="w-full max-w-[600px] mt-6 space-y-6">
           <Button 
             className="w-full h-14 text-lg bg-[#1D9E75] hover:bg-[#157a5a]"
@@ -277,7 +325,7 @@ export default function EmployeeSlip() {
                 <textarea 
                   placeholder="เช่น ขาดโอทีวันที่..." 
                   value={disputeReason}
-                  onChange={(e: any) => setDisputeReason(e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setDisputeReason(e.target.value)}
                   className="flex min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                 />
               </div>

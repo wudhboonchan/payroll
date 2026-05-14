@@ -11,7 +11,27 @@ import { Printer, Search, UserX } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
-import { formatEmployeeName } from './EmployeeFormModal'
+import { formatEmployeeName } from '../lib/formatters'
+
+interface Employee {
+  id: string
+  employee_code: string
+  first_name: string
+  last_name: string
+  prefix: string
+  nationality: string
+  status: string
+  payment_method: string
+  bank_name: string
+  bank_account: string
+  position: string
+}
+
+interface Shift {
+  is_holiday_ot: boolean
+  is_half_shift: boolean
+  ot_hours: number
+}
 
 export default function PaySlipPage() {
   const { user } = useAppStore()
@@ -30,7 +50,7 @@ export default function PaySlipPage() {
         .eq('factory_id', user.factory_id)
         .order('employee_code')
       if (error) throw error
-      return data as any[]
+      return data as Employee[]
     },
     enabled: !!user?.factory_id,
   })
@@ -86,7 +106,7 @@ export default function PaySlipPage() {
     enabled: !!selectedId
   })
 
-  const totalAdvance = advances.reduce((sum: number, adv: any) => sum + Number(adv.amount), 0)
+  const totalAdvance = advances.reduce((sum: number, adv) => sum + Number(adv.amount), 0)
 
   // Fetch shifts for day count display on slip
   const { data: slipShifts = [] } = useQuery({
@@ -99,25 +119,25 @@ export default function PaySlipPage() {
         .eq('employee_id', selectedId)
         .eq('period_id', currentPeriod.id)
       if (error) throw error
-      return data as any[]
+      return data as Shift[]
     },
     enabled: !!selectedId && !!currentPeriod?.id
   })
 
-  const selectedEmpForSlip = employees.find((e: any) => e.id === selectedId) as any
+  const selectedEmpForSlip = employees.find((e) => e.id === selectedId)
   const isClerkSlip = selectedEmpForSlip?.position === 'clerk'
 
-  const normalShiftsForSlip = slipShifts.filter((s: any) => !s.is_holiday_ot)
+  const normalShiftsForSlip = slipShifts.filter((s) => !s.is_holiday_ot)
   const days_normal = normalShiftsForSlip.length
-  const days_shift = normalShiftsForSlip.filter((s: any) => !s.is_half_shift).length
+  const days_shift = normalShiftsForSlip.filter((s) => !s.is_half_shift).length
   // Workers: count holiday OT days; Clerks: sum ot_hours
   const days_ot = isClerkSlip
-    ? slipShifts.reduce((sum: number, s: any) => sum + Number(s.ot_hours || 0), 0)
-    : slipShifts.filter((s: any) => s.is_holiday_ot).length
+    ? slipShifts.reduce((sum: number, s) => sum + Number(s.ot_hours || 0), 0)
+    : slipShifts.filter((s) => s.is_holiday_ot).length
 
   const isSearching = search.trim().length > 0
 
-  const visibleEmployees = employees.filter((emp: any) => {
+  const visibleEmployees = employees.filter((emp) => {
     if (isSearching) {
       const q = search.toLowerCase()
       return (
@@ -131,7 +151,7 @@ export default function PaySlipPage() {
   })
 
   // Build PaySlip data for selected employee
-  const selectedEmp = employees.find((e: any) => e.id === selectedId) as any
+  const selectedEmp = employees.find((e) => e.id === selectedId)
 
   const slipData: PaySlipData | null = selectedEmp && currentPeriod
     ? {
@@ -279,7 +299,7 @@ export default function PaySlipPage() {
                 ไม่พบพนักงาน
               </div>
             )}
-            {visibleEmployees.map((emp: any) => {
+            {visibleEmployees.map((emp) => {
               const isInactive = emp.status !== 'active'
               const isSelected = selectedId === emp.id
               return (

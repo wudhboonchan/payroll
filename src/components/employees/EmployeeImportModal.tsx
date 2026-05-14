@@ -56,8 +56,9 @@ export default function EmployeeImportModal({ isOpen, onClose }: Props) {
       }
       setParsedRows(rows)
       setStep('preview')
-    } catch (err: any) {
-      setParseError(err.message)
+    } catch (err: unknown) {
+      const error = err as Error
+      setParseError(error.message)
     }
   }, [])
 
@@ -95,7 +96,7 @@ export default function EmployeeImportModal({ isOpen, onClose }: Props) {
         factory_id: user.factory_id,
       }))
 
-      const { error } = await (supabase as any)
+      const { error } = await supabase
         .from('employees')
         .upsert(payload, { onConflict: 'employee_code,factory_id', ignoreDuplicates: false })
       if (error) throw error
@@ -106,8 +107,9 @@ export default function EmployeeImportModal({ isOpen, onClose }: Props) {
       toast.success(`นำเข้าพนักงานสำเร็จ ${validRows.length} คน`)
       setStep('done')
     },
-    onError: (err: any) => {
-      toast.error('นำเข้าไม่สำเร็จ', { description: err.message })
+    onError: (err: unknown) => {
+      const error = err as Error
+      toast.error('นำเข้าไม่สำเร็จ', { description: error.message })
     }
   })
 

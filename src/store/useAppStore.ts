@@ -1,10 +1,24 @@
 import { create } from 'zustand'
 
+interface User {
+  id: string
+  role: string
+  factory_id: string
+  full_name: string | null
+}
+
+interface CompanyContext {
+  id: string
+  name: string
+  type: string
+  factoryName?: string
+}
+
 interface AppState {
-  user: null | { id: string, role: string, factory_id: string, full_name: string | null }
-  setUser: (user: any) => void
-  companyContext: null | { id: string, name: string, type: string, factoryName?: string }
-  setCompanyContext: (company: any) => void
+  user: User | null
+  setUser: (user: User | null) => void
+  companyContext: CompanyContext | null
+  setCompanyContext: (company: CompanyContext | null) => void
   selectedPeriodId: string | null
   setSelectedPeriodId: (id: string | null) => void
 }

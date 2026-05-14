@@ -24,21 +24,36 @@ import {
   Clock4,
   CheckCircle2
 } from 'lucide-react'
-import { formatEmployeeName } from './EmployeeFormModal'
+import { formatEmployeeName } from '../lib/formatters'
 
-type ShiftType = 'morning' | 'afternoon' | 'night'
-interface AssignedEmployee {
+import { ShiftColumn, type AssignedEmployee, type ShiftType } from '../components/shifts/ShiftColumn'
+
+interface Employee {
+  id: string
+  employee_code: string
+  first_name: string
+  last_name: string
+  prefix: string
+  nationality: string
+  position: string
+}
+
+interface RawShiftAssignment {
+  id: string
   employee_id: string
-  code: string
-  name: string
-  shift: ShiftType
-  isNew: boolean
-  isHolidayOT: boolean
-  isHalfShift: boolean
-  woodExcess: number
-  filmAmount: number
-  otHours: number       // clerk: OT hours beyond 8h (stored per day)
-  isClerk: boolean      // derived from employee.position
+  shift_type: string
+  is_holiday_ot: boolean
+  is_half_shift: boolean
+  wood_excess: number
+  film_amount: number
+  ot_hours: number
+  employee: {
+    employee_code: string
+    first_name: string
+    last_name: string
+    prefix: string
+    nationality: string
+  }
 }
 
 export default function ShiftEntry() {
@@ -79,7 +94,7 @@ export default function ShiftEntry() {
         .eq('factory_id', user.factory_id)
         .neq('status', 'inactive')
       if (error) throw error
-      return data as any[]
+      return data as Employee[]
     },
     enabled: !!user?.factory_id
   })
@@ -134,7 +149,7 @@ export default function ShiftEntry() {
         .eq('work_date', workDateStr)
       
       if (error) throw error
-      return data as any[]
+      return data as unknown as RawShiftAssignment[]
     },
     enabled: !!user?.factory_id
   })
@@ -174,48 +189,52 @@ export default function ShiftEntry() {
       return
     }
 
-    const mapped = (existingAssignments && existingAssignments.length > 0)
-      ? existingAssignments
-          .filter((a: any) => !(isTraPhet && a.shift_type === 'night')) // กรองกะดึกออกถ้าเป็นตราเพชร
-          .map((a: any) => {
-            const emp = employees.find(e => e.id === a.employee_id)
-            return {
-              employee_id: a.employee_id,
-              code: a.employee?.employee_code || emp?.employee_code || '?',
-              name: formatEmployeeName({
-                prefix: a.employee?.prefix || emp?.prefix,
-                first_name: a.employee?.first_name || emp?.first_name,
-                last_name: a.employee?.last_name || emp?.last_name,
-                nationality: a.employee?.nationality || emp?.nationality,
-              }),
-              shift: a.shift_type as ShiftType,
-              isNew: false,
-              isHolidayOT: a.is_holiday_ot,
-              isHalfShift: a.is_half_shift ?? false,
-              woodExcess: Number(a.wood_excess ?? 0),
-              filmAmount: Number(a.film_amount ?? 0),
-              otHours: Number(a.ot_hours ?? 0),
-              isClerk: emp?.position === 'clerk',
-            }
-          })
-      : []
+    const frame = requestAnimationFrame(() => {
+      const mapped = (existingAssignments && existingAssignments.length > 0)
+        ? existingAssignments
+            .filter((a) => !(isTraPhet && a.shift_type === 'night')) // กรองกะดึกออกถ้าเป็นตราเพชร
+            .map((a) => {
+              const emp = employees.find(e => e.id === a.employee_id)
+              return {
+                employee_id: a.employee_id,
+                code: a.employee?.employee_code || emp?.employee_code || '?',
+                name: formatEmployeeName({
+                  prefix: a.employee?.prefix || emp?.prefix,
+                  first_name: a.employee?.first_name || emp?.first_name,
+                  last_name: a.employee?.last_name || emp?.last_name,
+                  nationality: a.employee?.nationality || emp?.nationality,
+                }),
+                shift: a.shift_type as ShiftType,
+                isNew: false,
+                isHolidayOT: a.is_holiday_ot,
+                isHalfShift: a.is_half_shift ?? false,
+                woodExcess: Number(a.wood_excess ?? 0),
+                filmAmount: Number(a.film_amount ?? 0),
+                otHours: Number(a.ot_hours ?? 0),
+                isClerk: emp?.position === 'clerk',
+              }
+            })
+        : []
 
-    setAssignments(prev => {
-      // Only update if the data actually changed (Deep compare to avoid loops)
-      const currentSignature = JSON.stringify(mapped.map(m => m.employee_id + m.shift + m.isHalfShift + m.otHours + m.woodExcess))
-      const prevSignature = JSON.stringify(prev.map(p => p.employee_id + p.shift + p.isHalfShift + p.otHours + p.woodExcess))
-      
-      if (currentSignature === prevSignature) {
-        return prev
+      setAssignments(prev => {
+        // Only update if the data actually changed (Deep compare to avoid loops)
+        const currentSignature = JSON.stringify(mapped.map(m => m.employee_id + m.shift + m.isHalfShift + m.otHours + m.woodExcess))
+        const prevSignature = JSON.stringify(prev.map(p => p.employee_id + p.shift + p.isHalfShift + p.otHours + p.woodExcess))
+        
+        if (currentSignature === prevSignature) {
+          return prev
+        }
+        return mapped
+      })
+
+      if (existingAssignments && existingAssignments.length > 0) {
+        setIsHolidayOT(existingAssignments[0].is_holiday_ot)
+      } else {
+        setIsHolidayOT(false)
       }
-      return mapped
-    })
+    });
 
-    if (existingAssignments && existingAssignments.length > 0) {
-      setIsHolidayOT(existingAssignments[0].is_holiday_ot)
-    } else {
-      setIsHolidayOT(false)
-    }
+    return () => cancelAnimationFrame(frame);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workDateStr, existingAssignments, employees.length, currentPeriod?.id])
 
@@ -331,7 +350,7 @@ export default function ShiftEntry() {
       queryClient.invalidateQueries({ queryKey: ['all-period-shifts', currentPeriod?.id] })
       toast.success(`บันทึกข้อมูลวันที่ ${formattedDate} สำเร็จ`)
     },
-    onError: (error: any) => {
+    onError: (error: Error) => {
       toast.error('เกิดข้อผิดพลาดในการบันทึก', { description: error.message })
     }
   })
@@ -705,85 +724,3 @@ export default function ShiftEntry() {
   )
 }
 
-function ShiftColumn({ title, time, icon, assignments, onAssign, onRemove, onClickEmployee, isSelecting }: any) {
-  return (
-    <div 
-      className={`
-        bg-white rounded-xl border flex flex-col overflow-hidden transition-all duration-200
-        ${isSelecting ? 'ring-2 ring-dashed ring-blue-300 hover:ring-blue-500 hover:bg-blue-50/30 cursor-pointer' : 'border-slate-200'}
-      `}
-      onClick={isSelecting ? onAssign : undefined}
-    >
-      <div className="p-4 border-b bg-slate-50/80 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-white rounded-lg shadow-sm border border-slate-100">
-            {icon}
-          </div>
-          <div>
-            <h3 className="font-bold text-slate-800">{title}</h3>
-            <p className="text-xs text-slate-500 font-mono mt-0.5">{time}</p>
-          </div>
-        </div>
-        <Badge variant="secondary" className="bg-slate-200/50 text-slate-600">{assignments.length} คน</Badge>
-      </div>
-
-      <div className="flex-1 overflow-y-auto p-3 space-y-2">
-        {assignments.map((emp: AssignedEmployee) => (
-          <div 
-            key={emp.employee_id} 
-            className="group flex items-center justify-between p-3 rounded-lg border border-slate-100 bg-white shadow-sm hover:shadow-md transition-shadow"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <button
-              className="flex-1 text-left"
-              onClick={() => onClickEmployee(emp)}
-              title={emp.isClerk ? 'คลิกเพื่อกรอก OT ชั่วโมง' : 'คลิกเพื่อตั้งค่าชั่วโมงทำงาน / ค่าไม้ / ค่าฟิล์ม'}
-            >
-              <div className="flex flex-col">
-                <p className="text-sm font-bold text-slate-900 leading-tight">
-                  {emp.isClerk ? '👩🏻‍🏫 ' : ''}{emp.name}
-                </p>
-                <div className="flex items-center gap-2 mt-1 flex-wrap">
-                  <span className="text-[10px] font-bold text-slate-400 tabular-nums">
-                    {emp.code}
-                  </span>
-                  {emp.isNew && (
-                    <Badge className="bg-green-100 text-green-700 hover:bg-green-100 border-none text-[10px] px-1.5 py-0 h-4">ใหม่</Badge>
-                  )}
-                  {emp.isClerk && (
-                    <Badge className="bg-red-100 text-red-600 hover:bg-red-100 border-none text-[10px] px-1.5 py-0 h-4">เสมียน</Badge>
-                  )}
-                  {!emp.isClerk && emp.isHalfShift && (
-                    <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100 border-none text-[10px] px-1.5 py-0 h-4">ทำงาน 8 ชม.</Badge>
-                  )}
-                  {emp.isClerk && emp.otHours > 0 && (
-                    <Badge className="bg-purple-100 text-purple-700 hover:bg-purple-100 border-none text-[10px] px-1.5 py-0 h-4">มี OT {emp.otHours}ชม.</Badge>
-                  )}
-                  {!emp.isClerk && emp.woodExcess > 0 && (
-                    <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 border-none text-[10px] px-1.5 py-0 h-4">+ค่าไม้</Badge>
-                  )}
-                  {!emp.isClerk && emp.filmAmount > 0 && (
-                    <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 border-none text-[10px] px-1.5 py-0 h-4">+ค่าฟิล์ม</Badge>
-                  )}
-                </div>
-              </div>
-            </button>
-            
-            <button 
-              onClick={() => onRemove(emp.employee_id)}
-              className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-md opacity-0 group-hover:opacity-100 transition-all ml-2 flex-shrink-0"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        ))}
-
-        {isSelecting && assignments.length === 0 && (
-          <div className="h-full min-h-[120px] flex items-center justify-center border-2 border-dashed border-blue-200 rounded-lg bg-blue-50/50">
-            <span className="text-sm font-medium text-blue-500">คลิกที่นี่เพื่อเพิ่มพนักงานเข้ากะ</span>
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}

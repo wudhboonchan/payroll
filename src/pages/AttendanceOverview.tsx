@@ -19,7 +19,6 @@ import {
   DialogHeader, 
   DialogTitle 
 } from '../components/ui/dialog'
-import { Badge } from '../components/ui/badge'
 import { Check, User, Clock, Calendar as CalendarIcon } from 'lucide-react'
 import {
   Tooltip,
@@ -125,7 +124,7 @@ export default function AttendanceOverview() {
         start: parseISO(currentPeriod.period_start),
         end: parseISO(currentPeriod.period_end)
       })
-    } catch (e) {
+    } catch {
       return []
     }
   }, [currentPeriod])

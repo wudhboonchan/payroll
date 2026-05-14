@@ -7,16 +7,12 @@ import { Button } from '../components/ui/button'
 import { Badge } from '../components/ui/badge'
 import { Input } from '../components/ui/input'
 import { toast } from 'sonner'
-import { useNavigate } from 'react-router-dom'
 import {
-  Calendar,
   Grid,
   Download,
-  Link2,
   Settings,
   Lock,
   FileText,
-  ArrowRight,
   Loader2
 } from 'lucide-react'
 import { formatPeriodLabel } from '../lib/formatters'
@@ -24,9 +20,16 @@ import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
 import PayslipExportModal from '../components/payroll/PayslipExportModal'
 
+interface PayrollPeriod {
+  id: string
+  period_start: string
+  period_end: string
+  status: string | null
+  factory_id: string
+}
+
 export default function Export() {
   const { user } = useAppStore()
-  const navigate = useNavigate()
 
   const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(null)
   const [exportType, setExportType] = useState<'month' | 'period'>('month')
@@ -46,46 +49,49 @@ export default function Export() {
         .eq('factory_id', user.factory_id)
         .order('period_start', { ascending: false })
       if (error) throw error
-      return data as any[]
+      return data as PayrollPeriod[]
     },
     enabled: !!user?.factory_id,
   })
 
   // Extract unique months from periods
-  const uniqueMonths = Array.from(new Set(periods.map((p: any) => {
+  const uniqueMonths = Array.from(new Set(periods.map((p: PayrollPeriod) => {
     const d = new Date(p.period_start)
     const thaiYear = d.getFullYear() + 543
     return `${format(d, 'MMMM', { locale: th })} ${thaiYear}`
   })))
 
   useEffect(() => {
-    if (!selectedPeriodId && periods.length > 0) {
-      const approved = periods.find((p: any) => p.status === 'approved')
+    if (periods.length > 0 && !selectedPeriodId) {
+      const approved = periods.find((p: PayrollPeriod) => p.status === 'approved')
       setSelectedPeriodId(approved?.id || periods[0].id)
     }
-    if (!selectedMonth && uniqueMonths.length > 0) {
+  }, [periods, selectedPeriodId])
+
+  useEffect(() => {
+    if (uniqueMonths.length > 0 && !selectedMonth) {
       setSelectedMonth(uniqueMonths[0])
     }
-  }, [periods, selectedPeriodId, uniqueMonths, selectedMonth])
+  }, [uniqueMonths, selectedMonth])
 
   const getPeriodsToExport = () => {
     if (exportType === 'period') {
       return selectedPeriodId ? [selectedPeriodId] : []
     } else {
       return periods
-        .filter((p: any) => {
+        .filter((p: PayrollPeriod) => {
           const d = new Date(p.period_start)
           const thaiYear = d.getFullYear() + 543
           const mLabel = `${format(d, 'MMMM', { locale: th })} ${thaiYear}`
           return mLabel === selectedMonth
         })
-        .map((p: any) => p.id)
+        .map((p: PayrollPeriod) => p.id)
     }
   }
 
   const getExportLabel = () => {
     if (exportType === 'period') {
-      const p = periods.find((p: any) => p.id === selectedPeriodId)
+      const p = periods.find((p: PayrollPeriod) => p.id === selectedPeriodId)
       return p ? formatPeriodLabel(p.period_start, p.period_end) : '—'
     } else {
       return selectedMonth
@@ -125,9 +131,30 @@ export default function Export() {
         return
       }
 
-      const ssoMap: Record<string, any> = {}
+      interface SSORow {
+        amount_normal: number
+        deduct_social_security: number
+        employee: {
+          national_id: string
+          prefix: string
+          first_name: string
+          last_name: string
+          nationality: string
+        }
+      }
 
-      data.filter((row: any) => row.employee).forEach((row: any) => {
+      interface SSOExportItem {
+        nat: string
+        emp: SSORow['employee']
+        amount_normal: number
+        deduct_social_security: number
+      }
+
+      const ssoMap: Record<string, SSOExportItem> = {}
+
+      const validRows = (data as unknown as SSORow[]).filter(row => row.employee)
+      
+      validRows.forEach((row) => {
         const emp = row.employee
         const nat = emp.nationality || 'ไทย'
         const code = emp.national_id || emp.first_name // fallback identifier
@@ -147,9 +174,18 @@ export default function Export() {
         ssoMap[key].deduct_social_security += (row.deduct_social_security || 0)
       })
 
-      const groupedData: Record<string, any[]> = {}
+      interface SSOGroupedData {
+        'เลขบัตรประชาชน': string
+        'คำนำหน้า': string
+        'ชื่อ': string
+        'สกุล': string
+        'ค่าจ้าง': number
+        'เงินสมทบ': number
+      }
+
+      const groupedData: Record<string, SSOGroupedData[]> = {}
       
-      Object.values(ssoMap).forEach((item: any) => {
+      Object.values(ssoMap).forEach((item) => {
         const { nat, emp, amount_normal, deduct_social_security } = item
         if (!groupedData[nat]) {
           groupedData[nat] = []
@@ -180,19 +216,40 @@ export default function Export() {
       }
 
       const exportLabel = getExportLabel()
-      const filename = `SSO_${exportLabel.replace(/[\s/\*?:\[\]]/g, '_')}.xlsx`
+      const filename = `SSO_${exportLabel.replace(/[\s/*?:[\]]/g, '_')}.xlsx`
       XLSX.writeFile(workbook, filename)
 
       toast.success('ดาวน์โหลดฟอร์มประกันสังคมสำเร็จ')
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err)
-      toast.error('เกิดข้อผิดพลาดในการ Export', { description: err.message })
+      const error = err as Error
+      toast.error('เกิดข้อผิดพลาดในการ Export', { description: error.message })
     } finally {
       setIsExportingSSO(false)
     }
   }
 
-  const handleExportPayrollSummary = async () => {
+interface PayrollRow {
+  amount_normal: number;
+  amount_shift: number;
+  amount_ot: number;
+  amount_wood_excess: number;
+  amount_film: number;
+  amount_special: number;
+  amount_diligence: number;
+  amount_position: number;
+  deduct_social_security: number;
+  deduct_advance: number;
+  deduct_safety_equipment: number;
+  deduct_uniform: number;
+  employee: {
+    employee_code: string;
+    first_name: string;
+    last_name: string;
+  };
+}
+
+const handleExportPayrollSummary = async () => {
     const periodIds = getPeriodsToExport()
     if (periodIds.length === 0) {
       toast.error('กรุณาเลือกช่วงเวลาที่ต้องการส่งออก')
@@ -233,9 +290,17 @@ export default function Export() {
         return
       }
 
-      const exportDataMap: Record<string, any> = {}
+      interface ExportItem {
+        emp: PayrollRow['employee']
+        normal: number; shift: number; ot: number; wood: number; film: number; special: number; diligence: number; position: number;
+        socSec: number; advance: number; safety: number; uniform: number
+      }
 
-      data.filter((row: any) => row.employee).forEach((row: any) => {
+      const exportDataMap: Record<string, ExportItem> = {}
+
+      const validRows = (data as unknown as PayrollRow[]).filter(row => row.employee)
+      
+      validRows.forEach((row) => {
         const emp = row.employee
         const code = emp.employee_code
 
@@ -276,7 +341,7 @@ export default function Export() {
       })
 
       const exportData = Object.values(exportDataMap)
-        .map((item: any) => {
+        .map((item) => {
           const emp = item.emp
 
           const wageTotal = item.normal + item.shift
@@ -304,30 +369,49 @@ export default function Export() {
           }
         })
 
+      interface ExportResult {
+        'รหัสพนักงาน': string
+        'ชื่อ-นามสกุล': string
+        'ค่าจ้างรวม': number
+        'ค่าจ้างปกติ': number
+        'ค่ากะ': number
+        'OT': number
+        'ค่าไม้เกิน': number
+        'ค่าฟิล์ม': number
+        'ค่าพิเศษ': number
+        'เบี้ยขยัน': number
+        'ค่าตำแหน่ง': number
+        'ประกันสังคม': number
+        'เบิกล่วงหน้า': number
+        'ค่าอุปกรณ์ความปลอดภัย': number
+        'ค่าเสื้อพนักงาน': number
+        'รวม': number
+      }
+
       if (exportData.length === 0) {
         toast.error('ไม่พบพนักงานในงวดนี้')
         return
       }
 
       // Sort by Employee Code
-      exportData.sort((a, b) => {
+      (exportData as unknown as ExportResult[]).sort((a, b) => {
         return String(a['รหัสพนักงาน']).localeCompare(String(b['รหัสพนักงาน']))
       })
 
       const exportLabel = getExportLabel()
-      const worksheet = XLSX.utils.json_to_sheet(exportData, { origin: 'A2' })
-      XLSX.utils.sheet_add_aoa(worksheet, [[`ค่าแรง ${exportLabel}`]], { origin: 'A1' })
-
       const workbook = XLSX.utils.book_new()
+      const worksheet = XLSX.utils.aoa_to_sheet([[`ค่าแรง ${exportLabel}`]])
+      XLSX.utils.sheet_add_json(worksheet, exportData, { origin: 'A2', skipHeader: false })
       XLSX.utils.book_append_sheet(workbook, worksheet, 'Payroll Summary')
 
-      const filename = `Payroll_Summary_${exportLabel.replace(/[\s/\*?:\[\]]/g, '_')}.xlsx`
+      const filename = `Payroll_Summary_${exportLabel.replace(/[\s/*?:[\]]/g, '_')}.xlsx`
       XLSX.writeFile(workbook, filename)
 
       toast.success('ดาวน์โหลดตาราง Payroll รวมสำเร็จ')
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err)
-      toast.error('เกิดข้อผิดพลาดในการ Export', { description: err.message })
+      const error = err as Error
+      toast.error('เกิดข้อผิดพลาดในการ Export', { description: error.message })
     } finally {
       setIsExportingPayroll(false)
     }
@@ -375,7 +459,7 @@ export default function Export() {
               value={selectedPeriodId || ''}
               onChange={e => setSelectedPeriodId(e.target.value)}
             >
-              {periods.map((p: any) => (
+              {periods.map((p) => (
                 <option key={p.id} value={p.id}>
                   {formatPeriodLabel(p.period_start, p.period_end)}
                   {p.status === 'approved' ? ' ✅' : ''}

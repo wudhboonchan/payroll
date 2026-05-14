@@ -18,8 +18,25 @@ import { Search, Plus, User, FileUp, AlertCircle, Filter, ArrowUpDown, ArrowDown
 import { formatThaiCurrency } from '../lib/formatters'
 import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
-import EmployeeFormModal, { formatEmployeeName } from './EmployeeFormModal'
+import { formatEmployeeName } from '../lib/formatters'
+import EmployeeFormModal from './EmployeeFormModal'
 import EmployeeImportModal from '../components/employees/EmployeeImportModal'
+
+interface Employee {
+  id: string
+  employee_code: string
+  first_name: string
+  last_name: string
+  prefix: string
+  nationality: string
+  status: string
+  rate_per_12h: number
+  payment_method: string
+  bank_name: string
+  bank_account: string
+  position: string
+  data_complete: boolean
+}
 
 export default function Employees() {
   const { user } = useAppStore()
@@ -73,7 +90,7 @@ export default function Employees() {
         .order('employee_code', { ascending: true })
 
       if (error) throw error
-      return data as any[]
+      return data as Employee[]
     },
     enabled: !!user?.factory_id
   })
@@ -100,16 +117,37 @@ export default function Employees() {
   }) || []
 
   const sortedEmployees = [...filteredEmployees].sort((a, b) => {
-    let valA, valB;
-    if (sortCol === 'name') {
-      valA = formatEmployeeName(a);
-      valB = formatEmployeeName(b);
-    } else if (sortCol === 'rate') {
-      valA = Number(a.rate_per_12h || 0);
-      valB = Number(b.rate_per_12h || 0);
-    } else {
-      valA = a[sortCol];
-      valB = b[sortCol];
+    let valA: string | number = '';
+    let valB: string | number = '';
+
+    switch (sortCol) {
+      case 'name':
+        valA = formatEmployeeName(a);
+        valB = formatEmployeeName(b);
+        break;
+      case 'rate':
+        valA = Number(a.rate_per_12h || 0);
+        valB = Number(b.rate_per_12h || 0);
+        break;
+      case 'employee_code':
+        valA = a.employee_code || '';
+        valB = b.employee_code || '';
+        break;
+      case 'nationality':
+        valA = a.nationality || '';
+        valB = b.nationality || '';
+        break;
+      case 'payment_method':
+        valA = a.payment_method || '';
+        valB = b.payment_method || '';
+        break;
+      case 'position':
+        valA = a.position || '';
+        valB = b.position || '';
+        break;
+      default:
+        valA = '';
+        valB = '';
     }
     
     if (valA < valB) return sortAsc ? -1 : 1;

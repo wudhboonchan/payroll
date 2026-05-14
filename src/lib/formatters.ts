@@ -30,3 +30,17 @@ export function formatPeriodLabel(start: string, end: string): string {
   }
   return `${format(startDate, 'd MMMM', { locale: th })} - ${format(endDate, 'd MMMM', { locale: th })} ${thaiYear}`
 }
+
+export function formatEmployeeName(emp: {
+  prefix?: string | null
+  first_name: string
+  last_name?: string | null
+  nationality?: string | null
+}) {
+  // Prefix is hidden in the UI as requested (kept only in DB for forms)
+  const lastName = emp.last_name?.trim() ? ` ${emp.last_name.trim()}` : ''
+  const name = `${emp.first_name}${lastName}`
+  const nat = emp.nationality
+  if (!nat || nat === 'ไทย') return name
+  return `${name} (${nat})`
+}

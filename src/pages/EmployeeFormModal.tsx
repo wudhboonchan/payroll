@@ -17,28 +17,8 @@ import { Button } from '../components/ui/button'
 import { Label } from '../components/ui/label'
 import { UserPlus } from 'lucide-react'
 
-// Nationality options
-export const NATIONALITIES = [
-  { value: 'ไทย', label: '🇹🇭 ไทย' },
-  { value: 'เมียนมา', label: '🇲🇲 เมียนมา/กะเหรี่ยง' },
-  { value: 'กัมพูชา', label: '🇰🇭 กัมพูชา' },
-  { value: 'ลาว', label: '🇱🇦 ลาว' },
-]
-
-// Helper: format name with nationality badge for foreign employees
-export function formatEmployeeName(emp: {
-  prefix?: string | null
-  first_name: string
-  last_name?: string | null
-  nationality?: string | null
-}) {
-  // Prefix is hidden in the UI as requested (kept only in DB for forms)
-  const lastName = emp.last_name?.trim() ? ` ${emp.last_name.trim()}` : ''
-  const name = `${emp.first_name}${lastName}`
-  const nat = emp.nationality
-  if (!nat || nat === 'ไทย') return name
-  return `${name} (${nat})`
-}
+import { formatEmployeeName } from '../lib/formatters'
+import { NATIONALITIES } from '../lib/constants'
 
 const employeeSchema = z
   .object({
@@ -95,6 +75,26 @@ interface Props {
   employeeId: string | null
 }
 
+interface Employee {
+  id: string
+  employee_code: string
+  prefix: string | null
+  first_name: string
+  last_name: string | null
+  national_id: string | null
+  nationality: string | null
+  position: 'worker' | 'clerk'
+  job_title: string | null
+  wage_type: 'daily' | 'monthly'
+  payment_method: 'cash' | 'bank_transfer'
+  bank_name: string | null
+  bank_account: string | null
+  rate_per_12h: number
+  status: 'active' | 'inactive'
+  notes: string | null
+  data_complete: boolean
+}
+
 const SELECT_CLASS =
   'flex h-11 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50'
 
@@ -110,7 +110,7 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
     setValue,
     formState: { errors },
   } = useForm<EmployeeFormValues>({
-    resolver: zodResolver(employeeSchema) as any,
+    resolver: zodResolver(employeeSchema),
     defaultValues: {
       payment_method: 'bank_transfer',
       status: 'active',
@@ -137,7 +137,7 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
         .eq('id', employeeId)
         .single()
       if (error) throw error
-      return data as any
+      return data as Employee
     },
     enabled: !!employeeId && isOpen,
   })
@@ -208,15 +208,15 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
       }
 
       if (employeeId) {
-        const { error } = await (supabase as any)
+        const { error } = await supabase
           .from('employees')
-          .update(payload as any)
+          .update(payload)
           .eq('id', employeeId)
         if (error) throw error
       } else {
-        const { error } = await (supabase as any)
+        const { error } = await supabase
           .from('employees')
-          .insert(payload as any)
+          .insert(payload)
         if (error) throw error
       }
     },
@@ -226,7 +226,8 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
       toast.success(employeeId ? 'อัปเดตข้อมูลสำเร็จ' : 'เพิ่มพนักงานสำเร็จ')
       onClose()
     },
-    onError: (error: any) => {
+    onError: (err: unknown) => {
+      const error = err as Error
       toast.error('เกิดข้อผิดพลาด', {
         description: error.message?.includes('unique')
           ? 'รหัสพนักงานนี้มีในระบบแล้ว'
@@ -259,7 +260,7 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId }: Props
 
         {/* ── Form Body ── */}
         <form
-          onSubmit={handleSubmit(onSubmit as any)}
+          onSubmit={handleSubmit(onSubmit)}
           className="flex-1 overflow-y-auto"
         >
           <div className="p-5 md:p-8 bg-white space-y-6">

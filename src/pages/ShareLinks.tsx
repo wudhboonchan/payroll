@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import { useAppStore } from '../store/useAppStore'
@@ -17,14 +17,21 @@ import {
   AlertCircle,
   RotateCcw,
   Users,
-  FileSpreadsheet,
   Link2,
 } from 'lucide-react'
-import { formatEmployeeName } from './EmployeeFormModal'
+import { formatEmployeeName } from '../lib/formatters'
 import { formatPeriodLabel } from '../lib/formatters'
 
 type SlipStatus = 'pending' | 'confirmed' | 'disputed' | 'auto_confirmed'
 type FilterStatus = 'all' | SlipStatus
+
+interface PayrollPeriod {
+  id: string
+  period_start: string
+  period_end: string
+  status: 'draft' | 'approved'
+  factory_id: string
+}
 
 interface TokenRow {
   id: string
@@ -32,6 +39,7 @@ interface TokenRow {
   expires_at: string
   employee_status: SlipStatus
   dispute_reason: string | null
+  created_at?: string
   employees: {
     employee_code: string
     first_name: string
@@ -103,19 +111,22 @@ export default function ShareLinks() {
         .eq('factory_id', user.factory_id)
         .order('period_start', { ascending: false })
       if (error) throw error
-      return data as any[]
+      return data as PayrollPeriod[]
     },
     enabled: !!user?.factory_id,
   })
 
+  // Initialize selectedPeriodId once when periods load
+  const hasInitializedPeriod = useRef(false)
   useEffect(() => {
-    if (!selectedPeriodId && periods.length > 0) {
-      const approved = periods.find((p: any) => p.status === 'approved')
+    if (!hasInitializedPeriod.current && periods.length > 0) {
+      const approved = periods.find(p => p.status === 'approved')
       setSelectedPeriodId(approved?.id || periods[0].id)
+      hasInitializedPeriod.current = true
     }
-  }, [periods, selectedPeriodId])
+  }, [periods])
 
-  const selectedPeriod = periods.find((p: any) => p.id === selectedPeriodId)
+  const selectedPeriod = periods.find(p => p.id === selectedPeriodId)
   const periodLabel = selectedPeriod
     ? formatPeriodLabel(selectedPeriod.period_start, selectedPeriod.period_end)
     : '—'
@@ -134,15 +145,16 @@ export default function ShareLinks() {
         .order('created_at')
       if (error) throw error
       
-      return data.map((t: any) => {
+      const typedData = data as unknown as TokenRow[]
+      return typedData.map(t => {
         if (t.employee_status === 'pending' && t.created_at) {
           const hoursPassed = (Date.now() - new Date(t.created_at).getTime()) / (1000 * 60 * 60)
           if (hoursPassed >= 24) {
-            return { ...t, employee_status: 'auto_confirmed' }
+            return { ...t, employee_status: 'auto_confirmed' as SlipStatus }
           }
         }
         return t
-      }) as any[]
+      })
     },
     enabled: !!selectedPeriodId,
   })
@@ -197,7 +209,7 @@ export default function ShareLinks() {
       if (existingError) throw existingError
 
       const existingIds = new Set(existingTokens?.map(t => t.employee_id) || [])
-      const newEmployees = (employees as any[]).filter(emp => !existingIds.has(emp.id))
+      const newEmployees = (employees || []).filter(emp => !existingIds.has(emp.id))
 
       if (newEmployees.length === 0) return // Nothing to do
 
@@ -218,12 +230,12 @@ export default function ShareLinks() {
       queryClient.invalidateQueries({ queryKey: ['payslip_tokens', selectedPeriodId] })
       toast.success('สร้างลิงก์สำเร็จ พร้อมส่งผ่าน LINE แล้ว')
     },
-    onError: (e: any) => toast.error('เกิดข้อผิดพลาด', { description: e.message }),
+    onError: (e: Error) => toast.error('เกิดข้อผิดพลาด', { description: e.message }),
   })
 
   const regenMutation = useMutation({
     mutationFn: async (tokenId: string) => {
-      const { error } = await (supabase as any)
+      const { error } = await supabase
         .from('payslip_tokens')
         .update({
           token: crypto.randomUUID(), // Generate a new token
@@ -321,7 +333,7 @@ export default function ShareLinks() {
               value={selectedPeriodId || ''}
               onChange={e => setSelectedPeriodId(e.target.value)}
             >
-              {periods.map((p: any) => (
+              {periods.map(p => (
                 <option key={p.id} value={p.id}>
                   {formatPeriodLabel(p.period_start, p.period_end)}
                   {p.status === 'approved' ? ' ✅' : ' (ร่าง)'}
@@ -386,7 +398,7 @@ export default function ShareLinks() {
                 <select
                   className="h-9 text-sm rounded-md border border-slate-200 px-2 flex-1 md:w-auto"
                   value={sortBy}
-                  onChange={e => setSortBy(e.target.value as any)}
+                  onChange={e => setSortBy(e.target.value as 'code' | 'name' | 'status')}
                 >
                   <option value="code">เรียงตามรหัส</option>
                   <option value="name">เรียงตามชื่อ</option>
@@ -436,7 +448,6 @@ export default function ShareLinks() {
                   {filtered.map(t => {
                     const emp = t.employees
                     const slipUrl = `${window.location.origin}/slip/${t.token}`
-                    const copyText = `${emp?.employee_code} ${formatEmployeeName(emp || { first_name: '' })}\n${slipUrl}`
                     const isExpired = new Date(t.expires_at) < new Date()
 
                     const messageText = `ใบแจ้งค่าแรง: ${formatEmployeeName(emp || { first_name: '' })}\nคลิกเพื่อดูสลิป: ${slipUrl}\n\n*กรุณาตรวจสอบและยืนยันภายใน 24 ชม.*\n(หากพ้นกำหนด ระบบจะยืนยันความถูกต้องให้อัตโนมัติค่ะ)`

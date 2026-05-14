@@ -106,7 +106,7 @@ export function downloadEmployeeTemplate() {
     '(ไม่บังคับ)',
   ]
 
-  const wsData: any[][] = [
+  const wsData: (string | number)[][] = [
     // Row 1 — Title
     ['แบบฟอร์มนำเข้าข้อมูลพนักงาน — ห้างหุ้นส่วนจำกัด วิราญกร', ...Array(ncols - 1).fill('')],
     // Row 2 — Instruction
@@ -216,7 +216,7 @@ export function downloadEmployeeTemplate() {
   XLSX.utils.book_append_sheet(wb, ws, 'พนักงาน')
 
   // ── Sheet 3: "คู่มือ" — human-readable guide ──────────────────────────────
-  const guideData: any[][] = [
+  const guideData: (string | number)[][] = [
     ['คำอธิบาย Column', 'บังคับ?', 'ค่าที่ยอมรับ / หมายเหตุ'],
     ...IMPORT_COLUMNS.map(c => [
       c.header.replace('*', '').trim(),
@@ -252,24 +252,23 @@ export function parseEmployeeExcel(file: File): Promise<ParsedRow[]> {
     reader.onload = (e) => {
       try {
         const wb = XLSX.read(e.target?.result, { type: 'array' })
-        const ws = wb.Sheets[wb.SheetNames[0]]
 
         // If first sheet is the reference sheet, use second sheet
         const sheetName = wb.SheetNames.find(n => n === 'พนักงาน') ?? wb.SheetNames[0]
         const targetWs = wb.Sheets[sheetName]
 
-        const rows: any[][] = XLSX.utils.sheet_to_json(targetWs, { header: 1, defval: '' })
+        const rows: unknown[][] = XLSX.utils.sheet_to_json(targetWs, { header: 1, defval: '' })
 
         // Find the header row — contains "รหัสพนักงาน"
-        const headerRowIdx = rows.findIndex(row =>
-          row.some((cell: any) => String(cell).includes('รหัสพนักงาน'))
+        const headerRowIdx = rows.findIndex((row: unknown[]) =>
+          row.some((cell: unknown) => String(cell).includes('รหัสพนักงาน'))
         )
         if (headerRowIdx === -1) {
           reject(new Error('ไม่พบ Column Header "รหัสพนักงาน*" — กรุณาใช้ Template ที่ดาวน์โหลดมา'))
           return
         }
 
-        const headerRow = rows[headerRowIdx].map((h: any) => String(h).trim())
+        const headerRow = (rows[headerRowIdx] as string[]).map((h: unknown) => String(h).trim())
 
         // Skip rows until we hit actual data (skip the "ค่าที่ยอมรับ" row and example rows)
         // Detect: example rows have employee_code that's just digits and first_name in Thai
@@ -292,9 +291,9 @@ export function parseEmployeeExcel(file: File): Promise<ParsedRow[]> {
         const parsed: ParsedRow[] = []
         const dataRows = rows.slice(headerRowIdx + 1)
 
-        dataRows.forEach((row, i) => {
+        dataRows.forEach((row: unknown[], i) => {
           // Skip empty rows
-          if (row.every((cell: any) => String(cell).trim() === '')) return
+          if (row.every((cell: unknown) => String(cell).trim() === '')) return
 
           // Skip the reference row (starts with "▶")
           if (String(row[0]).startsWith('▶')) return
@@ -305,7 +304,8 @@ export function parseEmployeeExcel(file: File): Promise<ParsedRow[]> {
 
           const data: Record<string, string> = {}
           Object.entries(colKeyMap).forEach(([idxStr, key]) => {
-            data[key] = String(row[parseInt(idxStr)] ?? '').trim()
+            const idx = parseInt(idxStr)
+            data[key] = String(row[idx] ?? '').trim()
           })
 
           // Defaults
@@ -338,8 +338,9 @@ export function parseEmployeeExcel(file: File): Promise<ParsedRow[]> {
         })
 
         resolve(parsed)
-      } catch (err: any) {
-        reject(new Error('ไม่สามารถอ่านไฟล์ได้: ' + err.message))
+      } catch (err: unknown) {
+        const error = err as Error
+        reject(new Error('ไม่สามารถอ่านไฟล์ได้: ' + error.message))
       }
     }
     reader.onerror = () => reject(new Error('เกิดข้อผิดพลาดในการอ่านไฟล์'))
