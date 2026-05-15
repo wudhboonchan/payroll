@@ -14,6 +14,7 @@ import ShareLinksPage from './pages/ShareLinks'
 import EmployeeSlipPage from './pages/EmployeeSlip'
 import SettingsPage from './pages/Settings'
 import AttendanceOverview from './pages/AttendanceOverview'
+import UserManagement from './pages/UserManagement'
 import { AppLayout, RequireAuth } from './components/layout/AppLayout'
 
 // Created once outside component to prevent re-instantiation on re-render
@@ -68,6 +69,10 @@ function App() {
 
                 <Route element={<RequireAuth allowedRoles={['admin', 'superUser']} />}>
                   <Route path="/export" element={<ExportPage />} />
+                </Route>
+
+                <Route element={<RequireAuth allowedRoles={['admin']} />}>
+                  <Route path="/users" element={<UserManagement />} />
                 </Route>
               </Route>
 

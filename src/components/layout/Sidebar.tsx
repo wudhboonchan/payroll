@@ -14,7 +14,8 @@ import {
   KeyRound,
   Link2,
   ChevronDown,
-  X
+  X,
+  UserCog
 } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { supabase } from '../../lib/supabase'
@@ -144,6 +145,12 @@ export function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
       href: '/export',
       icon: Download,
       roles: ['admin', 'superUser']
+    },
+    {
+      title: 'จัดการผู้ใช้งาน',
+      href: '/users',
+      icon: UserCog,
+      roles: ['admin']
     }
   ]
 
