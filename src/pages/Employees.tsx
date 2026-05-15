@@ -68,7 +68,6 @@ export default function Employees() {
         .from('payroll_periods')
         .select('id, factory_id, label, period_start, period_end, status')
         .eq('factory_id', user.factory_id)
-        .eq('status', 'draft')
         .order('period_end', { ascending: false })
         .limit(1)
         .single()
