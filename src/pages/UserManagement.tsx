@@ -138,7 +138,7 @@ export default function UserManagement() {
 
       <div className="p-4 md:p-8 max-w-3xl">
         <div className="flex items-center justify-between mb-6">
-          <p className="text-sm text-slate-500">ผู้ใช้งานระดับ User และ SuperAdmin ทั้งหมด ({profiles.length} คน)</p>
+          <p className="text-sm text-slate-500">ผู้ใช้งานทั้งหมด {profiles.length} คน</p>
           <Button
             onClick={() => { setFormError(''); setIsModalOpen(true) }}
             className="bg-[#1D9E75] hover:bg-[#157a5a] h-10 px-5"
