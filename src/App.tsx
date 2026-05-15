@@ -48,17 +48,22 @@ function App() {
               <Route path="/slip/:token" element={<EmployeeSlipPage />} />
 
               <Route element={<AppLayout />}>
-                <Route element={<RequireAuth allowedRoles={['admin', 'superUser', 'normalUser']} />}>
+                {/* Admin & SuperUser: full access */}
+                <Route element={<RequireAuth allowedRoles={['admin', 'superUser']} />}>
                   <Route path="/dashboard" element={<Dashboard />} />
                   <Route path="/employees" element={<Employees />} />
                   <Route path="/shifts" element={<ShiftEntry />} />
                   <Route path="/attendance" element={<AttendanceOverview />} />
                   <Route path="/payroll" element={<PayrollEntry />} />
                   <Route path="/advances" element={<AdvancePaymentsList />} />
-                  <Route path="/payslip" element={<PaySlipPage />} />
-                  <Route path="/share-links" element={<ShareLinksPage />} />
                   <Route path="/settings" element={<SettingsPage />} />
                   <Route path="/" element={<Navigate to="/dashboard" replace />} />
+                </Route>
+
+                {/* normalUser: payslip + share-links only */}
+                <Route element={<RequireAuth allowedRoles={['admin', 'superUser', 'normalUser']} />}>
+                  <Route path="/payslip" element={<PaySlipPage />} />
+                  <Route path="/share-links" element={<ShareLinksPage />} />
                 </Route>
 
                 <Route element={<RequireAuth allowedRoles={['admin', 'superUser']} />}>

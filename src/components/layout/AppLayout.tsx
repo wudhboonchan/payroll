@@ -17,8 +17,8 @@ export function RequireAuth({ allowedRoles }: RequireAuthProps) {
   }
 
   if (allowedRoles && !allowedRoles.includes(user.role)) {
-    // If user is logged in but doesn't have permission
-    return <Navigate to="/shifts" replace />
+    // normalUser gets redirected to their allowed landing page
+    return <Navigate to={user.role === 'normalUser' ? '/payslip' : '/shifts'} replace />
   }
 
   return <Outlet />

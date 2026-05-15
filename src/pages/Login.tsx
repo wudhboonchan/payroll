@@ -16,10 +16,10 @@ export default function Login() {
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
 
-  // Navigate to dashboard once the user is set in the store (after handleSession completes)
+  // Navigate after login — normalUser goes to payslip, others go to dashboard
   useEffect(() => {
     if (user) {
-      navigate('/dashboard', { replace: true })
+      navigate(user.role === 'normalUser' ? '/payslip' : '/dashboard', { replace: true })
     }
   }, [user, navigate])
 

@@ -95,37 +95,37 @@ export function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
       title: 'Dashboard',
       href: '/dashboard',
       icon: LayoutDashboard,
-      roles: ['admin', 'superUser', 'normalUser']
+      roles: ['admin', 'superUser']
     },
     {
       title: 'ฐานข้อมูลพนักงาน',
       href: '/employees',
       icon: Users,
-      roles: ['admin', 'superUser', 'normalUser']
+      roles: ['admin', 'superUser']
     },
     {
       title: 'กรอกกะ',
       href: '/shifts',
       icon: CalendarClock,
-      roles: ['admin', 'superUser', 'normalUser']
+      roles: ['admin', 'superUser']
     },
     {
       title: 'ภาพรวมการเข้างาน',
       href: '/attendance',
       icon: LayoutDashboard,
-      roles: ['admin', 'superUser', 'normalUser']
+      roles: ['admin', 'superUser']
     },
     {
       title: 'เบิกล่วงหน้า',
       href: '/advances',
       icon: CreditCard,
-      roles: ['admin', 'superUser', 'normalUser']
+      roles: ['admin', 'superUser']
     },
     {
       title: 'กรอกค่าจ้าง',
       href: '/payroll',
       icon: Calculator,
-      roles: ['admin', 'superUser', 'normalUser']
+      roles: ['admin', 'superUser']
     },
     {
       title: 'ดูสลิปเงินเดือน',
