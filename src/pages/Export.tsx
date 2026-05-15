@@ -465,62 +465,62 @@ const handleExportPayrollSummary = async () => {
         </div>
 
         {/* ── 3 Cards Grid ────────────────────────────────────────── */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 md:gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
 
           {/* Card 1: Excel */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 md:p-8 shadow-sm flex flex-col items-start">
-            <div className="w-10 h-10 md:w-12 md:h-12 rounded-xl bg-green-50 flex items-center justify-center mb-4 md:mb-5">
-              <Grid className="w-5 h-5 md:w-6 md:h-6 text-green-600" />
+          <div className="bg-white rounded-2xl border border-slate-200 p-4 md:p-6 shadow-sm flex flex-col items-start">
+            <div className="w-10 h-10 rounded-xl bg-green-50 flex items-center justify-center mb-3">
+              <Grid className="w-5 h-5 text-green-600" />
             </div>
-            <h3 className="text-base md:text-lg font-bold text-slate-800 mb-1.5 md:mb-2">ตาราง Payroll รวม</h3>
-            <p className="text-slate-500 text-xs md:text-sm mb-5 md:mb-8 md:min-h-[40px]">
+            <h3 className="text-sm font-bold text-slate-800 mb-1">ตาราง Payroll รวม</h3>
+            <p className="text-slate-500 text-xs mb-4 leading-relaxed">
               ดาวน์โหลดข้อมูล Payroll ทุกคนในรูปแบบ .xlsx
             </p>
-            <Button 
-              variant="outline" 
-              className="mt-auto w-full h-10 md:h-11 px-4 md:px-6 bg-green-50 border-green-100 text-green-700 hover:bg-green-100 hover:text-green-800 font-semibold disabled:opacity-50"
+            <Button
+              variant="outline"
+              className="mt-auto w-full h-9 px-3 bg-green-50 border-green-100 text-green-700 hover:bg-green-100 hover:text-green-800 text-xs font-semibold disabled:opacity-50"
               onClick={handleExportPayrollSummary}
               disabled={isExportingPayroll || (exportType === 'period' && !selectedPeriodId)}
             >
-              {isExportingPayroll ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />} 
+              {isExportingPayroll ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Download className="w-3.5 h-3.5 mr-1.5" />}
               {isExportingPayroll ? 'กำลังสร้างไฟล์...' : 'Download Excel'}
             </Button>
           </div>
 
           {/* Card 2: PDF */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 md:p-8 shadow-sm flex flex-col items-start">
-            <div className="w-10 h-10 md:w-12 md:h-12 rounded-xl bg-red-50 flex items-center justify-center mb-4 md:mb-5">
-              <FileText className="w-5 h-5 md:w-6 md:h-6 text-red-500" />
+          <div className="bg-white rounded-2xl border border-slate-200 p-4 md:p-6 shadow-sm flex flex-col items-start">
+            <div className="w-10 h-10 rounded-xl bg-red-50 flex items-center justify-center mb-3">
+              <FileText className="w-5 h-5 text-red-500" />
             </div>
-            <h3 className="text-base md:text-lg font-bold text-slate-800 mb-1.5 md:mb-2">PDF - Pay Slip รายบุคคล</h3>
-            <p className="text-slate-500 text-xs md:text-sm mb-5 md:mb-8 md:min-h-[40px]">
+            <h3 className="text-sm font-bold text-slate-800 mb-1">PDF - Pay Slip รายบุคคล</h3>
+            <p className="text-slate-500 text-xs mb-4 leading-relaxed">
               สร้างไฟล์ PDF Pay Slip แยกตามรายชื่อพนักงาน หรือพิมพ์ทั้งบริษัท
             </p>
-            <Button 
-              variant="outline" 
-              className="mt-auto w-full h-10 md:h-11 px-4 md:px-6 bg-red-50 border-red-100 text-red-600 hover:bg-red-100 hover:text-red-700 font-semibold" 
+            <Button
+              variant="outline"
+              className="mt-auto w-full h-9 px-3 bg-red-50 border-red-100 text-red-600 hover:bg-red-100 hover:text-red-700 text-xs font-semibold"
               onClick={() => setIsPayslipModalOpen(true)}
             >
-              <Download className="w-4 h-4 mr-2" /> Download PDF
+              <Download className="w-3.5 h-3.5 mr-1.5" /> Download PDF
             </Button>
           </div>
 
-          {/* Card 4: SSO */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 md:p-8 shadow-sm flex flex-col items-start">
-            <div className="w-10 h-10 md:w-12 md:h-12 rounded-xl bg-amber-50 flex items-center justify-center mb-4 md:mb-5">
-              <Grid className="w-5 h-5 md:w-6 md:h-6 text-amber-600" />
+          {/* Card 3: SSO */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-4 md:p-6 shadow-sm flex flex-col items-start">
+            <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center mb-3">
+              <Grid className="w-5 h-5 text-amber-600" />
             </div>
-            <h3 className="text-base md:text-lg font-bold text-slate-800 mb-1.5 md:mb-2">ฟอร์มประกันสังคม</h3>
-            <p className="text-slate-500 text-xs md:text-sm mb-5 md:mb-8 md:min-h-[40px]">
+            <h3 className="text-sm font-bold text-slate-800 mb-1">ฟอร์มประกันสังคม</h3>
+            <p className="text-slate-500 text-xs mb-4 leading-relaxed">
               Export ข้อมูลเลขบัตร + ยอดประกันสังคม สำหรับยื่น สปส. รายเดือน
             </p>
             <Button
               variant="outline"
-              className="mt-auto w-full h-10 md:h-11 px-4 md:px-6 bg-amber-50 border-amber-100 text-amber-700 hover:bg-amber-100 hover:text-amber-800 font-semibold disabled:opacity-50"
+              className="mt-auto w-full h-9 px-3 bg-amber-50 border-amber-100 text-amber-700 hover:bg-amber-100 hover:text-amber-800 text-xs font-semibold disabled:opacity-50"
               onClick={handleExportSSO}
               disabled={isExportingSSO || (exportType === 'period' && !selectedPeriodId)}
             >
-              {isExportingSSO ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />}
+              {isExportingSSO ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Download className="w-3.5 h-3.5 mr-1.5" />}
               {isExportingSSO ? 'กำลังสร้างไฟล์...' : 'Download Excel'}
             </Button>
           </div>
