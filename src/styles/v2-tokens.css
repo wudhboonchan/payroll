@@ -1,0 +1,239 @@
+/* ============================================================
+   VIRANKORN PAYROLL V2 — Design tokens
+   ============================================================ */
+
+:root {
+  /* Paper neutrals */
+  --vk-paper:     #F4F0E6;
+  --vk-paper-2:   #EAE4D4;
+  --vk-paper-3:   #DDD4BD;
+  --vk-bone:      #FBF8F0;
+  --vk-bone-2:    #F8F4E8;
+
+  /* Ink neutrals */
+  --vk-ink:       #161311;
+  --vk-ink-2:     #3A332C;
+  --vk-ink-3:     #7A6F60;
+  --vk-ink-4:     #B6AC9A;
+  --vk-rule:      #1D1A15;
+  --vk-rule-soft: #C9BFA9;
+
+  /* Persimmon accent */
+  --vk-persimmon:       #B14729;
+  --vk-persimmon-hover: #9A3D22;
+  --vk-persimmon-ink:   #6E2A14;
+  --vk-persimmon-tint:  #EFDCD0;
+
+  /* Money palette */
+  --vk-jade:        #1F6F4A;
+  --vk-jade-tint:   #D9E8DF;
+  --vk-crimson:     #A2231B;
+  --vk-crimson-tint:#ECDADA;
+
+  /* Status */
+  --vk-marigold:      #D89A2A;
+  --vk-marigold-tint: #F5E4BE;
+  --vk-auto:          #4A6E8A;
+  --vk-auto-tint:     #DFE7EE;
+
+  /* Fonts */
+  --vk-sans: 'Plus Jakarta Sans', 'Anuphan', ui-sans-serif, system-ui, sans-serif;
+  --vk-thai: 'Anuphan', ui-sans-serif, sans-serif;
+  --vk-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* Layout */
+  --vk-sidebar-w: 248px;
+  --vk-topbar-h:  56px;
+
+  /* Radius */
+  --vk-r0:    0px;
+  --vk-r1:    4px;
+  --vk-r2:    10px;
+  --vk-rfull: 999px;
+
+  /* Border */
+  --vk-hair:  1px;
+  --vk-heavy: 2px;
+
+  /* Motion */
+  --vk-ease: cubic-bezier(.2,.8,.2,1);
+  --vk-dur:  160ms;
+}
+
+/* ── Base reset for V2 pages ── */
+.vk-root {
+  background: var(--vk-paper);
+  color: var(--vk-ink);
+  font-family: var(--vk-sans);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Typography ── */
+.vk-eyebrow {
+  font-family: var(--vk-sans);
+  font-weight: 600;
+  font-size: 11px;
+  line-height: 1.3;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--vk-ink-3);
+}
+
+.vk-h1 {
+  font-family: var(--vk-sans);
+  font-weight: 600;
+  font-size: 24px;
+  line-height: 1.33;
+  letter-spacing: -0.01em;
+  color: var(--vk-ink);
+}
+
+.vk-h1 em {
+  font-style: normal;
+  color: var(--vk-ink-3);
+  font-weight: 500;
+}
+
+.vk-h2 {
+  font-family: var(--vk-sans);
+  font-weight: 600;
+  font-size: 18px;
+  line-height: 1.44;
+  color: var(--vk-ink);
+}
+
+.vk-small {
+  font-family: var(--vk-sans);
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--vk-ink-2);
+  font-weight: 500;
+}
+
+/* ── Mono numbers ── */
+.vk-mono-lg {
+  font-family: var(--vk-mono);
+  font-weight: 600;
+  font-size: 28px;
+  line-height: 1.14;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+.vk-mono-md {
+  font-family: var(--vk-mono);
+  font-weight: 500;
+  font-size: 16px;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+}
+.vk-mono-sm {
+  font-family: var(--vk-mono);
+  font-weight: 500;
+  font-size: 13px;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Rules ── */
+.vk-rule      { border: 0; border-top: 1px solid var(--vk-rule); height: 0; margin: 0; }
+.vk-rule-soft { border: 0; border-top: 1px solid var(--vk-rule-soft); height: 0; margin: 0; }
+.vk-rule-dash { border: 0; border-top: 1px dashed var(--vk-ink-3); height: 0; margin: 0; }
+
+/* ── Pill / Badge ── */
+.vk-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border: 1px solid var(--vk-rule);
+  border-radius: var(--vk-rfull);
+  font-family: var(--vk-sans);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: var(--vk-bone);
+  color: var(--vk-ink);
+  white-space: nowrap;
+}
+.vk-pill[data-tone="approved"]  { background: var(--vk-jade-tint);      border-color: var(--vk-jade);      color: var(--vk-jade); }
+.vk-pill[data-tone="draft"]     { color: var(--vk-ink-3); }
+.vk-pill[data-tone="warning"]   { background: var(--vk-marigold-tint);  border-color: var(--vk-marigold);  color: #6F4A0E; }
+.vk-pill[data-tone="danger"]    { background: var(--vk-crimson-tint);   border-color: var(--vk-crimson);   color: var(--vk-crimson); }
+.vk-pill[data-tone="accent"]    { background: var(--vk-persimmon-tint); border-color: var(--vk-persimmon); color: var(--vk-persimmon-ink); }
+.vk-pill[data-tone="auto"]      { background: var(--vk-auto-tint);      border-color: var(--vk-auto);      color: var(--vk-auto); }
+
+/* ── Buttons ── */
+.vk-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 36px;
+  padding: 0 14px;
+  font-family: var(--vk-sans);
+  font-weight: 600;
+  font-size: 13px;
+  border: 1px solid var(--vk-rule);
+  border-radius: var(--vk-r2);
+  background: var(--vk-bone);
+  color: var(--vk-ink);
+  cursor: pointer;
+  transition: background var(--vk-dur) var(--vk-ease);
+  white-space: nowrap;
+  text-decoration: none;
+}
+.vk-btn:hover   { background: var(--vk-paper-2); }
+.vk-btn:active  { box-shadow: inset 0 1px 0 rgba(0,0,0,0.12); }
+.vk-btn:focus-visible { outline: 2px solid var(--vk-persimmon); outline-offset: 2px; }
+.vk-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.vk-btn--primary {
+  background: var(--vk-persimmon);
+  color: #FBF8F0;
+  border-color: var(--vk-persimmon-ink);
+}
+.vk-btn--primary:hover   { background: var(--vk-persimmon-hover); }
+.vk-btn--primary:disabled { opacity: 0.5; }
+
+.vk-btn--ghost {
+  background: transparent;
+  border-color: transparent;
+}
+.vk-btn--ghost:hover { background: var(--vk-paper-2); }
+
+/* ── Inputs ── */
+.vk-input {
+  display: block;
+  width: 100%;
+  height: 38px;
+  padding: 0 12px;
+  font-family: var(--vk-sans);
+  font-size: 14px;
+  color: var(--vk-ink);
+  background: var(--vk-bone);
+  border: 1px solid var(--vk-rule-soft);
+  border-radius: var(--vk-r1);
+  transition: border-color var(--vk-dur) var(--vk-ease);
+  outline: none;
+}
+.vk-input:focus {
+  border-color: var(--vk-persimmon);
+  box-shadow: 0 0 0 2px var(--vk-persimmon-tint);
+}
+.vk-input--mono {
+  font-family: var(--vk-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.vk-input[data-locked="true"] {
+  background: var(--vk-paper-2);
+  color: var(--vk-ink-3);
+  border-style: dashed;
+}
+
+/* ── Money colors ── */
+.vk-money-pos { color: var(--vk-jade); }
+.vk-money-neg { color: var(--vk-crimson); }

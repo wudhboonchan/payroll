@@ -16,6 +16,17 @@ import SettingsPage from './pages/Settings'
 import AttendanceOverview from './pages/AttendanceOverview'
 import UserManagement from './pages/UserManagement'
 import { AppLayout, RequireAuth } from './components/layout/AppLayout'
+import { AppLayoutV2, RequireAuthV2 } from './components/v2/layout/AppLayoutV2'
+import LoginV2 from './pages/v2/LoginV2'
+import DashboardV2 from './pages/v2/DashboardV2'
+import EmployeesV2 from './pages/v2/EmployeesV2'
+import ShiftEntryV2 from './pages/v2/ShiftEntryV2'
+import PayrollEntryV2 from './pages/v2/PayrollEntryV2'
+import AdvancesV2 from './pages/v2/AdvancesV2'
+import PaySlipV2 from './pages/v2/PaySlipV2'
+import ShareLinksV2 from './pages/v2/ShareLinksV2'
+import ExportV2 from './pages/v2/ExportV2'
+import UserManagementV2 from './pages/v2/UserManagementV2'
 
 // Created once outside component to prevent re-instantiation on re-render
 const queryClient = new QueryClient({
@@ -73,6 +84,27 @@ function App() {
 
                 <Route element={<RequireAuth allowedRoles={['admin']} />}>
                   <Route path="/users" element={<UserManagement />} />
+                </Route>
+              </Route>
+
+              {/* ── V2 Design Preview ───────────────────────────────── */}
+              <Route path="/v2/login" element={<LoginV2 />} />
+              <Route element={<AppLayoutV2 />}>
+                <Route element={<RequireAuthV2 allowedRoles={['admin', 'superUser']} />}>
+                  <Route path="/v2/dashboard"  element={<DashboardV2 />} />
+                  <Route path="/v2/employees"  element={<EmployeesV2 />} />
+                  <Route path="/v2/shifts"     element={<ShiftEntryV2 />} />
+                  <Route path="/v2/payroll"    element={<PayrollEntryV2 />} />
+                  <Route path="/v2/advances"   element={<AdvancesV2 />} />
+                  <Route path="/v2/export"     element={<ExportV2 />} />
+                  <Route path="/v2"            element={<Navigate to="/v2/dashboard" replace />} />
+                </Route>
+                <Route element={<RequireAuthV2 allowedRoles={['admin', 'superUser', 'normalUser']} />}>
+                  <Route path="/v2/payslip"    element={<PaySlipV2 />} />
+                  <Route path="/v2/share-links" element={<ShareLinksV2 />} />
+                </Route>
+                <Route element={<RequireAuthV2 allowedRoles={['admin']} />}>
+                  <Route path="/v2/users"      element={<UserManagementV2 />} />
                 </Route>
               </Route>
 
