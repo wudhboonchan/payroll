@@ -44,7 +44,7 @@ export default function UserManagement() {
       const { data, error } = await supabase
         .from('profiles')
         .select('id, full_name, role, factory_id, factory:factories(name)')
-        .in('role', ['normalUser', 'superUser'])
+        .eq('role', 'normalUser')
         .order('full_name')
       if (error) throw error
       return data as Profile[]
