@@ -1,18 +1,19 @@
 import { useState } from 'react'
-import { Navigate, Outlet, useLocation } from 'react-router-dom'
+import { Navigate, Outlet, useLocation, useOutletContext } from 'react-router-dom'
 import { useAppStore } from '../../../store/useAppStore'
 import { SidebarV2 } from './SidebarV2'
-import '../.././../styles/v2-tokens.css'
+import '../../../styles/v2-tokens.css'
 
 interface RequireAuthV2Props { allowedRoles?: string[] }
 
 export function RequireAuthV2({ allowedRoles }: RequireAuthV2Props) {
   const { user } = useAppStore()
   const location = useLocation()
+  const ctx = useOutletContext()
   if (!user) return <Navigate to="/login" state={{ from: location }} replace />
   if (allowedRoles && !allowedRoles.includes(user.role))
     return <Navigate to={user.role === 'normalUser' ? '/v2/payslip' : '/v2/dashboard'} replace />
-  return <Outlet />
+  return <Outlet context={ctx} />
 }
 
 export function AppLayoutV2() {
