@@ -133,6 +133,7 @@ export default function ShareLinks() {
 
   const { data: tokens = [] } = useQuery({
     queryKey: ['payslip_tokens', selectedPeriodId],
+    refetchInterval: 8000, // polling fallback in case realtime misses an event
     queryFn: async () => {
       if (!selectedPeriodId) return []
       const { data, error } = await supabase
@@ -171,19 +172,14 @@ export default function ShareLinks() {
       .on(
         'postgres_changes',
         {
-          event: '*',
+          event: 'UPDATE',
           schema: 'public',
-          table: 'payslip_tokens'
+          table: 'payslip_tokens',
+          filter: `period_id=eq.${selectedPeriodId}`,
         },
-        (payload) => {
-          console.log('Realtime token update received', payload)
-          // Invalidate and refetch everything related to link status
-          queryClient.invalidateQueries({ queryKey: ['payslip_tokens'] })
+        () => {
+          queryClient.invalidateQueries({ queryKey: ['payslip_tokens', selectedPeriodId] })
           queryClient.invalidateQueries({ queryKey: ['dashboard-link-stats'] })
-          
-          // Force active queries to refetch immediately
-          queryClient.refetchQueries({ queryKey: ['payslip_tokens'], type: 'active' })
-          queryClient.refetchQueries({ queryKey: ['dashboard-link-stats'], type: 'active' })
         }
       )
       .subscribe()
