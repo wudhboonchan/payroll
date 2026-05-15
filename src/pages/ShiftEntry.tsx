@@ -141,6 +141,13 @@ export default function ShiftEntry() {
 
   const currentPeriod = periods[0]
 
+  // Period boundary helpers (parse as local date to avoid timezone shift)
+  const parseLocalDate = (s: string) => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d) }
+  const periodStart = currentPeriod ? parseLocalDate(currentPeriod.period_start) : null
+  const periodEnd   = currentPeriod ? parseLocalDate(currentPeriod.period_end)   : null
+  const isAtPeriodStart = periodStart ? format(currentDate, 'yyyy-MM-dd') <= format(periodStart, 'yyyy-MM-dd') : false
+  const isAtPeriodEnd   = periodEnd   ? format(currentDate, 'yyyy-MM-dd') >= format(periodEnd,   'yyyy-MM-dd') : false
+
   // Fetch existing assignments for the selected date
   const { data: existingAssignments = [], isLoading: isLoadingAssignments } = useQuery({
     queryKey: ['shifts-for-date', workDateStr, user?.factory_id],
@@ -190,6 +197,20 @@ export default function ShiftEntry() {
   const daysFilled = filledDaysSet.size
   const totalDaysInPeriod = 15 // Assuming 15-day cycle
   const progressPercent = (daysFilled / totalDaysInPeriod) * 100
+
+  // Clamp currentDate to within the current period when period first loads
+  useEffect(() => {
+    if (!periodStart || !periodEnd) return
+    const todayStr = format(new Date(), 'yyyy-MM-dd')
+    const startStr = format(periodStart, 'yyyy-MM-dd')
+    const endStr   = format(periodEnd,   'yyyy-MM-dd')
+    if (todayStr >= startStr && todayStr <= endStr) {
+      setCurrentDate(new Date())
+    } else {
+      setCurrentDate(periodStart)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPeriod?.id])
 
   // Synchronize state with database
   useEffect(() => {
@@ -450,7 +471,10 @@ export default function ShiftEntry() {
           {/* Date Navigator & Action Controls */}
           <div className={`px-4 md:px-8 py-2 md:py-3 border-b flex flex-col lg:flex-row justify-between items-center gap-4 transition-colors shrink-0 ${isHolidayOT ? 'bg-amber-50 border-amber-200' : 'bg-white'}`}>
             <div className="flex items-center gap-4">
-              <Button variant="outline" size="icon" onClick={() => handleDateChange(subDays(currentDate, 1))}>
+              <Button variant="outline" size="icon"
+                disabled={isAtPeriodStart}
+                onClick={() => handleDateChange(subDays(currentDate, 1))}
+              >
                 <ChevronLeft className="w-5 h-5" />
               </Button>
               <div className={`w-[260px] md:w-[320px] text-center px-2 py-2 rounded-xl font-bold text-lg md:text-xl transition-colors ${isHolidayOT
@@ -459,7 +483,10 @@ export default function ShiftEntry() {
                 }`}>
                 {formattedDate}
               </div>
-              <Button variant="outline" size="icon" onClick={() => handleDateChange(addDays(currentDate, 1))}>
+              <Button variant="outline" size="icon"
+                disabled={isAtPeriodEnd}
+                onClick={() => handleDateChange(addDays(currentDate, 1))}
+              >
                 <ChevronRight className="w-5 h-5" />
               </Button>
 

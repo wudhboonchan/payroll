@@ -8,7 +8,7 @@ import { Badge } from '../components/ui/badge'
 import {
   Users, Wallet, ShieldCheck, Banknote,
   CheckCircle2, Clock, ChevronDown,
-  Loader2, Calendar, AlertCircle, Link2, RotateCcw
+  Loader2, Calendar, AlertCircle, Link2, RotateCcw, Plus
 } from 'lucide-react'
 import { formatThaiCurrency, formatPeriodLabel } from '@/lib/formatters'
 import { supabase } from '../lib/supabase'
@@ -327,6 +327,65 @@ export default function Dashboard() {
     }
   })
 
+  // ── Create next period mutation ──────────────────────────────────────────
+  const createNextPeriodMutation = useMutation({
+    mutationFn: async () => {
+      if (!user?.factory_id) throw new Error('ไม่พบข้อมูลโรงงาน')
+
+      // Format using local time to avoid UTC timezone shift
+      const fmt = (d: Date) => {
+        const y = d.getFullYear()
+        const m = String(d.getMonth() + 1).padStart(2, '0')
+        const day = String(d.getDate()).padStart(2, '0')
+        return `${y}-${m}-${day}`
+      }
+      // Parse a YYYY-MM-DD string as local date (not UTC)
+      const parseLocal = (s: string) => {
+        const [y, m, d] = s.split('-').map(Number)
+        return new Date(y, m - 1, d)
+      }
+
+      let nextStart: Date
+      let nextEnd: Date
+
+      if (periods.length === 0) {
+        const now = new Date()
+        nextStart = new Date(now.getFullYear(), now.getMonth(), 1)
+        nextEnd = new Date(now.getFullYear(), now.getMonth(), 15)
+      } else {
+        const latest = periods[0]
+        const latestEnd = parseLocal(latest.period_end)
+        nextStart = new Date(latestEnd.getFullYear(), latestEnd.getMonth(), latestEnd.getDate() + 1)
+
+        const day = nextStart.getDate()
+        if (day === 1) {
+          nextEnd = new Date(nextStart.getFullYear(), nextStart.getMonth(), 15)
+        } else {
+          nextEnd = new Date(nextStart.getFullYear(), nextStart.getMonth() + 1, 0)
+        }
+      }
+
+      const startStr = fmt(nextStart)
+      const endStr = fmt(nextEnd)
+      const { error } = await supabase.from('payroll_periods').insert({
+        factory_id: user.factory_id,
+        label: formatPeriodLabel(startStr, endStr),
+        period_start: startStr,
+        period_end: endStr,
+        status: 'draft',
+        social_security_rate: 0.05,
+      })
+      if (error) throw error
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['periods'] })
+      toast.success('สร้างงวดใหม่เรียบร้อยแล้ว')
+    },
+    onError: (err: unknown) => {
+      toast.error('ไม่สามารถสร้างงวดได้', { description: (err as Error).message })
+    }
+  })
+
   // ── Unapprove mutation ───────────────────────────────────────────────────
   const unapproveMutation = useMutation({
     mutationFn: async () => {
@@ -483,6 +542,26 @@ export default function Dashboard() {
       </DropdownMenuContent>
     </DropdownMenu>
   )
+
+  // Preview label for the next period
+  const nextPeriodLabel = (() => {
+    const fmtLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+    if (periods.length === 0) {
+      const now = new Date()
+      const s = new Date(now.getFullYear(), now.getMonth(), 1)
+      const e = new Date(now.getFullYear(), now.getMonth(), 15)
+      return formatPeriodLabel(fmtLocal(s), fmtLocal(e))
+    }
+    const latest = periods[0]
+    const [y, m, d] = latest.period_end.split('-').map(Number)
+    const latestEnd = new Date(y, m - 1, d)
+    const nextStart = new Date(y, m - 1, d + 1)
+    const day = nextStart.getDate()
+    const nextEnd = day === 1
+      ? new Date(nextStart.getFullYear(), nextStart.getMonth(), 15)
+      : new Date(nextStart.getFullYear(), nextStart.getMonth() + 1, 0)
+    return formatPeriodLabel(fmtLocal(nextStart), fmtLocal(nextEnd))
+  })()
 
   if (user?.role === 'normalUser') {
     return (
@@ -687,7 +766,7 @@ export default function Dashboard() {
 
             </div>
 
-            {/* Approve / Unapprove buttons */}
+            {/* Approve / Unapprove / Create next period buttons */}
             {(user?.role === 'superUser' || user?.role === 'admin') && (
               <div className="mt-6 pt-5 border-t border-slate-100 space-y-2">
                 <Button
@@ -719,6 +798,34 @@ export default function Dashboard() {
                       <><Loader2 className="w-4 h-4 mr-2 animate-spin" />กำลังยกเลิก...</>
                     ) : (
                       <><RotateCcw className="w-4 h-4 mr-2" />ยกเลิกการอนุมัติ</>
+                    )}
+                  </Button>
+                )}
+                {isApproved && (
+                  <Button
+                    variant="outline"
+                    className="w-full rounded-xl h-9 font-medium text-[#1D9E75] border-[#1D9E75]/30 hover:bg-[#1D9E75]/5 hover:border-[#1D9E75]"
+                    disabled={createNextPeriodMutation.isPending}
+                    onClick={() => createNextPeriodMutation.mutate()}
+                  >
+                    {createNextPeriodMutation.isPending ? (
+                      <><Loader2 className="w-4 h-4 mr-2 animate-spin" />กำลังสร้าง...</>
+                    ) : (
+                      <><Plus className="w-4 h-4 mr-2" />สร้างงวดถัดไป ({nextPeriodLabel})</>
+                    )}
+                  </Button>
+                )}
+                {periods.length === 0 && (
+                  <Button
+                    variant="outline"
+                    className="w-full rounded-xl h-9 font-medium text-[#1D9E75] border-[#1D9E75]/30 hover:bg-[#1D9E75]/5 hover:border-[#1D9E75]"
+                    disabled={createNextPeriodMutation.isPending}
+                    onClick={() => createNextPeriodMutation.mutate()}
+                  >
+                    {createNextPeriodMutation.isPending ? (
+                      <><Loader2 className="w-4 h-4 mr-2 animate-spin" />กำลังสร้าง...</>
+                    ) : (
+                      <><Plus className="w-4 h-4 mr-2" />สร้างงวดแรก ({nextPeriodLabel})</>
                     )}
                   </Button>
                 )}
