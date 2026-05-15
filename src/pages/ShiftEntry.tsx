@@ -47,6 +47,8 @@ interface RawShiftAssignment {
   wood_excess: number
   film_amount: number
   ot_hours: number
+  actual_hours: number
+  is_holiday_ot_exempt: boolean
   is_cross_position: boolean
   cross_position_title: string
   cross_position_extra_pay: number
@@ -148,8 +150,8 @@ export default function ShiftEntry() {
         .from('shift_assignments' as any)
         .select(`
           id, employee_id, shift_type, is_holiday_ot,
-          is_half_shift, wood_excess, film_amount, ot_hours,
-          is_cross_position, cross_position_title, cross_position_extra_pay,
+          is_half_shift, wood_excess, film_amount, ot_hours, actual_hours,
+          is_holiday_ot_exempt, is_cross_position, cross_position_title, cross_position_extra_pay,
           employee:employees(employee_code, first_name, last_name, prefix, nationality)
         `)
         .eq('work_date', workDateStr)
@@ -213,10 +215,12 @@ export default function ShiftEntry() {
               shift: a.shift_type as ShiftType,
               isNew: false,
               isHolidayOT: a.is_holiday_ot,
+              isHolidayOTExempt: a.is_holiday_ot_exempt ?? false,
               isHalfShift: a.is_half_shift ?? false,
               woodExcess: Number(a.wood_excess ?? 0),
               filmAmount: Number(a.film_amount ?? 0),
               otHours: Number(a.ot_hours ?? 0),
+              partialHours: Number(a.actual_hours ?? 0),
               isClerk: emp?.position === 'clerk',
               isCrossPosition: a.is_cross_position ?? false,
               crossPositionTitle: a.cross_position_title || '',
@@ -227,8 +231,8 @@ export default function ShiftEntry() {
 
       setAssignments(prev => {
         // Only update if the data actually changed (Deep compare to avoid loops)
-        const currentSignature = JSON.stringify(mapped.map(m => m.employee_id + m.shift + m.isHalfShift + m.otHours + m.woodExcess))
-        const prevSignature = JSON.stringify(prev.map(p => p.employee_id + p.shift + p.isHalfShift + p.otHours + p.woodExcess))
+        const currentSignature = JSON.stringify(mapped.map(m => m.employee_id + m.shift + m.isHalfShift + m.otHours + m.woodExcess + m.partialHours + m.isHolidayOTExempt))
+        const prevSignature = JSON.stringify(prev.map(p => p.employee_id + p.shift + p.isHalfShift + p.otHours + p.woodExcess + p.partialHours + p.isHolidayOTExempt))
 
         if (currentSignature === prevSignature) {
           return prev
@@ -291,10 +295,12 @@ export default function ShiftEntry() {
         shift,
         isNew: true,
         isHolidayOT: isHolidayOT,
+        isHolidayOTExempt: false,
         isHalfShift: isClerk ? true : false,  // clerks always 8h
         woodExcess: 0,
         filmAmount: 0,
         otHours: 0,
+        partialHours: 0,
         isClerk,
         isCrossPosition: false,
         crossPositionTitle: '',
@@ -364,6 +370,8 @@ export default function ShiftEntry() {
         wood_excess: a.isClerk ? 0 : a.woodExcess,
         film_amount: a.isClerk ? 0 : a.filmAmount,
         ot_hours: a.otHours,
+        actual_hours: a.partialHours || 0,
+        is_holiday_ot_exempt: a.isHolidayOTExempt ?? false,
         is_cross_position: a.isCrossPosition ?? false,
         cross_position_title: a.crossPositionTitle || '',
         cross_position_extra_pay: a.crossPositionExtraPay || 0,
@@ -718,52 +726,90 @@ export default function ShiftEntry() {
                 </div>
               </>
             ) : (
-              /* ── Worker Modal: 8/12h toggle + wood/film ── */
+              /* ── Worker Modal: 8/12h toggle + partial hours + wood/film ── */
               <>
                 <div className="space-y-2">
                   <Label className="text-sm font-semibold text-slate-700">ชั่วโมงทำงาน</Label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      onClick={() => updateAssignment(detailModalEmp.employee_id, { isHalfShift: false })}
-                      className={`flex flex-col items-center gap-1 p-3 rounded-xl border-2 transition-all ${!detailModalEmp.isHalfShift
-                          ? 'border-[#1D9E75] bg-[#1D9E75]/10 text-[#1D9E75]'
-                          : 'border-slate-200 text-slate-500 hover:border-slate-300'
-                        }`}
-                    >
-                      <Clock className="w-5 h-5" />
-                      <span className="text-xs font-bold">{isHolidayOT ? '12 ชม. (OT วันหยุด)' : '12 ชม. (เต็ม)'}</span>
-                      <span className="text-[10px]">{isHolidayOT ? 'ได้เรท OT 2 เท่า' : 'ปกติ + ค่ากะ'}</span>
-                    </button>
-                    <button
-                      onClick={() => updateAssignment(detailModalEmp.employee_id, { isHalfShift: true })}
-                      className={`flex flex-col items-center gap-1 p-3 rounded-xl border-2 transition-all ${detailModalEmp.isHalfShift
-                          ? 'border-amber-500 bg-amber-50 text-amber-700'
-                          : 'border-slate-200 text-slate-500 hover:border-slate-300'
-                        }`}
-                    >
-                      <Clock4 className="w-5 h-5" />
-                      <span className="text-xs font-bold">{isHolidayOT ? '8 ชม. (OT วันหยุด)' : '8 ชม. เท่านั้น'}</span>
-                      <span className="text-[10px]">{isHolidayOT ? 'ได้เรท OT 2 เท่า' : 'ค่าปกติ (ไม่มีค่ากะ)'}</span>
-                    </button>
-                  </div>
-                  {detailModalEmp.isHalfShift && (
-                    <p className="text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded">
-                      ⚠️ วันนี้จะไม่ถูกนับค่ากะ (4 ชม.)
-                    </p>
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  <Label className="text-sm font-semibold text-slate-700">ชั่วโมง OT (ถ้ามี)</Label>
-                  <div className="flex items-center gap-3">
-                    <Input
-                      type="number" min="0" step="0.5"
-                      value={detailModalEmp.otHours || ''}
-                      onChange={e => updateAssignment(detailModalEmp.employee_id, { otHours: Number(e.target.value) || 0 })}
-                      placeholder="0" className="w-24 h-9 text-center font-bold"
-                    />
-                    <span className="text-slate-500 text-xs">ชม.</span>
-                  </div>
+                  {(() => {
+                    const isPartial = (detailModalEmp.partialHours || 0) > 0
+                    return (
+                      <>
+                        <div className={`grid gap-2 ${isHolidayOT ? 'grid-cols-2' : 'grid-cols-3'}`}>
+                          <button
+                            onClick={() => updateAssignment(detailModalEmp.employee_id, { isHalfShift: false, partialHours: 0 })}
+                            className={`flex flex-col items-center gap-1 p-3 rounded-xl border-2 transition-all ${
+                              !detailModalEmp.isHalfShift && !isPartial
+                                ? 'border-[#1D9E75] bg-[#1D9E75]/10 text-[#1D9E75]'
+                                : isPartial
+                                  ? 'border-slate-100 bg-slate-50 text-slate-300 cursor-not-allowed'
+                                  : 'border-slate-200 text-slate-500 hover:border-slate-300'
+                            }`}
+                          >
+                            <Clock className="w-5 h-5" />
+                            <span className="text-xs font-bold">{isHolidayOT ? '12 ชม. OT' : '12 ชม.'}</span>
+                            <span className="text-[11px]">{isHolidayOT ? '2 เท่า' : 'ปกติ + กะ'}</span>
+                          </button>
+                          <button
+                            onClick={() => updateAssignment(detailModalEmp.employee_id, { isHalfShift: true, partialHours: 0 })}
+                            className={`flex flex-col items-center gap-1 p-3 rounded-xl border-2 transition-all ${
+                              detailModalEmp.isHalfShift && !isPartial
+                                ? 'border-amber-500 bg-amber-50 text-amber-700'
+                                : isPartial
+                                  ? 'border-slate-100 bg-slate-50 text-slate-300 cursor-not-allowed'
+                                  : 'border-slate-200 text-slate-500 hover:border-slate-300'
+                            }`}
+                          >
+                            <Clock4 className="w-5 h-5" />
+                            <span className="text-xs font-bold">{isHolidayOT ? '8 ชม. OT' : '8 ชม.'}</span>
+                            <span className="text-[11px]">{isHolidayOT ? '2 เท่า' : 'ไม่มีค่ากะ'}</span>
+                          </button>
+                          {!isHolidayOT && (
+                            <button
+                              onClick={() => updateAssignment(detailModalEmp.employee_id, {
+                                isHalfShift: false,
+                                partialHours: detailModalEmp.partialHours || 4,
+                              })}
+                              className={`flex flex-col items-center gap-1 p-3 rounded-xl border-2 transition-all ${
+                                isPartial
+                                  ? 'border-orange-500 bg-orange-50 text-orange-700'
+                                  : 'border-slate-200 text-slate-500 hover:border-slate-300'
+                              }`}
+                            >
+                              <Clock4 className="w-5 h-5" />
+                              <span className="text-xs font-bold">{"< 8 ชม."}</span>
+                              <span className="text-[11px]">ลา/ป่วย</span>
+                            </button>
+                          )}
+                        </div>
+                        {isPartial && (
+                          <div className="flex items-center gap-3 pt-1">
+                            <Input
+                              type="number"
+                              min="0.5"
+                              max="7.5"
+                              step="0.5"
+                              value={detailModalEmp.partialHours || ''}
+                              onChange={e => updateAssignment(detailModalEmp.employee_id, { partialHours: Number(e.target.value) || 0 })}
+                              placeholder="ชม." className="w-24 h-9 text-center font-bold"
+                            />
+                            <div className="text-xs text-slate-500">
+                              <span>ชม. ทำงานจริง</span>
+                              {(detailModalEmp.partialHours || 0) > 0 && (
+                                <span className="ml-2 text-orange-600 font-semibold">
+                                  = {Math.round((357 / 8) * (detailModalEmp.partialHours || 0))} ฿
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                        {!isPartial && detailModalEmp.isHalfShift && (
+                          <p className="text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded">
+                            ⚠️ วันนี้จะไม่ถูกนับค่ากะ (4 ชม.)
+                          </p>
+                        )}
+                      </>
+                    )
+                  })()}
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
@@ -786,6 +832,29 @@ export default function ShiftEntry() {
                     />
                   </div>
                 </div>
+
+                {/* ── Holiday OT Exempt ── */}
+                {isHolidayOT && (
+                  <div className="pt-2 border-t">
+                    <div className="flex items-start gap-2">
+                      <input
+                        type="checkbox"
+                        id="hol-exempt"
+                        checked={detailModalEmp.isHolidayOTExempt ?? false}
+                        onChange={e => updateAssignment(detailModalEmp.employee_id, { isHolidayOTExempt: e.target.checked })}
+                        className="w-4 h-4 mt-0.5 rounded border-slate-300 text-[#1D9E75] focus:ring-[#1D9E75]"
+                      />
+                      <div>
+                        <Label htmlFor="hol-exempt" className="text-sm font-bold text-slate-700 cursor-pointer">
+                          ได้รับค่าจ้างปกติ (ไม่ได้เรท ×2)
+                        </Label>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          คิดเงินเหมือนวันทำงานปกติ ไม่ใช่ค่า OT วันหยุด
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* ── Job Rotation (Cross-position) ── */}
                 <div className="pt-2 border-t space-y-3">

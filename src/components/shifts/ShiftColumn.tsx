@@ -11,10 +11,12 @@ export interface AssignedEmployee {
   shift: ShiftType
   isNew: boolean
   isHolidayOT: boolean
+  isHolidayOTExempt: boolean
   isHalfShift: boolean
   woodExcess: number
   filmAmount: number
   otHours: number
+  partialHours: number
   isClerk: boolean
   isCrossPosition?: boolean
   crossPositionTitle?: string
@@ -89,7 +91,10 @@ export function ShiftColumn({
                   {emp.isClerk && (
                     <Badge className="bg-red-100 text-red-600 hover:bg-red-100 border-none text-[10px] px-1.5 py-0 h-4">เสมียน</Badge>
                   )}
-                  {!emp.isClerk && emp.isHalfShift && (
+                  {!emp.isClerk && emp.partialHours > 0 && (
+                    <Badge className="bg-orange-100 text-orange-700 hover:bg-orange-100 border-none text-[10px] px-1.5 py-0 h-4">ทำงาน {emp.partialHours} ชม.</Badge>
+                  )}
+                  {!emp.isClerk && emp.isHalfShift && emp.partialHours === 0 && (
                     <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100 border-none text-[10px] px-1.5 py-0 h-4">ทำงาน 8 ชม.</Badge>
                   )}
                   {emp.isClerk && emp.otHours > 0 && (
@@ -101,8 +106,11 @@ export function ShiftColumn({
                   {!emp.isClerk && emp.filmAmount > 0 && (
                     <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 border-none text-[10px] px-1.5 py-0 h-4">+ค่าฟิล์ม</Badge>
                   )}
-                  {emp.isHolidayOT && (
-                    <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100 border-none text-[10px] px-1.5 py-0 h-4">Holiday OT</Badge>
+                  {emp.isHolidayOT && !emp.isHolidayOTExempt && (
+                    <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100 border-none text-[10px] px-1.5 py-0 h-4">Holiday OT ×2</Badge>
+                  )}
+                  {emp.isHolidayOT && emp.isHolidayOTExempt && (
+                    <Badge className="bg-slate-100 text-slate-500 hover:bg-slate-100 border-none text-[10px] px-1.5 py-0 h-4">วันหยุด ×1</Badge>
                   )}
                   {emp.isCrossPosition && (
                     <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100 border-none text-[10px] px-1.5 py-0 h-4">สลับตำแหน่ง</Badge>

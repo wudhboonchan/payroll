@@ -7,7 +7,9 @@ export interface PayrollCalculationInput {
   rate_per_12h: number;       // daily rate for workers, monthly salary for clerks
   normal_days: number;        // full 12h shifts
   half_shift_days?: number;   // 8h only shifts (no shift pay for these)
-  holiday_ot_hours: number;
+  holiday_ot_full_days?: number;  // holiday OT full 12h days (paid 2× daily rate)
+  holiday_ot_half_days?: number;  // holiday OT 8h-only days (paid 2× base_normal_rate)
+  partial_hours_total?: number;   // total hours for < 8h partial shifts (paid per hour at 357/8)
 
   // For clerk (position === 'clerk')
   // rate_per_12h stores monthly salary
@@ -76,7 +78,9 @@ export function calculateTraPhetPayroll(input: PayrollCalculationInput): Payroll
     rate_per_12h,
     normal_days,
     half_shift_days = 0,
-    holiday_ot_hours,
+    holiday_ot_full_days = 0,
+    holiday_ot_half_days = 0,
+    partial_hours_total = 0,
     override_normal,
     override_shift,
     override_ot,
@@ -102,11 +106,14 @@ export function calculateTraPhetPayroll(input: PayrollCalculationInput): Payroll
   const base_shift_rate = Math.max(0, rate_per_12h - base_normal_rate);
 
   // Normal pay = 357 * totalNormalDays (including half shift days which only get 8h)
-  const amount_normal = base_normal_rate * totalNormalDays;
+  // Plus partial hours pay at hourly rate (357/8 per hour)
+  const amount_normal = base_normal_rate * totalNormalDays + Math.round((base_normal_rate / 8) * partial_hours_total);
   // Shift pay = Remainder * fullShiftDays ONLY (no shift pay for half/8h days)
   const amount_shift = base_shift_rate * fullShiftDays;
-  // OT = (rate_per_12h / 12) * holiday_ot_hours * 2 (holiday overtime)
-  const amount_ot = (rate_per_12h / 12) * holiday_ot_hours * 2;
+  // Holiday OT = 2× daily rate per full day + 2× base_normal_rate per 8h-only day
+  // Use at least base_normal_rate as floor for full days (matches normal pay floor of 357)
+  const effective_daily_rate = Math.max(rate_per_12h, base_normal_rate);
+  const amount_ot = holiday_ot_full_days * effective_daily_rate * 2 + holiday_ot_half_days * base_normal_rate * 2;
 
   const effective_normal = override_normal ?? amount_normal;
   const effective_shift = override_shift ?? amount_shift;

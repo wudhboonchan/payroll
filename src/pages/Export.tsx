@@ -159,29 +159,31 @@ export default function Export() {
 
       const ssoMap: Record<string, SSOExportItem> = {}
 
-      const validRows = (data as unknown as SSORow[]).filter(row => row.employee)
-      
+      // Only Thai nationals are subject to social security
+      const validRows = (data as unknown as SSORow[]).filter(row => {
+        if (!row.employee) return false
+        const nat = row.employee.nationality || 'ไทย'
+        return nat === 'ไทย'
+      })
+
       validRows.forEach((row) => {
         const emp = row.employee
-        const nat = emp.nationality || 'ไทย'
-        const code = emp.national_id || emp.first_name // fallback identifier
+        const code = emp.national_id || emp.first_name
 
-        const key = `${nat}_${code}`
-
-        if (!ssoMap[key]) {
-          ssoMap[key] = {
-            nat,
+        if (!ssoMap[code]) {
+          ssoMap[code] = {
+            nat: 'ไทย',
             emp,
             amount_normal: 0,
             deduct_social_security: 0
           }
         }
 
-        ssoMap[key].amount_normal += (row.amount_normal || 0)
-        ssoMap[key].deduct_social_security += (row.deduct_social_security || 0)
+        ssoMap[code].amount_normal += (row.amount_normal || 0)
+        ssoMap[code].deduct_social_security += (row.deduct_social_security || 0)
       })
 
-      interface SSOGroupedData {
+      interface SSOExportRow {
         'เลขบัตรประชาชน': string
         'คำนำหน้า': string
         'ชื่อ': string
@@ -190,37 +192,23 @@ export default function Export() {
         'เงินสมทบ': number
       }
 
-      const groupedData: Record<string, SSOGroupedData[]> = {}
-      
-      Object.values(ssoMap).forEach((item) => {
-        const { nat, emp, amount_normal, deduct_social_security } = item
-        if (!groupedData[nat]) {
-          groupedData[nat] = []
-        }
-        groupedData[nat].push({
-          'เลขบัตรประชาชน': emp.national_id || '',
-          'คำนำหน้า': emp.prefix || '',
-          'ชื่อ': emp.first_name || '',
-          'สกุล': emp.last_name || '',
-          'ค่าจ้าง': amount_normal,
-          'เงินสมทบ': Math.abs(deduct_social_security)
-        })
-      })
+      const thaiRows: SSOExportRow[] = Object.values(ssoMap).map(({ emp, amount_normal, deduct_social_security }) => ({
+        'เลขบัตรประชาชน': emp.national_id || '',
+        'คำนำหน้า': emp.prefix || '',
+        'ชื่อ': emp.first_name || '',
+        'สกุล': emp.last_name || '',
+        'ค่าจ้าง': amount_normal,
+        'เงินสมทบ': Math.abs(deduct_social_security)
+      }))
 
-      if (Object.keys(groupedData).length === 0) {
-        toast.error('ไม่พบพนักงานในงวดนี้')
+      if (thaiRows.length === 0) {
+        toast.error('ไม่พบพนักงานสัญชาติไทยในงวดนี้')
         return
       }
 
       const workbook = XLSX.utils.book_new()
-
-      for (const [nationality, employeesData] of Object.entries(groupedData)) {
-        let safeSheetName = nationality.replace(/[\\/*?:[\]]/g, '').substring(0, 31)
-        if (!safeSheetName) safeSheetName = 'Sheet'
-
-        const worksheet = XLSX.utils.json_to_sheet(employeesData)
-        XLSX.utils.book_append_sheet(workbook, worksheet, safeSheetName)
-      }
+      const worksheet = XLSX.utils.json_to_sheet(thaiRows)
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'ประกันสังคม')
 
       const exportLabel = getExportLabel()
       const filename = `SSO_${exportLabel.replace(/[\s/*?:[\]]/g, '_')}.xlsx`

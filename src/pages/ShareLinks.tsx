@@ -147,8 +147,11 @@ export default function ShareLinks() {
       
       const typedData = data as unknown as TokenRow[]
       return typedData.map(t => {
-        if (t.employee_status === 'pending' && t.created_at) {
-          const hoursPassed = (Date.now() - new Date(t.created_at).getTime()) / (1000 * 60 * 60)
+        if (t.employee_status === 'pending' && t.expires_at) {
+          // Derive sent_at from expires_at (always set to now+30d on create/reset)
+          // so auto-confirm counts 24h from the last send/reset, not the original created_at
+          const sentAt = new Date(t.expires_at).getTime() - 30 * 24 * 60 * 60 * 1000
+          const hoursPassed = (Date.now() - sentAt) / (1000 * 60 * 60)
           if (hoursPassed >= 24) {
             return { ...t, employee_status: 'auto_confirmed' as SlipStatus }
           }

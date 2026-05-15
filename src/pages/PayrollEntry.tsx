@@ -39,6 +39,7 @@ interface ShiftAssignment {
   work_date?: string
   shift_type?: string
   is_holiday_ot?: boolean
+  is_holiday_ot_exempt?: boolean
   is_half_shift?: boolean
   wood_excess?: number
   film_amount?: number
@@ -152,7 +153,7 @@ export default function PayrollEntry() {
       if (!selectedEmployeeId || !currentPeriod?.id) return []
       const { data, error } = await supabase
         .from('shift_assignments')
-        .select('id, employee_id, shift_type, is_holiday_ot, is_half_shift, wood_excess, film_amount, ot_hours, work_date, is_cross_position, cross_position_title, cross_position_extra_pay')
+        .select('id, employee_id, shift_type, is_holiday_ot, is_holiday_ot_exempt, is_half_shift, wood_excess, film_amount, ot_hours, work_date, is_cross_position, cross_position_title, cross_position_extra_pay')
         .eq('employee_id', selectedEmployeeId)
         .eq('period_id', currentPeriod?.id)
       if (error) throw error
@@ -219,7 +220,7 @@ export default function PayrollEntry() {
       const { data, error } = await supabase
         .from('shift_assignments' as any)
         .select(`
-          id, employee_id, shift_type, is_holiday_ot,
+          id, employee_id, shift_type, is_holiday_ot, is_holiday_ot_exempt,
           is_half_shift, wood_excess, film_amount, ot_hours, work_date,
           is_cross_position, cross_position_title, cross_position_extra_pay,
           employee:employees(employee_code, first_name, last_name, prefix, nationality)
@@ -289,19 +290,21 @@ export default function PayrollEntry() {
   // Consolidated calculations for stability
   const { 
     calc, totalAdvance, effectiveWood, effectiveFilm, 
-    isClerk, normalDays, halfShiftDays, holidayOtHours, 
+    isClerk, normalDays, halfShiftDays, holidayOtFullDays, holidayOtHalfDays,
     autoClerkOtHours, autoClerkOt1xHours, autoWood, autoFilm,
     autoSpecial, autoSpecialNote, effectiveSpecial
   } = useMemo(() => {
     const isClerk = selectedEmployee?.position === 'clerk'
     const advTotal = advances.reduce((sum: number, adv) => sum + Number(adv.amount), 0)
-    const normShifts = shifts.filter(s => !s.is_holiday_ot)
-    const normDays = normShifts.filter(s => !s.is_half_shift).length
-    const halfDays = normShifts.filter(s => s.is_half_shift).length
-    const holHours = shifts.filter(s => s.is_holiday_ot).reduce((sum: number, s) => {
-      const base = s.is_half_shift ? 8 : 12
-      return sum + base + Number(s.ot_hours || 0)
-    }, 0)
+    // Shifts treated as normal: non-holiday OR holiday but exempt (1x pay)
+    const normShifts = shifts.filter(s => !s.is_holiday_ot || s.is_holiday_ot_exempt)
+    const normDays = normShifts.filter(s => !s.is_half_shift && !((s as any).actual_hours > 0)).length
+    const halfDays = normShifts.filter(s => s.is_half_shift && !((s as any).actual_hours > 0)).length
+    const partialHoursTotal = normShifts.reduce((sum: number, s) => sum + Number((s as any).actual_hours || 0), 0)
+    // Shifts with true 2x holiday OT (not exempt)
+    const holShifts = shifts.filter(s => s.is_holiday_ot && !s.is_holiday_ot_exempt)
+    const holFullDays = holShifts.filter(s => !s.is_half_shift).length
+    const holHalfDays = holShifts.filter(s => s.is_half_shift).length
     const clerkNormDays = normShifts.length
     const isWeekendDay = (dateStr: string) => {
       const d = parseISO(dateStr);
@@ -326,17 +329,20 @@ export default function PayrollEntry() {
     const woodVal: number = overrideWood !== null ? overrideWood : autoW
     const filmVal: number = overrideFilm !== null ? overrideFilm : autoF
 
+    const isThai = !selectedEmployee?.nationality || selectedEmployee.nationality === 'ไทย'
     const input: PayrollCalculationInput = {
       position: (selectedEmployee?.position as 'worker' | 'clerk') || 'worker',
       wage_type: (selectedEmployee?.wage_type as 'daily' | 'monthly') || 'daily',
       rate_per_12h: selectedEmployee?.rate_per_12h || 0,
       normal_days: isClerk ? clerkNormDays : normDays,
       half_shift_days: isClerk ? 0 : halfDays,
-      holiday_ot_hours: holHours,
+      holiday_ot_full_days: holFullDays,
+      holiday_ot_half_days: holHalfDays,
+      partial_hours_total: isClerk ? 0 : partialHoursTotal,
       clerk_ot_hours: autoClerkOt,
       clerk_ot_1x_hours: autoClerkOt1x,
       override_normal: overrideNormal,
-      social_security_rate: socialSecurityRate,
+      social_security_rate: isThai ? socialSecurityRate : 0,
       deduct_advance: advTotal,
       amount_wood_excess: isClerk ? 0 : woodVal,
       amount_film: isClerk ? 0 : filmVal,
@@ -356,7 +362,8 @@ export default function PayrollEntry() {
       isClerk,
       normalDays: normDays,
       halfShiftDays: halfDays,
-      holidayOtHours: holHours,
+      holidayOtFullDays: holFullDays,
+      holidayOtHalfDays: holHalfDays,
       autoClerkOtHours: autoClerkOt,
       autoClerkOt1xHours: autoClerkOt1x,
       autoWood: autoW,
@@ -539,7 +546,7 @@ export default function PayrollEntry() {
 
                 // ── Status Logic (Using central calculatePayroll) ──
                 const empShifts = allPeriodShifts.filter(s => s.employee_id === emp.id)
-                const normalShifts = empShifts.filter(s => !s.is_holiday_ot)
+                const normalShifts = empShifts.filter(s => !s.is_holiday_ot || s.is_holiday_ot_exempt)
                 const isEmpClerk = emp.position === 'clerk'
 
                 const sidebarWood = empShifts.reduce((sum: number, s) => sum + Number(s.wood_excess || 0), 0)
@@ -557,32 +564,36 @@ export default function PayrollEntry() {
                     const sidebarClerkOt = empShifts.filter(s => !isWeekendDay(s.work_date)).reduce((sum: number, s) => sum + Number(s.ot_hours || 0), 0)
                     const sidebarClerkOt1x = empShifts.filter(s => isWeekendDay(s.work_date)).reduce((sum: number, s) => sum + Number(s.ot_hours || 0), 0)
 
-                    const sidebarHolHours = empShifts.filter(s => s.is_holiday_ot).reduce((sum: number, s) => {
-                      const base = s.is_half_shift ? 8 : 12
-                      return sum + base + Number(s.ot_hours || 0)
-                    }, 0)
+                    const sidebarHolShifts = empShifts.filter(s => s.is_holiday_ot && !s.is_holiday_ot_exempt)
+                    const sidebarHolFullDays = sidebarHolShifts.filter(s => !s.is_half_shift).length
+                    const sidebarHolHalfDays = sidebarHolShifts.filter(s => s.is_half_shift).length
+                    const sidebarNormShifts = empShifts.filter(s => !s.is_holiday_ot || s.is_holiday_ot_exempt)
+                    const sidebarPartialHours = sidebarNormShifts.reduce((sum: number, s) => sum + Number((s as any).actual_hours || 0), 0)
 
                     const sidebarWood = empShifts.reduce((sum: number, s) => sum + Number(s.wood_excess || 0), 0)
                     const sidebarFilm = empShifts.reduce((sum: number, s) => sum + Number(s.film_amount || 0), 0)
                     const sidebarAutoSpecial = empShifts
                       .filter(s => s.is_cross_position)
                       .reduce((sum: number, s) => sum + Number(s.cross_position_extra_pay || 0), 0)
-                    
+
                     const crossPosShifts = empShifts.filter(s => s.is_cross_position)
-                    const sidebarAutoSpecialNote = crossPosShifts.length > 0 
+                    const sidebarAutoSpecialNote = crossPosShifts.length > 0
                       ? crossPosShifts.map(s => `${s.cross_position_title || 'สลับตำแหน่ง'} (${s.cross_position_extra_pay}฿)`).join(', ')
                       : ''
 
+                    const isEmpThai = !emp.nationality || emp.nationality === 'ไทย'
                     const calcInput: PayrollCalculationInput = {
                       position: (emp.position as 'worker' | 'clerk') || 'worker',
                       wage_type: (emp.wage_type as 'daily' | 'monthly') || 'daily',
                       rate_per_12h: Number(emp.rate_per_12h || 0),
-                      normal_days: isEmpClerk ? normalShifts.length : normalShifts.filter(s => !s.is_half_shift).length,
-                      half_shift_days: isEmpClerk ? 0 : normalShifts.filter(s => s.is_half_shift).length,
-                      holiday_ot_hours: sidebarHolHours,
+                      normal_days: isEmpClerk ? sidebarNormShifts.length : sidebarNormShifts.filter(s => !s.is_half_shift && !((s as any).actual_hours > 0)).length,
+                      half_shift_days: isEmpClerk ? 0 : sidebarNormShifts.filter(s => s.is_half_shift && !((s as any).actual_hours > 0)).length,
+                      holiday_ot_full_days: sidebarHolFullDays,
+                      holiday_ot_half_days: sidebarHolHalfDays,
+                      partial_hours_total: isEmpClerk ? 0 : sidebarPartialHours,
                       clerk_ot_hours: sidebarClerkOt,
                       clerk_ot_1x_hours: sidebarClerkOt1x,
-                      social_security_rate: socialSecurityRate,
+                      social_security_rate: isEmpThai ? socialSecurityRate : 0,
                       override_normal: entry.override_normal != null ? Number(entry.override_normal) : null,
                       amount_wood_excess: isEmpClerk ? 0 : sidebarWood,
                       amount_film: isEmpClerk ? 0 : sidebarFilm,
@@ -865,7 +876,7 @@ export default function PayrollEntry() {
                       <div className="space-y-2">
                         <div className="flex justify-between items-center">
                           <Label className="text-slate-700 font-semibold">OT วันหยุด</Label>
-                          <span className="text-xs text-slate-500">คำนวณอัตโนมัติ: {holidayOtHours} ชม.</span>
+                          <span className="text-xs text-slate-500">คำนวณอัตโนมัติ: {holidayOtFullDays} วัน (12ชม.) + {holidayOtHalfDays} วัน (8ชม.)</span>
                         </div>
                         <Input className="bg-slate-50" readOnly value={formatThaiCurrency(calc.amount_ot)} />
                       </div>
