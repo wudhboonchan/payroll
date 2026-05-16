@@ -268,12 +268,6 @@ export default function ShiftEntryV2() {
         </div>
         {/* Row 2: holiday checkbox + save button — always same height */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          {/* Desktop only: badge in this row */}
-          {weekend && (
-            <span className="hidden md:inline-flex" style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', color: '#5b21b6', background: 'rgba(91,33,182,0.08)', padding: '2px 8px', borderRadius: 999, whiteSpace: 'nowrap' }}>
-              วันหยุดสัปดาห์
-            </span>
-          )}
           <label style={{
             display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: '4px 12px',
             border: `1px solid ${isHoliday ? 'var(--vk-marigold)' : 'var(--vk-rule-soft)'}`,
@@ -283,6 +277,12 @@ export default function ShiftEntryV2() {
             <input type="checkbox" checked={isHoliday} onChange={e => setIsHoliday(e.target.checked)} style={{ accentColor: 'var(--vk-marigold)' }} />
             วันหยุดนักขัตฤกษ์ (OT ×2)
           </label>
+          {/* Desktop only: weekend badge after holiday checkbox */}
+          {weekend && (
+            <span className="hidden md:inline-flex" style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', color: '#5b21b6', background: 'rgba(91,33,182,0.08)', padding: '2px 8px', borderRadius: 999, whiteSpace: 'nowrap' }}>
+              วันหยุดสัปดาห์
+            </span>
+          )}
           <div style={{ marginLeft: 'auto' }}>
             <button className="vk-btn vk-btn--primary" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
               onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
