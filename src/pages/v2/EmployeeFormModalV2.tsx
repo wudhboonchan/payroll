@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
@@ -6,7 +6,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { useAppStore } from '@/store/useAppStore'
 import { toast } from 'sonner'
-import { UserPlus, X } from 'lucide-react'
+import { UserPlus, X, AlertTriangle } from 'lucide-react'
 import { NATIONALITIES } from '@/lib/constants'
 import '../../styles/v2-tokens.css'
 
@@ -75,6 +75,7 @@ const errorStyle: React.CSSProperties = {
 export default function EmployeeFormModalV2({ isOpen, onClose, employeeId, onSuccess }: Props) {
   const { user } = useAppStore()
   const queryClient = useQueryClient()
+  const [inactiveConfirm, setInactiveConfirm] = useState<{ shiftCount: number; pendingValues: EmployeeFormValues } | null>(null)
 
   const { register, handleSubmit, reset, watch, setValue, formState: { errors } } = useForm<EmployeeFormValues>({
     resolver: zodResolver(employeeSchema) as any,
@@ -128,8 +129,13 @@ export default function EmployeeFormModalV2({ isOpen, onClose, employeeId, onSuc
   }, [employeeData, employeeId, isOpen, reset])
 
   const mutation = useMutation({
-    mutationFn: async (values: EmployeeFormValues) => {
+    mutationFn: async ({ values, deleteShifts }: { values: EmployeeFormValues; deleteShifts: boolean }) => {
       if (!user?.factory_id) throw new Error('No factory context')
+      // Delete all shift assignments for this employee if requested
+      if (deleteShifts && employeeId) {
+        const { error: shiftErr } = await supabase.from('shift_assignments').delete().eq('employee_id', employeeId)
+        if (shiftErr) throw shiftErr
+      }
       const payload = {
         ...values,
         last_name: values.last_name?.trim() || '',
@@ -145,10 +151,16 @@ export default function EmployeeFormModalV2({ isOpen, onClose, employeeId, onSuc
         if (error) throw error
       }
     },
-    onSuccess: () => {
+    onSuccess: (_, { deleteShifts }) => {
       queryClient.invalidateQueries({ queryKey: ['employees'] })
       queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] })
-      toast.success(employeeId ? 'อัปเดตข้อมูลสำเร็จ' : 'เพิ่มพนักงานสำเร็จ')
+      if (deleteShifts) {
+        queryClient.invalidateQueries({ queryKey: ['all-period-shifts'] })
+        queryClient.invalidateQueries({ queryKey: ['shift-assignments'] })
+        toast.success('บันทึกสำเร็จ — ลบกะของพนักงานทั้งหมดแล้ว')
+      } else {
+        toast.success(employeeId ? 'อัปเดตข้อมูลสำเร็จ' : 'เพิ่มพนักงานสำเร็จ')
+      }
       onSuccess?.()
       onClose()
     },
@@ -159,6 +171,20 @@ export default function EmployeeFormModalV2({ isOpen, onClose, employeeId, onSuc
       })
     },
   })
+
+  // Called by form submit — intercepts inactive + existing shifts case
+  const handleSave = async (values: EmployeeFormValues) => {
+    const isMarkingInactive = values.status === 'inactive' && employeeData?.status === 'active'
+    if (isMarkingInactive && employeeId) {
+      const { data: shifts } = await supabase.from('shift_assignments').select('id', { count: 'exact', head: false }).eq('employee_id', employeeId)
+      const shiftCount = shifts?.length ?? 0
+      if (shiftCount > 0) {
+        setInactiveConfirm({ shiftCount, pendingValues: values })
+        return
+      }
+    }
+    mutation.mutate({ values, deleteShifts: false })
+  }
 
   if (!isOpen) return null
 
@@ -196,7 +222,7 @@ export default function EmployeeFormModalV2({ isOpen, onClose, employeeId, onSuc
         </div>
 
         {/* Form body */}
-        <form onSubmit={handleSubmit(d => mutation.mutate(d))} style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+        <form onSubmit={handleSubmit(handleSave)} style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
           <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: 20, flex: 1 }}>
 
             {/* Row 1: รหัส + สัญชาติ */}
@@ -398,5 +424,33 @@ export default function EmployeeFormModalV2({ isOpen, onClose, employeeId, onSuc
         </form>
       </div>
     </div>
+
+      {/* ── Inactive + existing shifts confirmation modal ── */}
+      {inactiveConfirm && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 300, background: 'rgba(22,19,17,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          <div style={{ background: 'var(--vk-paper)', border: '1px solid var(--vk-rule)', width: '100%', maxWidth: 420, overflow: 'hidden' }}>
+            <div style={{ background: 'var(--vk-persimmon)', color: '#fff', padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 10 }}>
+              <AlertTriangle style={{ width: 16, height: 16, flexShrink: 0 }} />
+              <div style={{ fontWeight: 700, fontSize: 15 }}>พนักงานมีกะที่บันทึกอยู่</div>
+            </div>
+            <div style={{ padding: '20px' }}>
+              <p style={{ fontSize: 14, color: 'var(--vk-ink-2)', lineHeight: 1.7 }}>
+                พนักงานคนนี้มีกะที่ถูกบันทึกไว้ <strong>{inactiveConfirm.shiftCount} รายการ</strong>
+                {' '}หากเปลี่ยนสถานะเป็น <strong>พ้นสภาพ</strong> ระบบจะลบกะทั้งหมดของพนักงานคนนี้ออกจากทุกงวด
+              </p>
+              <div style={{ marginTop: 14, padding: '12px 14px', background: 'var(--vk-persimmon-tint)', border: '1px solid var(--vk-persimmon)', fontSize: 12, color: 'var(--vk-persimmon-ink)', lineHeight: 1.6 }}>
+                ⚠️ การลบกะไม่สามารถเรียกคืนได้ และจะส่งผลต่อการคำนวณค่าจ้างทุกงวดที่มีกะของพนักงานคนนี้
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, padding: '0 20px 20px', justifyContent: 'flex-end' }}>
+              <button className="vk-btn" onClick={() => setInactiveConfirm(null)}>ยกเลิก</button>
+              <button className="vk-btn vk-btn--primary" disabled={mutation.isPending}
+                onClick={() => { mutation.mutate({ values: inactiveConfirm.pendingValues, deleteShifts: true }); setInactiveConfirm(null) }}>
+                {mutation.isPending ? 'กำลังดำเนินการ...' : 'ยืนยัน — ลบกะและพ้นสภาพ'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
   )
 }
