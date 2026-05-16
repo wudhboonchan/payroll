@@ -154,6 +154,7 @@ export default function EmployeeFormModalV2({ isOpen, onClose, employeeId, onSuc
     onSuccess: (_, { deleteShifts }) => {
       queryClient.invalidateQueries({ queryKey: ['employees'] })
       queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] })
+      queryClient.removeQueries({ queryKey: ['employee', employeeId] })
       if (deleteShifts) {
         queryClient.invalidateQueries({ queryKey: ['all-period-shifts'] })
         queryClient.invalidateQueries({ queryKey: ['shift-assignments'] })
