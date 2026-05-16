@@ -29,9 +29,10 @@ function VKFooter() {
       letterSpacing: '0.02em',
       flexShrink: 0,
     }}>
-      © 2026 Virankorn. All rights reserved.
-      <span style={{ margin: '0 8px', color: 'var(--vk-rule-soft)' }}>|</span>
-      Powered with ❤︎ by Wudh Boonchan
+      {/* Mobile: short form */}
+      <span className="md:hidden">© 2026 Virankorn · Powered with ❤︎ by Wudh Boonchan</span>
+      {/* Desktop: full form */}
+      <span className="hidden md:inline">© 2026 Virankorn. All rights reserved.<span style={{ margin: '0 8px', color: 'var(--vk-rule-soft)' }}>|</span>Powered with ❤︎ by Wudh Boonchan</span>
     </footer>
   )
 }
