@@ -96,7 +96,7 @@ export default function EmployeesV2() {
   const handleCreate = () => { setSelectedEmployeeId(null); setIsModalOpen(true) }
   const handleEdit   = (id: string) => { setSelectedEmployeeId(id); setIsModalOpen(true) }
 
-  const activeLabel = showPendingOnly ? `ข้อมูลไม่ครบ (${pendingCount})` : showInactiveOnly ? `พ้นสภาพ (${inactiveCount})` : `ทำงานอยู่ (${filtered.length})`
+  const activeLabel = showPendingOnly ? `ข้อมูลไม่ครบ (${pendingCount})` : showInactiveOnly ? `พ้นสภาพ (${inactiveCount})` : `ปกติ (${filtered.length})`
 
   return (
     <div className="vk-root" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
@@ -109,7 +109,7 @@ export default function EmployeesV2() {
           <div>
             <div className="vk-eyebrow" style={{ marginBottom: 4 }}>EMPLOYEES · ฐานข้อมูลพนักงาน</div>
             <div style={{ fontFamily: 'var(--vk-sans)', fontWeight: 700, fontSize: 24, letterSpacing: '-0.02em' }}>
-              พนักงาน <span style={{ fontWeight: 400, color: 'var(--vk-ink-3)' }}>ทำงานอยู่ {employees.length - inactiveCount} คน</span>{inactiveCount > 0 && <span style={{ fontWeight: 400, fontSize: 14, color: 'var(--vk-ink-4)', marginLeft: 10 }}>({inactiveCount} พ้นสภาพ)</span>}
+              พนักงาน <span style={{ fontWeight: 400, color: 'var(--vk-ink-3)' }}>สถานะปกติ {employees.length - inactiveCount} คน</span>{inactiveCount > 0 && <span style={{ fontWeight: 400, fontSize: 14, color: 'var(--vk-ink-4)', marginLeft: 10 }}>({inactiveCount} พ้นสภาพ)</span>}
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
@@ -248,7 +248,7 @@ export default function EmployeesV2() {
                   </td>
                   <td style={{ padding: '13px 14px', textAlign: 'right' }}>
                     <span className="vk-pill" data-tone={emp.status === 'active' ? 'approved' : 'draft'}>
-                      ● {emp.status === 'active' ? 'ทำงาน' : 'ลาออก'}
+                      ● {emp.status === 'active' ? 'ปกติ' : 'พ้นสภาพ'}
                     </span>
                   </td>
                 </tr>
