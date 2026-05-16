@@ -189,6 +189,7 @@ export default function EmployeeFormModalV2({ isOpen, onClose, employeeId, onSuc
   if (!isOpen) return null
 
   return (
+    <>
     <div className="vk-root" style={{
       position: 'fixed', inset: 0, zIndex: 1000,
       background: 'rgba(22,19,17,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -452,5 +453,6 @@ export default function EmployeeFormModalV2({ isOpen, onClose, employeeId, onSuc
           </div>
         </div>
       )}
+    </>
   )
 }
