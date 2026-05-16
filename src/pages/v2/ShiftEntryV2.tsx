@@ -106,30 +106,44 @@ export default function ShiftEntryV2() {
     }, enabled: !!currentPeriod,
   })
 
-  // Sync DB → local state when date changes
+  // Sync DB → local state when date changes; auto-delete orphaned assignments from inactive employees
   useEffect(() => {
     if (loadingAssignments || employees.length === 0 || !currentPeriod) return
-    const mapped: AssignedEmp[] = (rawAssignments || []).map((a: any) => {
-      const emp = employees.find(e => e.id === a.employee_id)
-      return {
-        employee_id: a.employee_id, shift_type: a.shift_type,
-        code: emp?.employee_code || '?',
-        name: emp ? empName(emp) : '?',
-        nationality: emp?.nationality ?? null,
-        isClerk: emp?.position === 'clerk',
-        isHalfShift: a.is_half_shift ?? false,
-        partialHours: Number(a.actual_hours ?? 0),
-        woodExcess: Number(a.wood_excess ?? 0),
-        filmAmount: Number(a.film_amount ?? 0),
-        otHours: Number(a.ot_hours ?? 0),
-        isHolidayOTExempt: a.is_holiday_ot_exempt ?? false,
-        isCrossPosition: a.is_cross_position ?? false,
-        crossPositionTitle: a.cross_position_title || '',
-        crossPositionExtraPay: Number(a.cross_position_extra_pay ?? 0),
-        isNew: false,
-        rate_per_12h: Number(emp?.rate_per_12h ?? 0),
-      }
-    })
+    const activeIds = new Set(employees.map(e => e.id))
+    const orphaned = (rawAssignments || []).filter((a: any) => !activeIds.has(a.employee_id))
+    // Silently delete any shift assignments whose employee is no longer active
+    if (orphaned.length > 0) {
+      const orphanedIds = orphaned.map((a: any) => a.employee_id)
+      supabase.from('shift_assignments')
+        .delete()
+        .eq('period_id', currentPeriod.id)
+        .eq('work_date', activeDateStr)
+        .in('employee_id', orphanedIds)
+        .then(() => { /* fire and forget — query will refetch */ })
+    }
+    const mapped: AssignedEmp[] = (rawAssignments || [])
+      .filter((a: any) => activeIds.has(a.employee_id))  // skip orphaned
+      .map((a: any) => {
+        const emp = employees.find(e => e.id === a.employee_id)!
+        return {
+          employee_id: a.employee_id, shift_type: a.shift_type,
+          code: emp.employee_code,
+          name: empName(emp),
+          nationality: emp.nationality ?? null,
+          isClerk: emp.position === 'clerk',
+          isHalfShift: a.is_half_shift ?? false,
+          partialHours: Number(a.actual_hours ?? 0),
+          woodExcess: Number(a.wood_excess ?? 0),
+          filmAmount: Number(a.film_amount ?? 0),
+          otHours: Number(a.ot_hours ?? 0),
+          isHolidayOTExempt: a.is_holiday_ot_exempt ?? false,
+          isCrossPosition: a.is_cross_position ?? false,
+          crossPositionTitle: a.cross_position_title || '',
+          crossPositionExtraPay: Number(a.cross_position_extra_pay ?? 0),
+          isNew: false,
+          rate_per_12h: Number(emp.rate_per_12h ?? 0),
+        }
+      })
     setAssignments(mapped)
     if (rawAssignments.length > 0) setIsHoliday((rawAssignments[0] as any).is_holiday_ot ?? false)
     else setIsHoliday(false)

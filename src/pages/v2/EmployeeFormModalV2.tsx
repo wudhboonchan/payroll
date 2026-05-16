@@ -174,9 +174,9 @@ export default function EmployeeFormModalV2({ isOpen, onClose, employeeId, onSuc
 
   // Called by form submit — intercepts inactive + existing shifts case
   const handleSave = async (values: EmployeeFormValues) => {
-    const isMarkingInactive = values.status === 'inactive' && employeeData?.status === 'active'
-    if (isMarkingInactive && employeeId) {
-      const { data: shifts } = await supabase.from('shift_assignments').select('id', { count: 'exact', head: false }).eq('employee_id', employeeId)
+    // Always check for shifts when marking inactive (regardless of previous status)
+    if (values.status === 'inactive' && employeeId) {
+      const { data: shifts } = await supabase.from('shift_assignments').select('id').eq('employee_id', employeeId)
       const shiftCount = shifts?.length ?? 0
       if (shiftCount > 0) {
         setInactiveConfirm({ shiftCount, pendingValues: values })
