@@ -171,8 +171,6 @@ export default function EmployeesV2() {
           </button>
         </div>
 
-        <hr className="vk-rule" />
-
         {isLoading ? (
           <div style={{ padding: '60px 0', textAlign: 'center' }} className="vk-eyebrow">กำลังโหลด...</div>
         ) : sorted.length === 0 ? (
