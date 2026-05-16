@@ -111,7 +111,7 @@ function buildSlipHtml(entry: any, period: any, shifts: any[], branchName: strin
   const detailShift  = dsDays > 0 && !isClerk ? `฿${Math.round(baseShift)} × ${dsDays} วัน` : null
   const detailOt     = (isClerk && otHrs  > 0 ? `฿${clerkHourly.toFixed(2)} × 1.5 × ${otHrs} ชม.`  : null)
                     || (!isClerk && otDays > 0 ? `฿${empRate} × 2 × ${otDays} วัน`                  : null)
-  const detailOt1x   = isClerk && ot1Hrs > 0   ? `฿${clerkHourly.toFixed(2)} × 1.0 × ${ot1Hrs} ชม.` : null
+  const detailOt1x   = isClerk && ot1Hrs > 0   ? `฿${clerkHourly.toFixed(2)} × 1.0 × ${ot1Hrs} ชม. (${daysShift} วัน)` : null
 
   // special note subs
   const specialSubs: string[] = entry.special_note

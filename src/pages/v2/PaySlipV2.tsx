@@ -291,7 +291,7 @@ export default function PaySlipV2() {
       || (!empIsClerk && otDays > 0 ? `฿${empRate} × 2 × ${otDays} วัน`                 : null)
       : null
     const detailOt1x   = !isOutdated && empIsClerk && ot1Hrs > 0
-      ? `฿${clerkHourly.toFixed(2)} × 1.0 × ${ot1Hrs} ชม.` : null
+      ? `฿${clerkHourly.toFixed(2)} × 1.0 × ${ot1Hrs} ชม. (${daysShift} วัน)` : null
 
     // split special_note by comma into individual sub-lines
     const specialSubs = entry.special_note

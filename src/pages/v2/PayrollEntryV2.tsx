@@ -445,7 +445,7 @@ export default function PayrollEntryV2() {
                         ...(isClerk && clerkOt1xHours > 0 ? [{
                           label: 'OT วันหยุดสัปดาห์ (×1)',
                           sub: `${clerkOt1xHours} ชั่วโมง · ${clerkWeekendDays} วัน`,
-                          detail: `฿${monoNum(clerkHourly)} × 1.0 × ${clerkOt1xHours} ชม.`,
+                          detail: `฿${monoNum(clerkHourly)} × 1.0 × ${clerkOt1xHours} ชม. (${clerkWeekendDays} วัน)`,
                           value: Number(calc.effective_ot_1x) || 0, isOverridden: false,
                         }] : []),
                         ...(!isClerk && autoWood > 0 ? [{
