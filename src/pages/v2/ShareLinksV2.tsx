@@ -219,7 +219,7 @@ export default function ShareLinksV2() {
   const isAdminOrSuper = user?.role === 'admin' || user?.role === 'superUser'
 
   return (
-    <div className="vk-root" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+    <>
       <TopBarV2 title="ลิงก์สลิปพนักงาน" subtitle={activePeriod?.label} onMenuClick={onMenuClick} />
 
       <div className="vk-page vk-page--wide">
@@ -407,6 +407,6 @@ export default function ShareLinksV2() {
           </div>
         </div>
       )}
-    </div>
+    </>
   )
 }

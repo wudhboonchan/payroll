@@ -227,14 +227,14 @@ export default function ShiftEntryV2() {
   })
 
   if (!currentPeriod) return (
-    <div className="vk-root" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+    <>
       <TopBarV2 title="กรอกกะรายวัน" onMenuClick={onMenuClick} />
       <div style={{ padding: '60px 36px', textAlign: 'center' }} className="vk-eyebrow">ยังไม่มีงวด — กรุณาสร้างงวดที่ Dashboard ก่อน</div>
-    </div>
+    </>
   )
 
   return (
-    <div className="vk-root" style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
+    <>
       <TopBarV2 title="กรอกกะรายวัน" subtitle={currentPeriod.label} onMenuClick={onMenuClick} />
 
       {/* Date strip */}
@@ -439,7 +439,7 @@ export default function ShiftEntryV2() {
           </div>
         </div>
       )}
-    </div>
+    </>
   )
 }
 

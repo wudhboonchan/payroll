@@ -111,7 +111,7 @@ export default function AdvancesV2() {
   })
 
   return (
-    <div className="vk-root" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+    <>
       <TopBarV2 title="เบิกล่วงหน้า" subtitle={currentPeriod?.label} onMenuClick={onMenuClick} />
 
       <div className="vk-page">
@@ -245,6 +245,6 @@ export default function AdvancesV2() {
           </div>
         </div>
       )}
-    </div>
+    </>
   )
 }

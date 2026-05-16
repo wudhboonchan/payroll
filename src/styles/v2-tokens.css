@@ -298,7 +298,6 @@ html, body, #root {
   flex-direction: column;
   min-width: 0;
   background: var(--vk-paper);
-  min-height: 100vh;
 }
 @media (min-width: 768px) {
   .vk-main { margin-left: var(--vk-sidebar-w); }

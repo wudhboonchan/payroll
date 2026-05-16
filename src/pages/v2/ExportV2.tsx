@@ -493,7 +493,7 @@ body>div>div{border:none!important;box-shadow:none!important;border-bottom:1px s
   ]
 
   return (
-    <div className="vk-root" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+    <>
       <TopBarV2 title="ส่งออกข้อมูล" subtitle={label} onMenuClick={onMenuClick} />
 
       <div className="vk-page">
@@ -674,6 +674,6 @@ body>div>div{border:none!important;box-shadow:none!important;border-bottom:1px s
           </div>
         </div>
       )}
-    </div>
+    </>
   )
 }

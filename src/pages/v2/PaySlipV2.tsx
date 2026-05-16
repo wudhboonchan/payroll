@@ -324,7 +324,7 @@ export default function PaySlipV2() {
   const posLabel = selectedEmp ? (POSITIONS[selectedEmp.position] || selectedEmp.position || '') : ''
 
   return (
-    <div className="vk-root" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+    <>
       <TopBarV2 title="สลิปเงินเดือน" subtitle={currentPeriod?.label} onMenuClick={onMenuClick} />
 
       <div className="vk-split">
@@ -436,6 +436,6 @@ export default function PaySlipV2() {
           )}
         </div>
       </div>
-    </div>
+    </>
   )
 }

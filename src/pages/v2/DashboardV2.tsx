@@ -189,7 +189,7 @@ export default function DashboardV2() {
   const completionPct = stats && stats.totalDays > 0 ? Math.round((stats.uniqueDays / stats.totalDays) * 100) : 0
 
   return (
-    <div className="vk-root" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+    <>
       <TopBarV2 title="Dashboard" subtitle={activePeriod?.label} onMenuClick={onMenuClick} />
 
       <div className="vk-page">
@@ -402,6 +402,6 @@ export default function DashboardV2() {
           </div>
         </div>
       )}
-    </div>
+    </>
   )
 }

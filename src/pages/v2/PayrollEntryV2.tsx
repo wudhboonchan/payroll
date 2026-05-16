@@ -295,7 +295,7 @@ export default function PayrollEntryV2() {
   const monoNum = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2 })
 
   return (
-    <div className="vk-root" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+    <>
       <TopBarV2 title="กรอกค่าจ้าง" subtitle={currentPeriod?.label} onMenuClick={onMenuClick} />
 
       <div className="vk-split">
@@ -580,6 +580,6 @@ export default function PayrollEntryV2() {
           )}
         </div>
       </div>
-    </div>
+    </>
   )
 }

@@ -99,7 +99,7 @@ export default function EmployeesV2() {
   const activeLabel = showPendingOnly ? `ข้อมูลไม่ครบ (${pendingCount})` : showInactiveOnly ? `พ้นสภาพ (${inactiveCount})` : `ปกติ (${filtered.length})`
 
   return (
-    <div className="vk-root" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+    <>
       <TopBarV2 title="ฐานข้อมูลพนักงาน" subtitle={activeLabel} onMenuClick={onMenuClick} />
 
       <div className="vk-page">
@@ -272,6 +272,6 @@ export default function EmployeesV2() {
         isOpen={isImportOpen}
         onClose={() => setIsImportOpen(false)}
       />
-    </div>
+    </>
   )
 }

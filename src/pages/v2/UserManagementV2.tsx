@@ -79,7 +79,7 @@ export default function UserManagementV2() {
   if (user?.role !== 'admin') return null
 
   return (
-    <div className="vk-root" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+    <>
       <TopBarV2 title="จัดการผู้ใช้งาน" onMenuClick={onMenuClick} />
 
       <div className="vk-page" style={{ maxWidth: 760 }}>
@@ -162,6 +162,6 @@ export default function UserManagementV2() {
           </div>
         </div>
       )}
-    </div>
+    </>
   )
 }
