@@ -59,6 +59,7 @@ export default function ShiftEntryV2() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [assignments, setAssignments] = useState<AssignedEmp[]>([])
   const [detailEmp, setDetailEmp] = useState<AssignedEmp | null>(null)
+  const [clerkQueue, setClerkQueue] = useState<AssignedEmp[]>([])
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
   const confirmResolveRef = useRef<(ok: boolean) => void>(null as any)
 
@@ -202,9 +203,13 @@ export default function ShiftEntryV2() {
     setAssignments(prev => [...prev, ...newEmps])
     clearSelection()
 
-    // Auto-open detail modal for single clerk on weekend
-    if (newEmps.length === 1 && newEmps[0].isClerk && weekend) {
-      setDetailEmp(newEmps[0])
+    // Auto-open OT modal for every clerk assigned on a weekend, one by one
+    if (weekend) {
+      const clerks = newEmps.filter(e => e.isClerk)
+      if (clerks.length > 0) {
+        setDetailEmp(clerks[0])
+        setClerkQueue(clerks.slice(1))
+      }
     }
   }
 
@@ -496,7 +501,15 @@ export default function ShiftEntryV2() {
         <DetailModal
           emp={detailEmp} isHoliday={isHoliday} weekend={weekend}
           onUpdate={(patch) => updateAssignment(detailEmp.employee_id, patch)}
-          onClose={() => setDetailEmp(null)}
+          onClose={() => {
+            // If there are more clerks waiting in queue, open next one
+            if (clerkQueue.length > 0) {
+              setDetailEmp(clerkQueue[0])
+              setClerkQueue(q => q.slice(1))
+            } else {
+              setDetailEmp(null)
+            }
+          }}
         />
       )}
 
