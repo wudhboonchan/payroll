@@ -10,9 +10,9 @@ export function RequireAuthV2({ allowedRoles }: RequireAuthV2Props) {
   const { user } = useAppStore()
   const location = useLocation()
   const ctx = useOutletContext()
-  if (!user) return <Navigate to="/v2/login" state={{ from: location }} replace />
+  if (!user) return <Navigate to="/login" state={{ from: location }} replace />
   if (allowedRoles && !allowedRoles.includes(user.role))
-    return <Navigate to={user.role === 'normalUser' ? '/v2/payslip' : '/v2/dashboard'} replace />
+    return <Navigate to={user.role === 'normalUser' ? '/payslip' : '/dashboard'} replace />
   return <Outlet context={ctx} />
 }
 

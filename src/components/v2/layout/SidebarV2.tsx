@@ -16,15 +16,15 @@ import {
 interface Factory { id: string; name: string; companies: any }
 
 const NAV = [
-  { href: '/v2/dashboard',  label: 'Dashboard',         icon: LayoutDashboard, roles: ['admin','superUser'] },
-  { href: '/v2/employees',  label: 'ฐานข้อมูลพนักงาน', icon: Users,           roles: ['admin','superUser'] },
-  { href: '/v2/shifts',     label: 'กรอกกะรายวัน',      icon: CalendarClock,   roles: ['admin','superUser'] },
-  { href: '/v2/advances',   label: 'เบิกล่วงหน้า',      icon: CreditCard,      roles: ['admin','superUser'] },
-  { href: '/v2/payroll',    label: 'กรอกค่าจ้าง',       icon: Calculator,      roles: ['admin','superUser'] },
-  { href: '/v2/payslip',    label: 'ดูสลิปเงินเดือน',   icon: FileText,        roles: ['admin','superUser','normalUser'] },
-  { href: '/v2/share-links',label: 'ลิงก์สลิปพนักงาน',  icon: Link2,           roles: ['admin','superUser','normalUser'] },
-  { href: '/v2/export',     label: 'ส่งออกข้อมูล',      icon: Download,        roles: ['admin','superUser'] },
-  { href: '/v2/users',      label: 'จัดการผู้ใช้งาน',   icon: UserCog,         roles: ['admin'] },
+  { href: '/dashboard',  label: 'Dashboard',         icon: LayoutDashboard, roles: ['admin','superUser'] },
+  { href: '/employees',  label: 'ฐานข้อมูลพนักงาน', icon: Users,           roles: ['admin','superUser'] },
+  { href: '/shifts',     label: 'กรอกกะรายวัน',      icon: CalendarClock,   roles: ['admin','superUser'] },
+  { href: '/advances',   label: 'เบิกล่วงหน้า',      icon: CreditCard,      roles: ['admin','superUser'] },
+  { href: '/payroll',    label: 'กรอกค่าจ้าง',       icon: Calculator,      roles: ['admin','superUser'] },
+  { href: '/payslip',    label: 'ดูสลิปเงินเดือน',   icon: FileText,        roles: ['admin','superUser','normalUser'] },
+  { href: '/share-links',label: 'ลิงก์สลิปพนักงาน',  icon: Link2,           roles: ['admin','superUser','normalUser'] },
+  { href: '/export',     label: 'ส่งออกข้อมูล',      icon: Download,        roles: ['admin','superUser'] },
+  { href: '/users',      label: 'จัดการผู้ใช้งาน',   icon: UserCog,         roles: ['admin'] },
 ]
 
 interface SidebarV2Props { isOpen: boolean; setIsOpen: (v: boolean) => void }

@@ -13,7 +13,7 @@ export default function LoginV2() {
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    if (user) navigate(user.role === 'normalUser' ? '/v2/payslip' : '/v2/dashboard', { replace: true })
+    if (user) navigate(user.role === 'normalUser' ? '/payslip' : '/dashboard', { replace: true })
   }, [user, navigate])
 
   const handleLogin = async (e: React.FormEvent) => {

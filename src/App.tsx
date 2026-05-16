@@ -56,26 +56,24 @@ function App() {
             </div>
           ) : (
             <Routes>
-              {/* ── V2 Main App ─────────────────────────────────────── */}
-              <Route path="/" element={<Navigate to="/v2/dashboard" replace />} />
-              <Route path="/login" element={<Navigate to="/v2/login" replace />} />
-              <Route path="/v2/login" element={<LoginV2 />} />
+              {/* ── Main App ─────────────────────────────────────── */}
+              <Route path="/login" element={<LoginV2 />} />
               <Route element={<AppLayoutV2 />}>
                 <Route element={<RequireAuthV2 allowedRoles={['admin', 'superUser']} />}>
-                  <Route path="/v2/dashboard"  element={<DashboardV2 />} />
-                  <Route path="/v2/employees"  element={<EmployeesV2 />} />
-                  <Route path="/v2/shifts"     element={<ShiftEntryV2 />} />
-                  <Route path="/v2/payroll"    element={<PayrollEntryV2 />} />
-                  <Route path="/v2/advances"   element={<AdvancesV2 />} />
-                  <Route path="/v2/export"     element={<ExportV2 />} />
-                  <Route path="/v2"            element={<Navigate to="/v2/dashboard" replace />} />
+                  <Route path="/"           element={<Navigate to="/dashboard" replace />} />
+                  <Route path="/dashboard"  element={<DashboardV2 />} />
+                  <Route path="/employees"  element={<EmployeesV2 />} />
+                  <Route path="/shifts"     element={<ShiftEntryV2 />} />
+                  <Route path="/payroll"    element={<PayrollEntryV2 />} />
+                  <Route path="/advances"   element={<AdvancesV2 />} />
+                  <Route path="/export"     element={<ExportV2 />} />
                 </Route>
                 <Route element={<RequireAuthV2 allowedRoles={['admin', 'superUser', 'normalUser']} />}>
-                  <Route path="/v2/payslip"    element={<PaySlipV2 />} />
-                  <Route path="/v2/share-links" element={<ShareLinksV2 />} />
+                  <Route path="/payslip"    element={<PaySlipV2 />} />
+                  <Route path="/share-links" element={<ShareLinksV2 />} />
                 </Route>
                 <Route element={<RequireAuthV2 allowedRoles={['admin']} />}>
-                  <Route path="/v2/users"      element={<UserManagementV2 />} />
+                  <Route path="/users"      element={<UserManagementV2 />} />
                 </Route>
               </Route>
 
@@ -105,7 +103,7 @@ function App() {
                 </Route>
               </Route>
 
-              <Route path="*" element={<Navigate to="/v2/login" replace />} />
+              <Route path="*" element={<Navigate to="/login" replace />} />
             </Routes>
           )}
         </div>
