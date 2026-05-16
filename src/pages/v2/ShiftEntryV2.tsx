@@ -151,7 +151,7 @@ export default function ShiftEntryV2() {
       return
     }
     const isClerk = selected.position === 'clerk'
-    setAssignments(prev => [...prev, {
+    const newEmp: AssignedEmp = {
       employee_id: selected.id, shift_type: shiftKey,
       code: selected.employee_code, name: empName(selected),
       nationality: selected.nationality ?? null,
@@ -160,8 +160,11 @@ export default function ShiftEntryV2() {
       isHolidayOTExempt: false, isCrossPosition: false,
       crossPositionTitle: '', crossPositionExtraPay: 0, isNew: true,
       rate_per_12h: Number(selected.rate_per_12h ?? 0),
-    }])
+    }
+    setAssignments(prev => [...prev, newEmp])
     setSelected(null)
+    // Auto-open detail modal for clerk on weekend — OT hours are mandatory
+    if (isClerk && weekend) setDetailEmp(newEmp)
   }
 
   const handleRemove = (empId: string) => {
