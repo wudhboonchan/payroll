@@ -124,16 +124,18 @@ export default function EmployeesV2() {
           </div>
         </div>
 
-        {/* Filters row */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-          {/* Search */}
-          <div style={{ position: 'relative', flex: '1 1 200px', maxWidth: 300 }}>
+        {/* Filters — row 1: search */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+          <div style={{ position: 'relative', flex: 1, maxWidth: 300 }}>
             <Search style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', width: 14, height: 14, color: 'var(--vk-ink-3)' }} />
             <input className="vk-input" placeholder="ค้นหาชื่อหรือรหัสพนักงาน" value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
               style={{ paddingLeft: 32, height: 36, fontSize: 13 }} />
           </div>
+        </div>
 
+        {/* Filters — row 2: filter buttons */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
           {/* Pending filter */}
           <button
             onClick={() => { setShowPendingOnly(p => !p); setShowInactiveOnly(false) }}
