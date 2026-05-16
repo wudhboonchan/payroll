@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
@@ -59,6 +59,8 @@ export default function ShiftEntryV2() {
   const [selected, setSelected] = useState<Employee | null>(null)
   const [assignments, setAssignments] = useState<AssignedEmp[]>([])
   const [detailEmp, setDetailEmp] = useState<AssignedEmp | null>(null)
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
+  const confirmResolveRef = useRef<(ok: boolean) => void>(null as any)
 
   // ── periods ──
   const { data: periods = [] } = useQuery<Period[]>({
@@ -177,7 +179,8 @@ export default function ShiftEntryV2() {
     mutationFn: async () => {
       if (!user?.factory_id || !currentPeriod?.id) throw new Error('กรุณาสร้างงวดก่อน')
       if (assignments.length === 0) {
-        if (!window.confirm('คุณกำลังจะลบข้อมูลกะทั้งหมดของวันนี้ ยืนยันหรือไม่?')) throw new Error('ยกเลิก')
+        const ok = await new Promise<boolean>(resolve => { confirmResolveRef.current = resolve; setConfirmDeleteOpen(true) })
+        if (!ok) throw new Error('ยกเลิก')
         await supabase.from('shift_assignments').delete().eq('period_id', currentPeriod.id).eq('work_date', activeDateStr)
         return
       }
@@ -392,6 +395,32 @@ export default function ShiftEntryV2() {
           onUpdate={(patch) => updateAssignment(detailEmp.employee_id, patch)}
           onClose={() => setDetailEmp(null)}
         />
+      )}
+
+      {/* Confirm delete all shifts modal */}
+      {confirmDeleteOpen && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(22,19,17,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+          onClick={() => { setConfirmDeleteOpen(false); confirmResolveRef.current(false) }}>
+          <div style={{ background: 'var(--vk-paper)', border: '1px solid var(--vk-rule)', width: '100%', maxWidth: 380, overflow: 'hidden' }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ background: 'var(--vk-persimmon)', color: '#fff', padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 10 }}>
+              <X style={{ width: 16, height: 16, flexShrink: 0 }} />
+              <div style={{ fontWeight: 700, fontSize: 15 }}>ยืนยันการลบข้อมูลกะ</div>
+            </div>
+            <div style={{ padding: '20px 20px 8px' }}>
+              <p style={{ fontSize: 14, color: 'var(--vk-ink-2)', lineHeight: 1.6 }}>
+                ไม่มีพนักงานในกะวันนี้ — ระบบจะ<strong>ลบข้อมูลกะทั้งหมด</strong>ของวันนี้ออก
+              </p>
+              <div style={{ marginTop: 12, padding: '10px 14px', background: 'var(--vk-persimmon-tint)', border: '1px solid var(--vk-persimmon)', fontSize: 12, color: 'var(--vk-persimmon-ink)' }}>
+                การดำเนินการนี้ไม่สามารถเรียกคืนได้
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, padding: '16px 20px', justifyContent: 'flex-end' }}>
+              <button className="vk-btn" onClick={() => { setConfirmDeleteOpen(false); confirmResolveRef.current(false) }}>ยกเลิก</button>
+              <button className="vk-btn vk-btn--primary" onClick={() => { setConfirmDeleteOpen(false); confirmResolveRef.current(true) }}>ยืนยันลบ</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
