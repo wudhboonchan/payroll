@@ -31,7 +31,7 @@ function VKFooter() {
     }}>
       © 2026 Virankorn. All rights reserved.
       <span style={{ margin: '0 8px', color: 'var(--vk-rule-soft)' }}>|</span>
-      Powered by Wudh Boonchan
+      Powered with ❤︎ by Wudh Boonchan
     </footer>
   )
 }
@@ -40,12 +40,10 @@ export function AppLayoutV2() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   return (
-    <div className="vk-root" style={{ display: 'flex', minHeight: '100vh' }}>
+    <div className="vk-root" style={{ display: 'flex', height: '100vh' }}>
       <SidebarV2 isOpen={sidebarOpen} setIsOpen={setSidebarOpen} />
-      <div className="vk-main" style={{ display: 'flex', flexDirection: 'column' }}>
-        <div style={{ flex: 1 }}>
-          <Outlet context={{ onMenuClick: () => setSidebarOpen(true) }} />
-        </div>
+      <div className="vk-main" style={{ display: 'flex', flexDirection: 'column', overflow: 'auto' }}>
+        <Outlet context={{ onMenuClick: () => setSidebarOpen(true) }} />
         <VKFooter />
       </div>
     </div>
