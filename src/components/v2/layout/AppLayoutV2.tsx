@@ -16,14 +16,37 @@ export function RequireAuthV2({ allowedRoles }: RequireAuthV2Props) {
   return <Outlet context={ctx} />
 }
 
+function VKFooter() {
+  return (
+    <footer style={{
+      borderTop: '1px solid var(--vk-rule-soft)',
+      backgroundColor: 'var(--vk-paper)',
+      padding: '12px 24px',
+      textAlign: 'center',
+      fontSize: 11,
+      color: 'var(--vk-ink-4)',
+      fontFamily: 'var(--vk-sans)',
+      letterSpacing: '0.02em',
+      flexShrink: 0,
+    }}>
+      © 2026 Virankorn. All rights reserved.
+      <span style={{ margin: '0 8px', color: 'var(--vk-rule-soft)' }}>|</span>
+      Powered by Wudh Boonchan
+    </footer>
+  )
+}
+
 export function AppLayoutV2() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   return (
     <div className="vk-root" style={{ display: 'flex', minHeight: '100vh' }}>
       <SidebarV2 isOpen={sidebarOpen} setIsOpen={setSidebarOpen} />
-      <div className="vk-main">
-        <Outlet context={{ onMenuClick: () => setSidebarOpen(true) }} />
+      <div className="vk-main" style={{ display: 'flex', flexDirection: 'column' }}>
+        <div style={{ flex: 1 }}>
+          <Outlet context={{ onMenuClick: () => setSidebarOpen(true) }} />
+        </div>
+        <VKFooter />
       </div>
     </div>
   )
