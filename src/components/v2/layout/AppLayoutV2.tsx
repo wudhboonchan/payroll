@@ -43,7 +43,9 @@ export function AppLayoutV2() {
     <div className="vk-root" style={{ display: 'flex', height: '100vh' }}>
       <SidebarV2 isOpen={sidebarOpen} setIsOpen={setSidebarOpen} />
       <div className="vk-main" style={{ display: 'flex', flexDirection: 'column', overflow: 'auto' }}>
-        <Outlet context={{ onMenuClick: () => setSidebarOpen(true) }} />
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+          <Outlet context={{ onMenuClick: () => setSidebarOpen(true) }} />
+        </div>
         <VKFooter />
       </div>
     </div>
