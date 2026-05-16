@@ -440,7 +440,7 @@ export default function EmployeeFormModalV2({ isOpen, onClose, employeeId, onSuc
 
       {/* ── Inactive + existing shifts confirmation modal ── */}
       {inactiveConfirm && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 300, background: 'rgba(22,19,17,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+        <div style={{ position: 'fixed', inset: 0, zIndex: 1100, background: 'rgba(22,19,17,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
           <div style={{ background: 'var(--vk-paper)', border: '1px solid var(--vk-rule)', width: '100%', maxWidth: 420, overflow: 'hidden' }}>
             <div style={{ background: 'var(--vk-persimmon)', color: '#fff', padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 10 }}>
               <AlertTriangle style={{ width: 16, height: 16, flexShrink: 0 }} />
