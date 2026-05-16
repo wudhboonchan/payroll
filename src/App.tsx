@@ -56,38 +56,9 @@ function App() {
             </div>
           ) : (
             <Routes>
-              <Route path="/login" element={<Login />} />
-              <Route path="/slip/:token" element={<EmployeeSlipPage />} />
-
-              <Route element={<AppLayout />}>
-                {/* Admin & SuperUser: full access */}
-                <Route element={<RequireAuth allowedRoles={['admin', 'superUser']} />}>
-                  <Route path="/dashboard" element={<Dashboard />} />
-                  <Route path="/employees" element={<Employees />} />
-                  <Route path="/shifts" element={<ShiftEntry />} />
-                  <Route path="/attendance" element={<AttendanceOverview />} />
-                  <Route path="/payroll" element={<PayrollEntry />} />
-                  <Route path="/advances" element={<AdvancePaymentsList />} />
-                  <Route path="/settings" element={<SettingsPage />} />
-                  <Route path="/" element={<Navigate to="/dashboard" replace />} />
-                </Route>
-
-                {/* normalUser: payslip + share-links only */}
-                <Route element={<RequireAuth allowedRoles={['admin', 'superUser', 'normalUser']} />}>
-                  <Route path="/payslip" element={<PaySlipPage />} />
-                  <Route path="/share-links" element={<ShareLinksPage />} />
-                </Route>
-
-                <Route element={<RequireAuth allowedRoles={['admin', 'superUser']} />}>
-                  <Route path="/export" element={<ExportPage />} />
-                </Route>
-
-                <Route element={<RequireAuth allowedRoles={['admin']} />}>
-                  <Route path="/users" element={<UserManagement />} />
-                </Route>
-              </Route>
-
-              {/* ── V2 Design Preview ───────────────────────────────── */}
+              {/* ── V2 Main App ─────────────────────────────────────── */}
+              <Route path="/" element={<Navigate to="/v2/dashboard" replace />} />
+              <Route path="/login" element={<Navigate to="/v2/login" replace />} />
               <Route path="/v2/login" element={<LoginV2 />} />
               <Route element={<AppLayoutV2 />}>
                 <Route element={<RequireAuthV2 allowedRoles={['admin', 'superUser']} />}>
@@ -105,6 +76,32 @@ function App() {
                 </Route>
                 <Route element={<RequireAuthV2 allowedRoles={['admin']} />}>
                   <Route path="/v2/users"      element={<UserManagementV2 />} />
+                </Route>
+              </Route>
+
+              {/* ── V1 Archive (reference only) ──────────────────────── */}
+              <Route path="/v1/login" element={<Login />} />
+              <Route path="/slip/:token" element={<EmployeeSlipPage />} />
+              <Route element={<AppLayout />}>
+                <Route element={<RequireAuth allowedRoles={['admin', 'superUser']} />}>
+                  <Route path="/v1/dashboard"  element={<Dashboard />} />
+                  <Route path="/v1/employees"  element={<Employees />} />
+                  <Route path="/v1/shifts"     element={<ShiftEntry />} />
+                  <Route path="/v1/attendance" element={<AttendanceOverview />} />
+                  <Route path="/v1/payroll"    element={<PayrollEntry />} />
+                  <Route path="/v1/advances"   element={<AdvancePaymentsList />} />
+                  <Route path="/v1/settings"   element={<SettingsPage />} />
+                  <Route path="/v1"            element={<Navigate to="/v1/dashboard" replace />} />
+                </Route>
+                <Route element={<RequireAuth allowedRoles={['admin', 'superUser', 'normalUser']} />}>
+                  <Route path="/v1/payslip"    element={<PaySlipPage />} />
+                  <Route path="/v1/share-links" element={<ShareLinksPage />} />
+                </Route>
+                <Route element={<RequireAuth allowedRoles={['admin', 'superUser']} />}>
+                  <Route path="/v1/export"     element={<ExportPage />} />
+                </Route>
+                <Route element={<RequireAuth allowedRoles={['admin']} />}>
+                  <Route path="/v1/users"      element={<UserManagement />} />
                 </Route>
               </Route>
 

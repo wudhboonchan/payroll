@@ -242,7 +242,7 @@ export default function DashboardV2() {
             {/* Stats row */}
             <div className="vk-grid-4" style={{ marginBottom: 36 }}>
               {[
-                { eyebrow: 'พนักงานทั้งหมด', value: String(activeEmployeeCount), sub: 'คน (กำลังทำงาน)', color: 'var(--vk-ink)' },
+                { eyebrow: 'พนักงานทั้งหมด', value: String(activeEmployeeCount), sub: 'คน (สถานะปกติ)', color: 'var(--vk-ink)' },
                 { eyebrow: 'ยอดจ่ายรวม',    value: (stats?.gross ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 }), sub: 'บาท', color: 'var(--vk-jade)' },
                 { eyebrow: 'ประกันสังคม',    value: (stats?.ss   ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 }), sub: 'บาท', color: 'var(--vk-ink-3)' },
                 { eyebrow: 'ยอดจ่ายสุทธิ',  value: (stats?.net  ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 }), sub: 'บาท', color: 'var(--vk-persimmon)' },
@@ -252,7 +252,7 @@ export default function DashboardV2() {
                   <div style={{ fontFamily: 'var(--vk-mono)', fontWeight: 600, fontSize: 28, letterSpacing: '-0.025em', color: s.color, fontVariantNumeric: 'tabular-nums', lineHeight: 1.1, marginBottom: 4 }}>
                     {s.value}
                   </div>
-                  <div className="vk-small" style={{ color: 'var(--vk-ink-3)', fontFamily: 'var(--vk-mono)', fontSize: 12 }}>{s.sub}</div>
+                  <div className="vk-small" style={{ color: 'var(--vk-ink-3)' }}>{s.sub}</div>
                 </div>
               ))}
             </div>
@@ -265,7 +265,7 @@ export default function DashboardV2() {
                 <div style={{ padding: '20px 0' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
                     <span style={{ fontFamily: 'var(--vk-sans)', fontSize: 14, color: 'var(--vk-ink-2)' }}>วันที่บันทึกแล้ว</span>
-                    <span style={{ fontFamily: 'var(--vk-mono)', fontWeight: 600, fontSize: 16, fontVariantNumeric: 'tabular-nums' }}>
+                    <span style={{ fontFamily: 'var(--vk-sans)', fontWeight: 600, fontSize: 16 }}>
                       {stats?.uniqueDays ?? 0} <span style={{ color: 'var(--vk-ink-3)', fontWeight: 400 }}>/ {stats?.totalDays ?? 0} วัน</span>
                     </span>
                   </div>
