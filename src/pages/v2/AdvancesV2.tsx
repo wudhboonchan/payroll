@@ -19,6 +19,7 @@ export default function AdvancesV2() {
   const { user } = useAppStore()
   const queryClient = useQueryClient()
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingEmp, setEditingEmp] = useState<{ employee_code: string; first_name: string; last_name: string; nationality?: string | null } | null>(null)
   const [form, setForm] = useState({ employee_id: '', amount: '', notes: '' })
@@ -158,7 +159,7 @@ export default function AdvancesV2() {
                         <Pencil style={{ width: 13, height: 13, color: 'var(--vk-ink-3)' }} />
                       </button>
                       <button className="vk-btn vk-btn--ghost" style={{ width: 30, height: 30, padding: 0 }}
-                        onClick={e => { e.stopPropagation(); if (window.confirm('ยืนยันการลบ?')) deleteMutation.mutate(a.id) }}>
+                        onClick={e => { e.stopPropagation(); setDeleteTarget({ id: a.id, name: `${a.employee?.first_name ?? ''} ${a.employee?.last_name ?? ''}`.trim() }) }}>
                         <Trash2 style={{ width: 13, height: 13, color: 'var(--vk-crimson)' }} />
                       </button>
                     </div>
@@ -211,6 +212,35 @@ export default function AdvancesV2() {
                 {saveMutation.isPending ? 'กำลังบันทึก...' : isEdit ? 'อัปเดตรายการ' : 'บันทึก'}
               </button>
               <button className="vk-btn" onClick={closeModal}>ยกเลิก</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm delete modal */}
+      {deleteTarget && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(22,19,17,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+          onClick={() => setDeleteTarget(null)}>
+          <div style={{ background: 'var(--vk-paper)', border: '1px solid var(--vk-rule)', width: '100%', maxWidth: 380, overflow: 'hidden' }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ background: 'var(--vk-persimmon)', color: '#fff', padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 10 }}>
+              <Trash2 style={{ width: 15, height: 15, flexShrink: 0 }} />
+              <div style={{ fontWeight: 700, fontSize: 15 }}>ยืนยันการลบรายการเบิก</div>
+            </div>
+            <div style={{ padding: '20px' }}>
+              <p style={{ fontSize: 14, color: 'var(--vk-ink-2)', lineHeight: 1.6 }}>
+                ต้องการลบรายการเบิกล่วงหน้าของ <strong>{deleteTarget.name}</strong> ใช่หรือไม่?
+              </p>
+              <div style={{ marginTop: 12, padding: '10px 14px', background: 'var(--vk-persimmon-tint)', border: '1px solid var(--vk-persimmon)', fontSize: 12, color: 'var(--vk-persimmon-ink)' }}>
+                การดำเนินการนี้ไม่สามารถเรียกคืนได้
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, padding: '0 20px 16px', justifyContent: 'flex-end' }}>
+              <button className="vk-btn" onClick={() => setDeleteTarget(null)}>ยกเลิก</button>
+              <button className="vk-btn vk-btn--primary" disabled={deleteMutation.isPending}
+                onClick={() => { deleteMutation.mutate(deleteTarget.id); setDeleteTarget(null) }}>
+                {deleteMutation.isPending ? 'กำลังลบ...' : 'ยืนยันลบ'}
+              </button>
             </div>
           </div>
         </div>
