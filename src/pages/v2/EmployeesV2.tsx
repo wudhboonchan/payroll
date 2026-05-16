@@ -96,7 +96,7 @@ export default function EmployeesV2() {
   const handleCreate = () => { setSelectedEmployeeId(null); setIsModalOpen(true) }
   const handleEdit   = (id: string) => { setSelectedEmployeeId(id); setIsModalOpen(true) }
 
-  const activeLabel = showPendingOnly ? `ข้อมูลไม่ครบ (${pendingCount})` : showInactiveOnly ? `ไม่ได้ทำงาน (${inactiveCount})` : `ทำงานอยู่ (${filtered.length})`
+  const activeLabel = showPendingOnly ? `ข้อมูลไม่ครบ (${pendingCount})` : showInactiveOnly ? `พ้นสภาพ (${inactiveCount})` : `ทำงานอยู่ (${filtered.length})`
 
   return (
     <div className="vk-root" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
@@ -109,7 +109,7 @@ export default function EmployeesV2() {
           <div>
             <div className="vk-eyebrow" style={{ marginBottom: 4 }}>EMPLOYEES · ฐานข้อมูลพนักงาน</div>
             <div style={{ fontFamily: 'var(--vk-sans)', fontWeight: 700, fontSize: 24, letterSpacing: '-0.02em' }}>
-              พนักงาน <span style={{ fontWeight: 400, color: 'var(--vk-ink-3)' }}>ทำงานอยู่ {employees.length - inactiveCount} คน</span>{inactiveCount > 0 && <span style={{ fontWeight: 400, fontSize: 14, color: 'var(--vk-ink-4)', marginLeft: 10 }}>({inactiveCount} ไม่ได้ทำงาน)</span>}
+              พนักงาน <span style={{ fontWeight: 400, color: 'var(--vk-ink-3)' }}>ทำงานอยู่ {employees.length - inactiveCount} คน</span>{inactiveCount > 0 && <span style={{ fontWeight: 400, fontSize: 14, color: 'var(--vk-ink-4)', marginLeft: 10 }}>({inactiveCount} พ้นสภาพ)</span>}
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
@@ -164,7 +164,7 @@ export default function EmployeesV2() {
               color: showInactiveOnly ? 'var(--vk-bone)' : 'var(--vk-ink-2)',
             }}>
             <UserX style={{ width: 13, height: 13 }} />
-            ไม่ได้ทำงาน
+            พ้นสภาพ
             {inactiveCount > 0 && (
               <span style={{ background: showInactiveOnly ? 'rgba(255,255,255,0.25)' : 'var(--vk-ink-3)', color: '#fff', borderRadius: 999, fontSize: 11, fontWeight: 700, padding: '0 6px', lineHeight: '18px' }}>{inactiveCount}</span>
             )}
