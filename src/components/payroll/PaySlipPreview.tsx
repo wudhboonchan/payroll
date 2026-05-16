@@ -158,11 +158,11 @@ export const PaySlipPreview = forwardRef<HTMLDivElement, PaySlipPreviewProps>(({
         <div>
           <span style={S.label9}>รหัสพนักงาน</span>
           <span style={{ ...S.val13, marginBottom: '10px' }}>{data.employee_code}</span>
-          <span style={{ ...S.label9, marginTop: '10px' }}>ชื่อ - นามสกุล</span>
+          <span style={{ ...S.label9, marginTop: '10px' }}>พนักงาน</span>
           <span style={S.val13}>{data.first_name} {data.last_name}</span>
         </div>
         <div>
-          <span style={S.label9}>งวดค่าแรง (Period)</span>
+          <span style={S.label9}>งวด</span>
           <span style={{ ...S.val13, marginBottom: '10px' }}>{periodLabel}</span>
           <span style={{ ...S.label9, marginTop: '10px' }}>หน่วยงาน</span>
           <span style={S.val13}>{data.factory_name || '—'}</span>
@@ -232,7 +232,7 @@ export const PaySlipPreview = forwardRef<HTMLDivElement, PaySlipPreviewProps>(({
           <div>
             <span style={S.label9}>วิธีการรับเงิน</span>
             <span style={{ fontSize: '12px', fontWeight: 700, color: '#0f172a', display: 'block' }}>
-              {data.payment_method === 'cash' ? 'เงินสด' : 'โอนบัญชีธนาคาร'}
+              {data.payment_method === 'bank_transfer' ? 'โอนบัญชีธนาคาร' : 'เงินสด'}
             </span>
           </div>
           {data.payment_method === 'bank_transfer' && (

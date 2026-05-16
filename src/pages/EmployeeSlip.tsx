@@ -4,13 +4,14 @@ import { useParams } from 'react-router-dom'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 
-import { PaySlipPreview } from '../components/payroll/PaySlipPreview'
-import type { PaySlipData } from '../components/payroll/PaySlipPreview'
+import { VKSlipDocument } from '../components/v2/VKSlipDocument'
+import type { SlipIncomeRow, SlipDeductRow } from '../components/v2/VKSlipDocument'
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/card'
 import { Button } from '../components/ui/button'
 import { Label } from '../components/ui/label'
 
-import { CheckCircle2, AlertCircle, Clock, Loader2, ShieldAlert, Eye, Lock } from 'lucide-react'
+import { CheckCircle2, AlertCircle, Clock, Loader2, ShieldAlert, Eye } from 'lucide-react'
+import '../styles/v2-tokens.css'
 
 interface PayslipRPCResponse {
   token_data: {
@@ -204,6 +205,90 @@ export default function EmployeeSlip() {
     } as PaySlipData
   }, [rawData, slipShifts, days_normal, days_shift, days_ot, days_ot_1x, empPosition])
 
+  // ── Slip rows (mirrors PaySlipV2 logic so formula strings are identical) ──
+  const POSITIONS: Record<string, string> = { worker: 'พนักงานทั่วไป', clerk: 'เสมียน', foreman: 'โฟร์แมน', office: 'พนักงานออฟฟิศ', manager: 'ผู้จัดการ' }
+  const MONTHS_SHORT = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.']
+
+  const slipRows = useMemo(() => {
+    if (!slipData) return { income: [] as SlipIncomeRow[], deductions: [] as SlipDeductRow[], workingDays: 0, periodLabel: '', posLabel: '' }
+
+    // Rates — derive from amounts same as PaySlipV2
+    const baseNormal  = 357
+    // For clerks, rate_per_12h is in the RPC employee object. We approximate from amounts if needed.
+    // We use days counts from slipData (populated from shift queries).
+    const dn = slipData.days_normal ?? 0
+    const ds = slipData.days_shift  ?? 0   // for clerk = weekend days, for worker = full-shift days
+    const clerkDaily  = dn > 0 ? slipData.amount_normal / dn : 0
+    const clerkHourly = clerkDaily / 8
+    const baseShift   = ds > 0 ? slipData.amount_shift / ds : 0
+
+    const amtNormal = slipData.amount_normal
+    const amtShift  = isClerkSlip ? 0 : slipData.amount_shift
+    const amtOt     = slipData.amount_ot       // 1.5x for clerk / 2x for worker
+    const amtOt1x   = slipData.amount_ot_1x ?? 0
+
+    // Day/hour counts for formula strings
+    const dnDays = dn  // from shift data
+    const dsDays = isClerkSlip ? ds : ds  // weekend days (clerk) / full-shift days (worker)
+    const otHrs  = isClerkSlip && clerkHourly > 0 ? Math.round(amtOt   / (clerkHourly * 1.5)) : 0
+    const ot1Hrs = isClerkSlip && clerkHourly > 0 ? Math.round(amtOt1x / clerkHourly)          : 0
+    const empRate = isClerkSlip ? clerkDaily * 30 : (baseNormal + baseShift) * 1  // approx for worker
+    const workerRate = ds > 0 ? baseNormal + baseShift : baseNormal  // base+shift combined
+    const otDays = !isClerkSlip && workerRate > 0 ? Math.round(amtOt / (workerRate * 2)) : 0
+
+    // Working days = normal workdays (not weekends for clerk)
+    const workingDays = isClerkSlip ? (dnDays + dsDays) : dnDays
+
+    // Formula detail strings
+    const detailNormal = dnDays > 0
+      ? (isClerkSlip ? `฿${Math.round(clerkDaily)} × ${dnDays} วัน` : `฿${baseNormal} × ${dnDays} วัน`)
+      : null
+    const detailShift = !isClerkSlip && dsDays > 0 && baseShift > 0
+      ? `฿${Math.round(baseShift)} × ${dsDays} วัน`
+      : null
+    const detailOt = isClerkSlip && otHrs > 0
+      ? `฿${clerkHourly.toFixed(2)} × 1.5 × ${otHrs} ชม.`
+      : (!isClerkSlip && otDays > 0 ? `฿${workerRate} × 2 × ${otDays} วัน` : null)
+    const detailOt1x = isClerkSlip && ot1Hrs > 0
+      ? `฿${clerkHourly.toFixed(2)} × 1.0 × ${ot1Hrs} ชม.`
+      : null
+
+    const specialSubs = slipData.special_note
+      ? slipData.special_note.split(',').map(s => s.trim()).filter(Boolean)
+      : []
+
+    const income: SlipIncomeRow[] = [
+      { label: isClerkSlip ? 'ค่าจ้างปกติ (วันธรรมดา)' : 'ค่าจ้างปกติ (8 ชม.)', value: amtNormal, detail: detailNormal, subs: [] },
+      { label: 'ค่ากะ (4 ชม.)',                                                     value: amtShift,  detail: detailShift,  subs: [] },
+      { label: isClerkSlip ? 'OT ล่วงเวลา (×1.5)' : 'OT วันหยุดนักขัตฤกษ์ (×2)', value: amtOt,    detail: detailOt,     subs: [] },
+      { label: 'OT วันหยุดสัปดาห์ (×1)',                                            value: isClerkSlip ? amtOt1x : 0, detail: detailOt1x, subs: [] },
+      { label: 'ค่าไม้ส่วนเกิน',  value: slipData.amount_wood_excess, detail: null, subs: [] },
+      { label: 'ค่าฟิล์ม',        value: slipData.amount_film,        detail: null, subs: [] },
+      { label: 'เงินพิเศษ',       value: slipData.amount_special,     detail: null, subs: specialSubs },
+      { label: 'เบี้ยขยัน',       value: slipData.amount_diligence,   detail: null, subs: [] },
+      { label: 'ค่าตำแหน่ง',      value: slipData.amount_position,    detail: null, subs: [] },
+    ].filter(r => r.value > 0 && r.label !== '') as SlipIncomeRow[]
+
+    const deductions: SlipDeductRow[] = [
+      { label: 'ประกันสังคม',            value: slipData.deduct_social_security },
+      { label: 'เบิกล่วงหน้า',           value: slipData.deduct_advance },
+      { label: 'ค่าอุปกรณ์ความปลอดภัย', value: slipData.deduct_safety_equipment },
+      { label: 'ค่าเสื้อพนักงาน',        value: slipData.deduct_uniform },
+    ].filter(r => r.value > 0)
+
+    const s = new Date(slipData.period_start), e = new Date(slipData.period_end)
+    const periodLabel = `${s.getDate()} ${MONTHS_SHORT[s.getMonth()]} – ${e.getDate()} ${MONTHS_SHORT[e.getMonth()]} ${e.getFullYear() + 543}`
+
+    return { income, deductions, workingDays, periodLabel, posLabel: POSITIONS[slipData.position ?? ''] ?? '' }
+  }, [slipData, isClerkSlip])
+
+  const maskBank = (a?: string | null) => {
+    if (!a) return undefined
+    const s = a.replace(/[-\s]/g, '')
+    if (s.length <= 6) return s
+    return `${s.slice(0, 3)}-${'X'.repeat(s.length - 6)}-${s.slice(-3)}`
+  }
+
   const [autoStatus, setAutoStatus] = useState<string>('')
 
   useEffect(() => {
@@ -326,8 +411,25 @@ export default function EmployeeSlip() {
         </div>
       )}
 
-      <div className="w-full max-w-[600px] shadow-lg rounded-xl overflow-x-auto bg-white">
-        <PaySlipPreview data={slipData} />
+      <div className="w-full max-w-[680px]">
+        {slipData && (
+          <VKSlipDocument
+            branchName={slipData.factory_name}
+            employeeName={`${slipData.first_name} ${slipData.last_name}`}
+            employeeCode={slipData.employee_code}
+            positionLabel={slipRows.posLabel || undefined}
+            periodLabel={slipRows.periodLabel}
+            paymentMethod={slipData.payment_method}
+            bankName={slipData.bank_name}
+            bankAccount={maskBank(slipData.bank_account)}
+            income={slipRows.income}
+            deductions={slipRows.deductions}
+            totalIncome={slipData.total_income}
+            totalDeduct={slipData.total_deductions}
+            netPay={slipData.net_pay}
+            workingDays={slipRows.workingDays > 0 ? slipRows.workingDays : undefined}
+          />
+        )}
       </div>
 
       {currentStatus === 'pending' && (
@@ -373,43 +475,45 @@ export default function EmployeeSlip() {
 
     </div>
     
-    {/* Privacy Warning Modal */}
+    {/* Privacy Warning Modal — VK theme */}
     {!hasAcceptedWarning && (
-      <div className="fixed inset-0 z-[100] bg-slate-900/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-300">
-        <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-8 text-center space-y-6 overflow-hidden relative animate-in fade-in zoom-in-95 duration-500">
-          <div className="absolute top-0 left-0 right-0 h-2 bg-gradient-to-r from-amber-400 via-[#1D9E75] to-blue-500" />
-          
-          <div className="flex justify-center">
-            <div className="w-20 h-20 bg-amber-50 rounded-full flex items-center justify-center relative">
-              <ShieldAlert className="w-10 h-10 text-amber-500" />
-              <div className="absolute -bottom-1 -right-1 bg-white p-1 rounded-full shadow-sm">
-                <Lock className="w-5 h-5 text-slate-400" />
-              </div>
+      <div className="vk-root" style={{ position: 'fixed', inset: 0, zIndex: 100, background: 'rgba(22,19,17,0.88)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+        <div style={{ background: 'var(--vk-paper)', border: '1px solid var(--vk-rule)', width: '100%', maxWidth: 400, overflow: 'hidden' }}>
+
+          {/* Header bar */}
+          <div style={{ background: 'var(--vk-ink)', padding: '22px 28px 20px', textAlign: 'center' }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 52, height: 52, background: 'rgba(255,255,255,0.08)', marginBottom: 14 }}>
+              <ShieldAlert style={{ width: 26, height: 26, color: 'var(--vk-marigold, #f59e0b)' }} />
+            </div>
+            <div style={{ fontFamily: 'var(--vk-sans)', fontWeight: 700, fontSize: 18, color: 'var(--vk-bone)', letterSpacing: '-0.01em' }}>
+              แจ้งเตือนความเป็นส่วนตัว
+            </div>
+            <div style={{ fontFamily: 'var(--vk-sans)', fontSize: 13, color: 'rgba(255,255,255,0.5)', marginTop: 6, lineHeight: 1.5 }}>
+              ระบบกำลังจะแสดงผลข้อมูลสลิปเงินเดือน<br />และข้อมูลส่วนบุคคลของท่าน
             </div>
           </div>
 
-          <div className="space-y-2">
-            <h2 className="text-2xl font-bold text-slate-900">แจ้งเตือนความเป็นส่วนตัว</h2>
-            <p className="text-slate-500">
-              ระบบกำลังจะแสดงผลข้อมูลสลิปเงินเดือนและข้อมูลส่วนบุคคลของท่าน
-            </p>
-          </div>
-
-          <div className="bg-slate-50 p-4 rounded-2xl text-left border border-slate-100">
-            <div className="flex items-start gap-3">
-              <Eye className="w-5 h-5 text-slate-400 mt-0.5" />
-              <p className="text-xs text-slate-600 leading-relaxed">
+          {/* Body */}
+          <div style={{ padding: '20px 28px', background: 'var(--vk-bone)' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, background: 'var(--vk-paper)', border: '1px solid var(--vk-rule)', padding: '14px 16px' }}>
+              <Eye style={{ width: 16, height: 16, color: 'var(--vk-ink-3)', flexShrink: 0, marginTop: 1 }} />
+              <p style={{ fontFamily: 'var(--vk-sans)', fontSize: 13, color: 'var(--vk-ink-2)', lineHeight: 1.65, margin: 0 }}>
                 ข้อมูลนี้เป็นข้อมูลส่วนตัวและมีความสำคัญ โปรดระมัดระวังการเปิดอ่านในที่สาธารณะ หรือในที่ที่มีผู้อื่นอาจมองเห็นหน้าจอของท่านได้
               </p>
             </div>
           </div>
 
-          <Button 
-            onClick={() => setHasAcceptedWarning(true)}
-            className="w-full h-14 text-lg bg-[#1D9E75] hover:bg-[#157a5a] rounded-2xl shadow-lg shadow-[#1D9E75]/20 font-bold"
-          >
-            ยืนยันเพื่อดูข้อมูล
-          </Button>
+          {/* Action */}
+          <div style={{ padding: '0 28px 24px', background: 'var(--vk-bone)' }}>
+            <button
+              onClick={() => setHasAcceptedWarning(true)}
+              style={{ width: '100%', height: 48, background: 'var(--vk-jade)', border: 'none', cursor: 'pointer', fontFamily: 'var(--vk-sans)', fontWeight: 700, fontSize: 15, color: '#fff', letterSpacing: '0.01em', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, transition: 'opacity 0.15s' }}
+              onMouseEnter={e => (e.currentTarget.style.opacity = '0.88')}
+              onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
+            >
+              ยืนยันเพื่อดูข้อมูล
+            </button>
+          </div>
         </div>
       </div>
     )}

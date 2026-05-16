@@ -108,11 +108,17 @@ function App() {
                 </Route>
               </Route>
 
-              <Route path="*" element={<Navigate to="/login" replace />} />
+              <Route path="*" element={<Navigate to="/v2/login" replace />} />
             </Routes>
           )}
         </div>
-        <Toaster position="top-center" richColors />
+        <Toaster position="top-center" toastOptions={{
+          classNames: {
+            toast: 'font-sans',
+            success: '!bg-[#F4F0E6] !border-[#B14729] !text-[#B14729]',
+            error: '!bg-[#F4F0E6] !border-[#C0392B] !text-[#C0392B]',
+          },
+        }} />
       </BrowserRouter>
     </QueryClientProvider>
   )
