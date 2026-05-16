@@ -563,7 +563,7 @@ export default function PayrollEntryV2() {
                     <div>
                       <div className="vk-eyebrow">NET PAY · เงินได้สุทธิ</div>
                       <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 11, color: 'var(--vk-ink-3)', marginTop: 3 }}>
-                        {isClerk ? clerkWeekdayDays + clerkWeekendDays : calc.normal_days} วันทำงาน
+                        {isClerk ? clerkWeekdayDays + clerkWeekendDays + holidayOtFullDays + holidayOtHalfDays : calc.normal_days + holidayOtFullDays + holidayOtHalfDays} วันทำงาน
                       </div>
                     </div>
                     <div className="vk-netpay-num" style={{ fontFamily: 'var(--vk-mono)', fontWeight: 700, letterSpacing: '-0.03em', fontVariantNumeric: 'tabular-nums', color: 'var(--vk-ink)' }}>

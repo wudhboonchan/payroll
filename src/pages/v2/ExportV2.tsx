@@ -60,6 +60,7 @@ function buildSlipHtml(entry: any, period: any, shifts: any[], branchName: strin
   const halfDays   = normShifts.filter((s: any) => s.is_half_shift && !s.actual_hours).length
   const partialHrs = normShifts.reduce((a: number, s: any) => a + Number(s.actual_hours || 0), 0)
   const holFull    = holShifts.filter((s: any) => !s.is_half_shift).length
+  const holHalf    = holShifts.filter((s: any) =>  s.is_half_shift).length
   const clerkNorm  = normShifts.filter((s: any) => !isWeekend(s.work_date)).length
   const clerkOt    = shifts.filter((s: any) => !isWeekend(s.work_date)).reduce((a: number, s: any) => a + Number(s.ot_hours || 0), 0)
   const clerkOt1x  = shifts.filter((s: any) => isWeekend(s.work_date)).reduce((a: number, s: any) => a + Number(s.ot_hours || 0), 0)
@@ -102,7 +103,7 @@ function buildSlipHtml(entry: any, period: any, shifts: any[], branchName: strin
   const ot1Hrs = clerkHourly > 0 && isClerk ? Math.round(amtOt1x / clerkHourly)         : 0
   const otDays = !isClerk && empRate > 0    ? Math.round(amtOtRaw / (empRate * 2))       : 0
 
-  const workingDays = isClerk ? (dnDays + daysShift) : dnDays
+  const workingDays = isClerk ? (dnDays + daysShift + holFull + holHalf) : (dnDays + holFull + holHalf)
 
   const detailNormal = dnDays > 0
     ? (isClerk ? `฿${Math.round(clerkDaily)} × ${dnDays} วัน` : `฿${baseNormal} × ${dnDays} วัน`)

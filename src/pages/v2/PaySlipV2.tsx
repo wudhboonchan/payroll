@@ -279,7 +279,7 @@ export default function PaySlipV2() {
     const otHrs   = clerkHourly > 0 && empIsClerk ? Math.round(amtOt   / (clerkHourly * 1.5)) : 0
     const ot1Hrs  = clerkHourly > 0 && empIsClerk ? Math.round(amtOt1x / clerkHourly)         : 0
     const otDays  = !empIsClerk && empRate > 0 ? Math.round(amtOtRaw / (empRate * 2)) : 0
-    workingDays = empIsClerk ? (dnDays + daysShift) : dnDays
+    workingDays = empIsClerk ? (dnDays + daysShift + holFull + holHalf) : (dnDays + holFull + holHalf)
 
     // Only show formula detail when not outdated
     const detailNormal = !isOutdated && dnDays > 0
