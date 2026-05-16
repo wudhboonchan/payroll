@@ -5,7 +5,7 @@ import { supabase } from '../../lib/supabase'
 import { useAppStore } from '../../store/useAppStore'
 import { TopBarV2 } from '../../components/v2/layout/TopBarV2'
 import { toast } from 'sonner'
-import { ChevronLeft, ChevronRight, Save, X, Clock, Clock4 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Save, X, Clock, Clock4, CheckSquare } from 'lucide-react'
 import '../../styles/v2-tokens.css'
 
 // ── helpers ────────────────────────────────────────────────────────────
@@ -56,7 +56,7 @@ export default function ShiftEntryV2() {
   const { user } = useAppStore()
   const queryClient = useQueryClient()
   const [isHoliday, setIsHoliday] = useState(false)
-  const [selected, setSelected] = useState<Employee | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [assignments, setAssignments] = useState<AssignedEmp[]>([])
   const [detailEmp, setDetailEmp] = useState<AssignedEmp | null>(null)
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
@@ -111,7 +111,6 @@ export default function ShiftEntryV2() {
     if (loadingAssignments || employees.length === 0 || !currentPeriod) return
     const activeIds = new Set(employees.map(e => e.id))
     const orphaned = (rawAssignments || []).filter((a: any) => !activeIds.has(a.employee_id))
-    // Silently delete any shift assignments whose employee is no longer active
     if (orphaned.length > 0) {
       const orphanedIds = orphaned.map((a: any) => a.employee_id)
       supabase.from('shift_assignments')
@@ -119,10 +118,10 @@ export default function ShiftEntryV2() {
         .eq('period_id', currentPeriod.id)
         .eq('work_date', activeDateStr)
         .in('employee_id', orphanedIds)
-        .then(() => { /* fire and forget — query will refetch */ })
+        .then(() => {})
     }
     const mapped: AssignedEmp[] = (rawAssignments || [])
-      .filter((a: any) => activeIds.has(a.employee_id))  // skip orphaned
+      .filter((a: any) => activeIds.has(a.employee_id))
       .map((a: any) => {
         const emp = employees.find(e => e.id === a.employee_id)!
         return {
@@ -153,32 +152,60 @@ export default function ShiftEntryV2() {
   const assignedIds = new Set(assignments.map(a => a.employee_id))
   const pool = employees.filter(e => !assignedIds.has(e.id))
 
+  // ── selection helpers ──
+  const toggleSelect = (emp: Employee) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(emp.id)) next.delete(emp.id)
+      else next.add(emp.id)
+      return next
+    })
+  }
+
+  const selectAll = () => {
+    // exclude clerks on holidays (not allowed)
+    const eligible = pool.filter(e => !(isHoliday && e.position === 'clerk'))
+    setSelectedIds(new Set(eligible.map(e => e.id)))
+  }
+
+  const clearSelection = () => setSelectedIds(new Set())
+
   const updateAssignment = (empId: string, patch: Partial<AssignedEmp>) => {
     setAssignments(prev => prev.map(a => a.employee_id === empId ? { ...a, ...patch } : a))
     setDetailEmp(prev => prev?.employee_id === empId ? { ...prev, ...patch } : prev)
   }
 
   const handleAssign = (shiftKey: string) => {
-    if (!selected) return
-    if (isHoliday && selected.position === 'clerk') {
-      toast.error("ไม่อนุญาตให้ลงกะเสมียนในวันหยุดนักขัตฤกษ์")
+    if (selectedIds.size === 0) return
+
+    const selectedEmps = pool.filter(e => selectedIds.has(e.id))
+    const blocked = selectedEmps.filter(e => isHoliday && e.position === 'clerk')
+    if (blocked.length > 0) {
+      toast.error(`ไม่อนุญาตให้ลงกะเสมียนในวันหยุดนักขัตฤกษ์`)
       return
     }
-    const isClerk = selected.position === 'clerk'
-    const newEmp: AssignedEmp = {
-      employee_id: selected.id, shift_type: shiftKey,
-      code: selected.employee_code, name: empName(selected),
-      nationality: selected.nationality ?? null,
-      isClerk, isHalfShift: isClerk, partialHours: 0,
-      woodExcess: 0, filmAmount: 0, otHours: 0,
-      isHolidayOTExempt: false, isCrossPosition: false,
-      crossPositionTitle: '', crossPositionExtraPay: 0, isNew: true,
-      rate_per_12h: Number(selected.rate_per_12h ?? 0),
+
+    const newEmps: AssignedEmp[] = selectedEmps.map(emp => {
+      const isClerk = emp.position === 'clerk'
+      return {
+        employee_id: emp.id, shift_type: shiftKey,
+        code: emp.employee_code, name: empName(emp),
+        nationality: emp.nationality ?? null,
+        isClerk, isHalfShift: isClerk, partialHours: 0,
+        woodExcess: 0, filmAmount: 0, otHours: 0,
+        isHolidayOTExempt: false, isCrossPosition: false,
+        crossPositionTitle: '', crossPositionExtraPay: 0, isNew: true,
+        rate_per_12h: Number(emp.rate_per_12h ?? 0),
+      }
+    })
+
+    setAssignments(prev => [...prev, ...newEmps])
+    clearSelection()
+
+    // Auto-open detail modal for single clerk on weekend
+    if (newEmps.length === 1 && newEmps[0].isClerk && weekend) {
+      setDetailEmp(newEmps[0])
     }
-    setAssignments(prev => [...prev, newEmp])
-    setSelected(null)
-    // Auto-open detail modal for clerk on weekend — OT hours are mandatory
-    if (isClerk && weekend) setDetailEmp(newEmp)
   }
 
   const handleRemove = (empId: string) => {
@@ -188,7 +215,7 @@ export default function ShiftEntryV2() {
   const navigate = (dir: -1 | 1) => {
     const d = new Date(activeDate); d.setDate(d.getDate() + dir)
     if (fmtDate(d) < fmtDate(periodStart) || fmtDate(d) > fmtDate(periodEnd)) return
-    setCurrentDate(d); setSelected(null)
+    setCurrentDate(d); clearSelection()
   }
 
   // ── save ──
@@ -225,6 +252,9 @@ export default function ShiftEntryV2() {
     },
     onError: (e: Error) => toast.error('บันทึกไม่สำเร็จ', { description: e.message }),
   })
+
+  const hasSelection = selectedIds.size > 0
+  const allEligibleSelected = pool.filter(e => !(isHoliday && e.position === 'clerk')).every(e => selectedIds.has(e.id)) && pool.length > 0
 
   if (!currentPeriod) return (
     <>
@@ -266,7 +296,7 @@ export default function ShiftEntryV2() {
             <ChevronRight style={{ width: 15, height: 15 }} />
           </button>
         </div>
-        {/* Row 2: holiday checkbox + save button — always same height */}
+        {/* Row 2: holiday checkbox + weekend badge (desktop) + save button */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <label style={{
             display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: '4px 12px',
@@ -296,44 +326,81 @@ export default function ShiftEntryV2() {
       <div className="vk-shift-split">
         {/* Pool */}
         <div style={{ padding: '16px 14px', background: 'transparent', overflowY: 'auto', maxHeight: '35vh' }} className="md:max-h-none">
-          <div className="vk-eyebrow" style={{ marginBottom: 12 }}>POOL · ยังไม่ได้กรอก ({pool.length})</div>
+          {/* Pool header with select-all */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+            <div className="vk-eyebrow">POOL · ยังไม่ได้กรอก ({pool.length})</div>
+            {pool.length > 0 && (
+              <button
+                onClick={allEligibleSelected ? clearSelection : selectAll}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  fontSize: 10, fontWeight: 700, letterSpacing: '0.06em',
+                  color: allEligibleSelected ? 'var(--vk-persimmon)' : 'var(--vk-ink-3)',
+                  background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px',
+                  textTransform: 'uppercase',
+                }}>
+                <CheckSquare style={{ width: 12, height: 12 }} />
+                {allEligibleSelected ? 'ยกเลิก' : 'เลือกทั้งหมด'}
+              </button>
+            )}
+          </div>
           <hr className="vk-rule-soft" style={{ marginBottom: 10 }} />
           {pool.length === 0 ? (
             <div className="vk-small" style={{ color: 'var(--vk-ink-3)', padding: '12px 0' }}>กรอกครบทุกคนแล้ว ✓</div>
-          ) : pool.map(emp => (
-            <div key={emp.id}
-              onClick={() => setSelected(s => s?.id === emp.id ? null : emp)}
-              style={{
-                padding: '9px 12px', marginBottom: 5, cursor: 'pointer', borderRadius: 4,
-                background: selected?.id === emp.id ? 'var(--vk-persimmon-tint)' : 'var(--vk-paper)',
-                border: `1px solid ${selected?.id === emp.id ? 'var(--vk-persimmon)' : 'var(--vk-rule-soft)'}`,
-                transition: 'all 120ms',
-              }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                <span style={{ fontWeight: 600, fontSize: 13 }}>
-                  {empName(emp)}{fmtNationality(emp.nationality) ? ` (${fmtNationality(emp.nationality)})` : ''}
-                </span>
-                {emp.position === 'clerk' && (
-                  <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 999, background: 'rgba(177,71,41,0.12)', color: 'var(--vk-persimmon)', letterSpacing: '0.04em', flexShrink: 0 }}>เสมียน</span>
-                )}
+          ) : pool.map(emp => {
+            const isSelected = selectedIds.has(emp.id)
+            const isBlockedClerk = isHoliday && emp.position === 'clerk'
+            return (
+              <div key={emp.id}
+                onClick={() => !isBlockedClerk && toggleSelect(emp)}
+                style={{
+                  padding: '9px 12px', marginBottom: 5, cursor: isBlockedClerk ? 'not-allowed' : 'pointer', borderRadius: 4,
+                  background: isSelected ? 'var(--vk-persimmon-tint)' : 'var(--vk-paper)',
+                  border: `1px solid ${isSelected ? 'var(--vk-persimmon)' : 'var(--vk-rule-soft)'}`,
+                  opacity: isBlockedClerk ? 0.4 : 1,
+                  transition: 'all 120ms',
+                  display: 'flex', alignItems: 'center', gap: 10,
+                }}>
+                {/* Checkbox indicator */}
+                <div style={{
+                  width: 16, height: 16, borderRadius: 4, flexShrink: 0,
+                  border: `2px solid ${isSelected ? 'var(--vk-persimmon)' : 'var(--vk-rule-soft)'}`,
+                  background: isSelected ? 'var(--vk-persimmon)' : 'transparent',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                  {isSelected && (
+                    <svg width="9" height="7" viewBox="0 0 9 7" fill="none">
+                      <path d="M1 3.5L3.5 6L8 1" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  )}
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <span style={{ fontWeight: 600, fontSize: 13 }}>
+                      {empName(emp)}{fmtNationality(emp.nationality) ? ` (${fmtNationality(emp.nationality)})` : ''}
+                    </span>
+                    {emp.position === 'clerk' && (
+                      <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 999, background: 'rgba(177,71,41,0.12)', color: 'var(--vk-persimmon)', letterSpacing: '0.04em', flexShrink: 0 }}>เสมียน</span>
+                    )}
+                  </div>
+                  <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 10, color: 'var(--vk-ink-3)', marginTop: 1 }}>{emp.employee_code}</div>
+                </div>
               </div>
-              <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 10, color: 'var(--vk-ink-3)', marginTop: 1 }}>{emp.employee_code}</div>
-            </div>
-          ))}
+            )
+          })}
         </div>
 
         {/* Shift columns */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0, overflow: 'auto', alignItems: 'stretch' }}>
           {SHIFTS.map(sh => {
             const shiftEmps = assignments.filter(a => a.shift_type === sh.key)
-            const canDrop = !!selected
+            const canDrop = hasSelection
             return (
               <div key={sh.key}
-                onClick={() => { if (selected) handleAssign(sh.key) }}
+                onClick={() => { if (hasSelection) handleAssign(sh.key) }}
                 style={{
                   background: 'var(--vk-bone)',
                   borderRight: sh.key === 'morning' ? '1px solid var(--vk-rule-soft)' : 'none',
-                  borderLeft: sh.key !== 'morning' ? 'none' : 'none',
                   outline: canDrop ? `2px solid var(--vk-persimmon)` : 'none',
                   outlineOffset: -2,
                   padding: '20px 24px', cursor: canDrop ? 'pointer' : 'default',
@@ -389,7 +456,7 @@ export default function ShiftEntryV2() {
                   ))}
                   {canDrop && (
                     <div style={{ padding: 10, border: '1px dashed var(--vk-persimmon)', color: 'var(--vk-persimmon-ink)', fontSize: 12, textAlign: 'center' }}>
-                      + วางที่นี่
+                      + วาง {selectedIds.size} คน ที่นี่
                     </div>
                   )}
                 </div>
@@ -399,8 +466,8 @@ export default function ShiftEntryV2() {
         </div>
       </div>
 
-      {/* Floating hint */}
-      {selected && (
+      {/* Floating selection hint */}
+      {hasSelection && (
         <div style={{
           position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
           background: 'var(--vk-ink-2)', color: 'var(--vk-bone)',
@@ -412,11 +479,15 @@ export default function ShiftEntryV2() {
           maxWidth: 'calc(100vw - 32px)',
         }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', color: 'var(--vk-persimmon)', textTransform: 'uppercase', marginBottom: 2 }}>เลือกแล้ว</div>
-            <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{empName(selected)}</div>
-            <div style={{ fontSize: 11, color: 'var(--vk-ink-4)', marginTop: 1 }}>คลิกที่กะที่ต้องการ</div>
+            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', color: 'var(--vk-persimmon)', textTransform: 'uppercase', marginBottom: 2 }}>
+              เลือกแล้ว {selectedIds.size} คน
+            </div>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>คลิกที่กะที่ต้องการ</div>
+            <div style={{ fontSize: 11, color: 'var(--vk-ink-4)', marginTop: 1 }}>
+              {pool.filter(e => selectedIds.has(e.id)).map(e => empName(e)).join(', ')}
+            </div>
           </div>
-          <span style={{ cursor: 'pointer', color: 'var(--vk-ink-4)', fontSize: 18, lineHeight: 1, flexShrink: 0 }} onClick={() => setSelected(null)}>×</span>
+          <span style={{ cursor: 'pointer', color: 'var(--vk-ink-4)', fontSize: 18, lineHeight: 1, flexShrink: 0 }} onClick={clearSelection}>×</span>
         </div>
       )}
 
