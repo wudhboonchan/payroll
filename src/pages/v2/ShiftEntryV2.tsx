@@ -403,12 +403,20 @@ export default function ShiftEntryV2() {
       {selected && (
         <div style={{
           position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
-          background: 'var(--vk-ink)', color: 'var(--vk-bone)',
-          padding: '10px 20px', fontSize: 13, fontFamily: 'var(--vk-sans)', fontWeight: 500,
-          display: 'flex', gap: 14, alignItems: 'center', zIndex: 100, borderRadius: 999,
+          background: 'var(--vk-ink-2)', color: 'var(--vk-bone)',
+          padding: '10px 16px 10px 18px',
+          fontFamily: 'var(--vk-sans)',
+          display: 'flex', alignItems: 'center', gap: 12,
+          zIndex: 100, borderRadius: 14,
+          boxShadow: '0 4px 20px rgba(22,19,17,0.35)',
+          maxWidth: 'calc(100vw - 32px)',
         }}>
-          เลือก <b>{empName(selected)}</b> — คลิกที่กะที่ต้องการ
-          <span style={{ cursor: 'pointer', opacity: 0.7, fontSize: 16 }} onClick={() => setSelected(null)}>×</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', color: 'var(--vk-persimmon)', textTransform: 'uppercase', marginBottom: 2 }}>เลือกแล้ว</div>
+            <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{empName(selected)}</div>
+            <div style={{ fontSize: 11, color: 'var(--vk-ink-4)', marginTop: 1 }}>คลิกที่กะที่ต้องการ</div>
+          </div>
+          <span style={{ cursor: 'pointer', color: 'var(--vk-ink-4)', fontSize: 18, lineHeight: 1, flexShrink: 0 }} onClick={() => setSelected(null)}>×</span>
         </div>
       )}
 
