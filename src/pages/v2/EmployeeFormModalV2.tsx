@@ -101,6 +101,21 @@ export default function EmployeeFormModalV2({ isOpen, onClose, employeeId, onSuc
     enabled: !!employeeId && isOpen,
   })
 
+  // Pre-fetch shift count so handleSave can check synchronously (no async freeze)
+  const { data: employeeShiftCount = 0 } = useQuery({
+    queryKey: ['employee-shift-count', employeeId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('shift_assignments' as any)
+        .select('id')
+        .eq('employee_id', employeeId!)
+      if (error) return 0
+      return (data as any[])?.length ?? 0
+    },
+    enabled: !!employeeId && isOpen,
+    staleTime: 0,
+  })
+
   useEffect(() => {
     if (position === 'clerk') setValue('wage_type', 'monthly')
     else if (position === 'worker') setValue('wage_type', 'daily')
@@ -155,6 +170,7 @@ export default function EmployeeFormModalV2({ isOpen, onClose, employeeId, onSuc
       queryClient.invalidateQueries({ queryKey: ['employees'] })
       queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] })
       queryClient.removeQueries({ queryKey: ['employee', employeeId] })
+      queryClient.removeQueries({ queryKey: ['employee-shift-count', employeeId] })
       if (deleteShifts) {
         queryClient.invalidateQueries({ queryKey: ['all-period-shifts'] })
         queryClient.invalidateQueries({ queryKey: ['shift-assignments'] })
@@ -173,16 +189,11 @@ export default function EmployeeFormModalV2({ isOpen, onClose, employeeId, onSuc
     },
   })
 
-  // Called by form submit — intercepts inactive + existing shifts case
-  const handleSave = async (values: EmployeeFormValues) => {
-    // Always check for shifts when marking inactive (regardless of previous status)
-    if (values.status === 'inactive' && employeeId) {
-      const { data: shifts } = await supabase.from('shift_assignments').select('id').eq('employee_id', employeeId)
-      const shiftCount = shifts?.length ?? 0
-      if (shiftCount > 0) {
-        setInactiveConfirm({ shiftCount, pendingValues: values })
-        return
-      }
+  // Called by form submit — intercepts inactive + existing shifts case (synchronous, uses pre-fetched count)
+  const handleSave = (values: EmployeeFormValues) => {
+    if (values.status === 'inactive' && employeeId && employeeShiftCount > 0) {
+      setInactiveConfirm({ shiftCount: employeeShiftCount, pendingValues: values })
+      return
     }
     mutation.mutate({ values, deleteShifts: false })
   }
