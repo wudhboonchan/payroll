@@ -9,9 +9,10 @@ import { Plus, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import '../../styles/v2-tokens.css'
 
-const tempClient = createClient(
-  `${window.location.origin}/supabase-api`,
-  import.meta.env.VITE_SUPABASE_ANON_KEY || '',
+// Admin client — uses service role key to create users without email confirmation / rate limits
+const adminClient = createClient(
+  import.meta.env.VITE_SUPABASE_URL || '',
+  import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY || '',
   { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } }
 )
 
@@ -26,9 +27,10 @@ export default function UserManagementV2() {
   const { data: profiles = [] } = useQuery<any[]>({
     queryKey: ['user-profiles'],
     queryFn: async () => {
-      const { data, error } = await supabase.from('profiles').select('id,full_name,role,factory_id,factory:factories(name)').eq('role','normalUser').order('full_name')
+      const { data, error } = await adminClient.from('profiles').select('id,full_name,role,factory_id,factory:factories(name)').eq('role','normalUser').order('full_name')
       if (error) throw error; return data
     },
+    staleTime: 0,
   })
 
   const { data: factories = [] } = useQuery<any[]>({
@@ -44,13 +46,24 @@ export default function UserManagementV2() {
       setFormError('')
       if (!form.email || !form.password || !form.full_name || !form.factory_id) throw new Error('กรุณากรอกข้อมูลให้ครบทุกช่อง')
       if (form.password.length < 6) throw new Error('รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร')
-      const { data: signUpData, error: signUpError } = await tempClient.auth.signUp({ email: form.email, password: form.password })
+      // Use admin API — no confirmation email, no rate limit
+      const { data: createData, error: signUpError } = await adminClient.auth.admin.createUser({
+        email: form.email, password: form.password, email_confirm: true,
+      })
       if (signUpError) throw signUpError
-      if (!signUpData.user) throw new Error('ไม่สามารถสร้างบัญชีได้')
-      const { error: profileError } = await supabase.from('profiles').upsert({ id: signUpData.user.id, full_name: form.full_name, role: 'normalUser', factory_id: form.factory_id })
+      if (!createData.user) throw new Error('ไม่สามารถสร้างบัญชีได้')
+      // Admin client has service role → bypasses RLS
+      const { error: profileError } = await adminClient.from('profiles').upsert({
+        id: createData.user.id, full_name: form.full_name, role: 'normalUser', factory_id: form.factory_id,
+      })
       if (profileError) throw profileError
     },
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['user-profiles'] }); toast.success('สร้างผู้ใช้เรียบร้อยแล้ว'); setIsModalOpen(false); setForm({ email:'',password:'',full_name:'',factory_id:'' }) },
+    onSuccess: () => {
+      queryClient.refetchQueries({ queryKey: ['user-profiles'] })
+      toast.success('สร้างผู้ใช้เรียบร้อยแล้ว')
+      setIsModalOpen(false)
+      setForm({ email: '', password: '', full_name: '', factory_id: '' })
+    },
     onError: (e: Error) => setFormError(e.message),
   })
 
@@ -69,7 +82,7 @@ export default function UserManagementV2() {
     <div className="vk-root" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
       <TopBarV2 title="จัดการผู้ใช้งาน" onMenuClick={onMenuClick} />
 
-      <div style={{ padding: '28px 36px 60px', maxWidth: 760 }}>
+      <div className="vk-page" style={{ maxWidth: 760 }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 28 }}>
           <div>
             <div className="vk-eyebrow" style={{ marginBottom: 4 }}>USER MANAGEMENT · จัดการผู้ใช้งาน</div>

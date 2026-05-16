@@ -22,7 +22,7 @@ export function AppLayoutV2() {
   return (
     <div className="vk-root" style={{ display: 'flex', minHeight: '100vh' }}>
       <SidebarV2 isOpen={sidebarOpen} setIsOpen={setSidebarOpen} />
-      <div style={{ flex: 1, marginLeft: 'var(--vk-sidebar-w)', display: 'flex', flexDirection: 'column', minWidth: 0 }} className="md:ml-[248px] ml-0">
+      <div className="vk-main">
         <Outlet context={{ onMenuClick: () => setSidebarOpen(true) }} />
       </div>
     </div>

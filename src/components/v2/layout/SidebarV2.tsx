@@ -2,10 +2,11 @@ import { Link, useLocation } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { useAppStore } from '../../../store/useAppStore'
 import { supabase } from '../../../lib/supabase'
+import { toast } from 'sonner'
 import {
   LayoutDashboard, Users, CalendarClock, Calculator,
-  CreditCard, FileText, Download, LogOut, Building2,
-  Link2, UserCog, ChevronDown, X, Menu, KeyRound
+  CreditCard, FileText, Download, LogOut,
+  Link2, UserCog, ChevronDown, X, Menu, KeyRound, Eye, EyeOff
 } from 'lucide-react'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
@@ -18,10 +19,10 @@ const NAV = [
   { href: '/v2/dashboard',  label: 'Dashboard',         icon: LayoutDashboard, roles: ['admin','superUser'] },
   { href: '/v2/employees',  label: 'ฐานข้อมูลพนักงาน', icon: Users,           roles: ['admin','superUser'] },
   { href: '/v2/shifts',     label: 'กรอกกะรายวัน',      icon: CalendarClock,   roles: ['admin','superUser'] },
-  { href: '/v2/payroll',    label: 'กรอกค่าจ้าง',       icon: Calculator,      roles: ['admin','superUser'] },
   { href: '/v2/advances',   label: 'เบิกล่วงหน้า',      icon: CreditCard,      roles: ['admin','superUser'] },
+  { href: '/v2/payroll',    label: 'กรอกค่าจ้าง',       icon: Calculator,      roles: ['admin','superUser'] },
   { href: '/v2/payslip',    label: 'ดูสลิปเงินเดือน',   icon: FileText,        roles: ['admin','superUser','normalUser'] },
-  { href: '/v2/share-links',label: 'ลิงก์สลิป (LINE)',  icon: Link2,           roles: ['admin','superUser','normalUser'] },
+  { href: '/v2/share-links',label: 'ลิงก์สลิปพนักงาน',  icon: Link2,           roles: ['admin','superUser','normalUser'] },
   { href: '/v2/export',     label: 'ส่งออกข้อมูล',      icon: Download,        roles: ['admin','superUser'] },
   { href: '/v2/users',      label: 'จัดการผู้ใช้งาน',   icon: UserCog,         roles: ['admin'] },
 ]
@@ -32,6 +33,11 @@ export function SidebarV2({ isOpen, setIsOpen }: SidebarV2Props) {
   const { user, companyContext, setUser, setCompanyContext } = useAppStore()
   const location = useLocation()
   const [factories, setFactories] = useState<Factory[]>([])
+  const [showPwModal, setShowPwModal] = useState(false)
+  const [pwForm, setPwForm] = useState({ current: '', next: '', confirm: '' })
+  const [pwError, setPwError] = useState('')
+  const [pwLoading, setPwLoading] = useState(false)
+  const [showPw, setShowPw] = useState(false)
 
   useEffect(() => {
     if (user?.role === 'admin' || user?.role === 'superUser') {
@@ -55,6 +61,30 @@ export function SidebarV2({ isOpen, setIsOpen }: SidebarV2Props) {
     setCompanyContext(null)
   }
 
+  const handleChangePassword = async () => {
+    setPwError('')
+    if (!pwForm.next || !pwForm.confirm) { setPwError('กรุณากรอกรหัสผ่านใหม่'); return }
+    if (pwForm.next.length < 6) { setPwError('รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร'); return }
+    if (pwForm.next !== pwForm.confirm) { setPwError('รหัสผ่านใหม่ไม่ตรงกัน'); return }
+    setPwLoading(true)
+    try {
+      // Re-authenticate first to verify current password
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.user?.email) throw new Error('ไม่พบข้อมูลผู้ใช้')
+      const { error: signInErr } = await supabase.auth.signInWithPassword({ email: session.user.email, password: pwForm.current })
+      if (signInErr) throw new Error('รหัสผ่านปัจจุบันไม่ถูกต้อง')
+      const { error } = await supabase.auth.updateUser({ password: pwForm.next })
+      if (error) throw error
+      toast.success('เปลี่ยนรหัสผ่านเรียบร้อยแล้ว')
+      setShowPwModal(false)
+      setPwForm({ current: '', next: '', confirm: '' })
+    } catch (e: any) {
+      setPwError(e.message)
+    } finally {
+      setPwLoading(false)
+    }
+  }
+
   const filtered = NAV.filter(n => !user || n.roles.includes(user.role))
 
   return (
@@ -67,22 +97,32 @@ export function SidebarV2({ isOpen, setIsOpen }: SidebarV2Props) {
       <aside style={{
         position: 'fixed', insetBlock: 0, left: 0, zIndex: 50, width: 'var(--vk-sidebar-w)',
         background: 'var(--vk-bone)', borderRight: '1px solid var(--vk-rule)',
-        display: 'flex', flexDirection: 'column',
-        transform: isOpen ? 'translateX(0)' : undefined,
-      }} className={`vk-root hidden md:flex ${isOpen ? '!flex' : ''}`}>
+      }} className={`vk-root flex-col hidden md:flex ${isOpen ? '!flex' : ''}`}>
 
         {/* Brand */}
-        <div style={{ padding: '18px 16px 14px', borderBottom: '1px solid var(--vk-rule-soft)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <Building2 style={{ width: 32, height: 32, flexShrink: 0, color: 'var(--vk-persimmon)', padding: 6, background: 'var(--vk-persimmon-tint)', borderRadius: 6 }} />
-            <div>
-              <div style={{ fontFamily: 'var(--vk-sans)', fontWeight: 700, fontSize: 14, letterSpacing: '-0.01em', color: 'var(--vk-ink)' }}>หจก. วิราญกร</div>
-              <div style={{ fontFamily: 'var(--vk-thai)', fontSize: 11, color: 'var(--vk-ink-3)', marginTop: 1 }}>Payroll System v2</div>
-            </div>
+        <div style={{ padding: '22px 20px 18px', borderBottom: '1px solid var(--vk-rule-soft)', position: 'relative', overflow: 'hidden' }}>
+          {/* Giant tilted logo — purely decorative, clipped by overflow:hidden */}
+          <img
+            src="/logo.png"
+            alt=""
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              right: -28,
+              top: '50%',
+              transform: 'translateY(-50%) rotate(35deg)',
+              width: 116,
+              height: 116,
+              objectFit: 'contain',
+              opacity: 0.18,
+              pointerEvents: 'none',
+              userSelect: 'none',
+            }}
+          />
+          <div style={{ position: 'relative', zIndex: 1 }}>
+            <div style={{ fontFamily: 'var(--vk-sans)', fontWeight: 800, fontSize: 22, letterSpacing: '-0.03em', color: 'var(--vk-ink)', lineHeight: 1.1 }}>วิราญกร</div>
+            <div style={{ fontFamily: 'var(--vk-sans)', fontSize: 11, fontWeight: 500, color: 'var(--vk-ink-3)', letterSpacing: '0.06em', textTransform: 'uppercase', marginTop: 4 }}>Payroll System</div>
           </div>
-          <button className="md:hidden vk-btn vk-btn--ghost" style={{ width: 28, height: 28, padding: 0 }} onClick={() => setIsOpen(false)}>
-            <X style={{ width: 16, height: 16 }} />
-          </button>
         </div>
 
         {/* Factory picker */}
@@ -145,10 +185,8 @@ export function SidebarV2({ isOpen, setIsOpen }: SidebarV2Props) {
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" side="top" className="w-52 mb-1">
-              <DropdownMenuItem>
-                <Link to="/settings" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <KeyRound style={{ width: 15, height: 15, opacity: 0.5 }} /> เปลี่ยนรหัสผ่าน
-                </Link>
+              <DropdownMenuItem onClick={() => { setShowPwModal(true); setPwError(''); setPwForm({ current: '', next: '', confirm: '' }) }} className="flex items-center gap-2 cursor-pointer">
+                <KeyRound style={{ width: 15, height: 15, opacity: 0.5 }} /> เปลี่ยนรหัสผ่าน
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={handleSignOut} className="flex items-center gap-2 text-red-600 focus:text-red-600 focus:bg-red-50 cursor-pointer">
@@ -158,6 +196,67 @@ export function SidebarV2({ isOpen, setIsOpen }: SidebarV2Props) {
           </DropdownMenu>
         </div>
       </aside>
+
+      {/* ── Change Password Modal ── */}
+      {showPwModal && (
+        <div className="vk-root" style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(22,19,17,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+          onClick={() => setShowPwModal(false)}>
+          <div style={{ background: 'var(--vk-paper)', border: '1px solid var(--vk-rule)', width: '100%', maxWidth: 380, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+            onClick={e => e.stopPropagation()}>
+
+            {/* Header */}
+            <div style={{ background: 'var(--vk-persimmon)', color: '#fff', padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 15 }}>เปลี่ยนรหัสผ่าน</div>
+                <div style={{ fontSize: 11, opacity: 0.55, marginTop: 1 }}>กรอกรหัสผ่านปัจจุบันและรหัสผ่านใหม่</div>
+              </div>
+              <button onClick={() => setShowPwModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#fff', opacity: 0.6, padding: 4 }}>
+                <X style={{ width: 16, height: 16 }} />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div style={{ padding: '20px', background: 'var(--vk-bone)', display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {[
+                { label: 'รหัสผ่านปัจจุบัน', key: 'current' },
+                { label: 'รหัสผ่านใหม่', key: 'next' },
+                { label: 'ยืนยันรหัสผ่านใหม่', key: 'confirm' },
+              ].map(f => (
+                <div key={f.key}>
+                  <label style={{ display: 'block', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--vk-ink-3)', marginBottom: 5 }}>{f.label}</label>
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      type={showPw ? 'text' : 'password'}
+                      value={(pwForm as any)[f.key]}
+                      onChange={e => setPwForm(p => ({ ...p, [f.key]: e.target.value }))}
+                      onKeyDown={e => e.key === 'Enter' && handleChangePassword()}
+                      style={{ width: '100%', height: 36, padding: '0 36px 0 10px', fontSize: 13, fontFamily: 'var(--vk-sans)', border: '1px solid var(--vk-rule)', background: 'var(--vk-paper)', color: 'var(--vk-ink)', outline: 'none', boxSizing: 'border-box' }}
+                    />
+                    {f.key === 'next' && (
+                      <button onClick={() => setShowPw(v => !v)} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--vk-ink-3)', padding: 0 }}>
+                        {showPw ? <EyeOff style={{ width: 14, height: 14 }} /> : <Eye style={{ width: 14, height: 14 }} />}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {pwError && (
+                <div style={{ padding: '8px 12px', background: 'var(--vk-crimson-tint)', border: '1px solid var(--vk-crimson)', fontSize: 12, color: 'var(--vk-crimson)' }}>
+                  {pwError}
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div style={{ padding: '12px 20px', borderTop: '1px solid var(--vk-rule)', background: 'var(--vk-paper)', display: 'flex', gap: 8 }}>
+              <button className="vk-btn vk-btn--primary" style={{ flex: 1 }} onClick={handleChangePassword} disabled={pwLoading}>
+                {pwLoading ? 'กำลังบันทึก...' : 'บันทึกรหัสผ่านใหม่'}
+              </button>
+              <button className="vk-btn" onClick={() => setShowPwModal(false)}>ยกเลิก</button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }

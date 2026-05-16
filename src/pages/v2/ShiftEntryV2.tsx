@@ -1,34 +1,66 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
 import { useAppStore } from '../../store/useAppStore'
 import { TopBarV2 } from '../../components/v2/layout/TopBarV2'
 import { toast } from 'sonner'
-import { ChevronLeft, ChevronRight, Save } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Save, X, Clock, Clock4 } from 'lucide-react'
 import '../../styles/v2-tokens.css'
 
+// ── helpers ────────────────────────────────────────────────────────────
 function parseLocal(s: string) { const [y,m,d]=s.split('-').map(Number); return new Date(y,m-1,d) }
 function fmtDate(d: Date) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` }
 const MONTHS = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.']
-function fmtDisplay(s: string) { const d=parseLocal(s); return `${d.getDate()} ${MONTHS[d.getMonth()]}` }
+const DAYS   = ['อาทิตย์','จันทร์','อังคาร','พุธ','พฤหัส','ศุกร์','เสาร์']
+function fmtDisplay(s: string) {
+  const d = parseLocal(s)
+  return `วัน${DAYS[d.getDay()]}ที่ ${d.getDate()} ${MONTHS[d.getMonth()]}`
+}
+function isWeekend(s: string) { const d = parseLocal(s); return d.getDay() === 0 || d.getDay() === 6 }
 
+// ── types ──────────────────────────────────────────────────────────────
 interface Period { id: string; label: string; period_start: string; period_end: string; status: string }
-interface Employee { id: string; employee_code: string; first_name: string; last_name: string }
-interface Assignment { id?: string; employee_id: string; shift_type: string; is_holiday_ot: boolean; actual_hours: number; is_holiday_ot_exempt: boolean }
+interface Employee { id: string; employee_code: string; first_name: string; last_name: string; prefix: string | null; position: string; nationality: string | null }
+interface AssignedEmp {
+  employee_id: string; shift_type: string; code: string; name: string
+  nationality: string | null
+  isClerk: boolean; isHalfShift: boolean; partialHours: number
+  woodExcess: number; filmAmount: number; otHours: number
+  isHolidayOTExempt: boolean; isCrossPosition: boolean
+  crossPositionTitle: string; crossPositionExtraPay: number
+  isNew: boolean
+  rate_per_12h: number
+}
 
 const SHIFTS = [
-  { key: 'morning',   label: 'กะเช้า',  hours: '06:00 — 18:00' },
-  { key: 'afternoon', label: 'กะบ่าย',  hours: '14:00 — 02:00' },
-  { key: 'night',     label: 'กะดึก',   hours: '22:00 — 10:00' },
+  { key: 'morning',   label: 'กะเช้า',  hours: '08:00 — 20:00' },
+  { key: 'afternoon', label: 'กะบ่าย',  hours: '20:00 — 08:00' },
 ]
 
+function empName(e: Employee) {
+  return `${e.first_name} ${e.last_name}`.trim()
+}
+function isNonThai(nationality: string | null) {
+  return nationality && nationality !== 'ไทย'
+}
+function fmtNationality(nationality: string | null) {
+  if (!nationality || nationality === 'ไทย') return null
+  if (nationality === 'เมียนมา' || nationality.toLowerCase().includes('myanmar') || nationality.toLowerCase().includes('burma')) return 'เมียนมา/กะเหรี่ยง'
+  return nationality
+}
+
+// ── component ──────────────────────────────────────────────────────────
 export default function ShiftEntryV2() {
   const { onMenuClick } = useOutletContext<{ onMenuClick: () => void }>()
   const { user } = useAppStore()
   const queryClient = useQueryClient()
   const [isHoliday, setIsHoliday] = useState(false)
+  const [selected, setSelected] = useState<Employee | null>(null)
+  const [assignments, setAssignments] = useState<AssignedEmp[]>([])
+  const [detailEmp, setDetailEmp] = useState<AssignedEmp | null>(null)
 
+  // ── periods ──
   const { data: periods = [] } = useQuery<Period[]>({
     queryKey: ['periods', user?.factory_id],
     queryFn: async () => {
@@ -44,60 +76,135 @@ export default function ShiftEntryV2() {
   const [currentDate, setCurrentDate] = useState<Date | null>(null)
   const activeDate = currentDate ?? new Date(Math.min(periodEnd.getTime(), Date.now()))
   const activeDateStr = fmtDate(activeDate)
+  const weekend = isWeekend(activeDateStr)
 
-  const isAtStart = fmtDate(activeDate) <= fmtDate(periodStart)
-  const isAtEnd   = fmtDate(activeDate) >= fmtDate(periodEnd)
+  const isAtStart = activeDateStr <= fmtDate(periodStart)
+  const isAtEnd   = activeDateStr >= fmtDate(periodEnd)
 
+  // ── employees ──
   const { data: employees = [] } = useQuery<Employee[]>({
     queryKey: ['employees', user?.factory_id],
     queryFn: async () => {
-      const { data, error } = await supabase.from('employees').select('id,employee_code,first_name,last_name').eq('factory_id', user?.factory_id ?? '').eq('status','active').order('employee_code')
+      const { data, error } = await supabase.from('employees')
+        .select('id,employee_code,first_name,last_name,prefix,position,nationality')
+        .eq('factory_id', user?.factory_id ?? '').eq('status','active').order('employee_code')
       if (error) throw error; return data
     }, enabled: !!user?.factory_id,
   })
 
-  const { data: assignments = [] } = useQuery<Assignment[]>({
+  // ── fetch existing assignments for the day ──
+  const { data: rawAssignments = [], isLoading: loadingAssignments } = useQuery({
     queryKey: ['shifts-v2', currentPeriod?.id, activeDateStr],
     queryFn: async () => {
       if (!currentPeriod) return []
-      const { data, error } = await supabase.from('shift_assignments').select('id,employee_id,shift_type,is_holiday_ot,actual_hours,is_holiday_ot_exempt')
+      const { data, error } = await supabase.from('shift_assignments')
+        .select('id,employee_id,shift_type,is_holiday_ot,is_half_shift,wood_excess,film_amount,ot_hours,actual_hours,is_holiday_ot_exempt,is_cross_position,cross_position_title,cross_position_extra_pay')
         .eq('period_id', currentPeriod.id).eq('work_date', activeDateStr)
       if (error) throw error; return data
     }, enabled: !!currentPeriod,
   })
 
+  // Sync DB → local state when date changes
+  useEffect(() => {
+    if (loadingAssignments || employees.length === 0 || !currentPeriod) return
+    const mapped: AssignedEmp[] = (rawAssignments || []).map((a: any) => {
+      const emp = employees.find(e => e.id === a.employee_id)
+      return {
+        employee_id: a.employee_id, shift_type: a.shift_type,
+        code: emp?.employee_code || '?',
+        name: emp ? empName(emp) : '?',
+        nationality: emp?.nationality ?? null,
+        isClerk: emp?.position === 'clerk',
+        isHalfShift: a.is_half_shift ?? false,
+        partialHours: Number(a.actual_hours ?? 0),
+        woodExcess: Number(a.wood_excess ?? 0),
+        filmAmount: Number(a.film_amount ?? 0),
+        otHours: Number(a.ot_hours ?? 0),
+        isHolidayOTExempt: a.is_holiday_ot_exempt ?? false,
+        isCrossPosition: a.is_cross_position ?? false,
+        crossPositionTitle: a.cross_position_title || '',
+        crossPositionExtraPay: Number(a.cross_position_extra_pay ?? 0),
+        isNew: false,
+        rate_per_12h: Number(emp?.rate_per_12h ?? 0),
+      }
+    })
+    setAssignments(mapped)
+    if (rawAssignments.length > 0) setIsHoliday((rawAssignments[0] as any).is_holiday_ot ?? false)
+    else setIsHoliday(false)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rawAssignments, employees.length, currentPeriod?.id, activeDateStr])
+
   const assignedIds = new Set(assignments.map(a => a.employee_id))
   const pool = employees.filter(e => !assignedIds.has(e.id))
 
-  const [selected, setSelected] = useState<Employee | null>(null)
+  const updateAssignment = (empId: string, patch: Partial<AssignedEmp>) => {
+    setAssignments(prev => prev.map(a => a.employee_id === empId ? { ...a, ...patch } : a))
+    setDetailEmp(prev => prev?.employee_id === empId ? { ...prev, ...patch } : prev)
+  }
 
-  const saveMutation = useMutation({
-    mutationFn: async ({ emp, shiftKey }: { emp: Employee; shiftKey: string }) => {
-      const { error } = await supabase.from('shift_assignments').upsert({
-        period_id: currentPeriod!.id, work_date: activeDateStr,
-        employee_id: emp.id, shift_type: shiftKey,
-        is_holiday_ot: isHoliday, actual_hours: 12, is_holiday_ot_exempt: false,
-      }, { onConflict: 'period_id,work_date,employee_id' })
-      if (error) throw error
-    },
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['shifts-v2'] }); setSelected(null) },
-    onError: (e: Error) => toast.error('บันทึกไม่สำเร็จ', { description: e.message }),
-  })
+  const handleAssign = (shiftKey: string) => {
+    if (!selected) return
+    if (isHoliday && selected.position === 'clerk') {
+      toast.error("ไม่อนุญาตให้ลงกะเสมียนในวันหยุดนักขัตฤกษ์")
+      return
+    }
+    const isClerk = selected.position === 'clerk'
+    setAssignments(prev => [...prev, {
+      employee_id: selected.id, shift_type: shiftKey,
+      code: selected.employee_code, name: empName(selected),
+      nationality: selected.nationality ?? null,
+      isClerk, isHalfShift: isClerk, partialHours: 0,
+      woodExcess: 0, filmAmount: 0, otHours: 0,
+      isHolidayOTExempt: false, isCrossPosition: false,
+      crossPositionTitle: '', crossPositionExtraPay: 0, isNew: true,
+      rate_per_12h: Number(selected.rate_per_12h ?? 0),
+    }])
+    setSelected(null)
+  }
 
-  const removeMutation = useMutation({
-    mutationFn: async (empId: string) => {
-      const { error } = await supabase.from('shift_assignments').delete().eq('period_id', currentPeriod!.id).eq('work_date', activeDateStr).eq('employee_id', empId)
-      if (error) throw error
-    },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['shifts-v2'] }),
-  })
+  const handleRemove = (empId: string) => {
+    setAssignments(prev => prev.filter(a => a.employee_id !== empId))
+  }
 
   const navigate = (dir: -1 | 1) => {
-    const d = new Date(activeDate)
-    d.setDate(d.getDate() + dir)
+    const d = new Date(activeDate); d.setDate(d.getDate() + dir)
     if (fmtDate(d) < fmtDate(periodStart) || fmtDate(d) > fmtDate(periodEnd)) return
-    setCurrentDate(d)
+    setCurrentDate(d); setSelected(null)
   }
+
+  // ── save ──
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      if (!user?.factory_id || !currentPeriod?.id) throw new Error('กรุณาสร้างงวดก่อน')
+      if (assignments.length === 0) {
+        if (!window.confirm('คุณกำลังจะลบข้อมูลกะทั้งหมดของวันนี้ ยืนยันหรือไม่?')) throw new Error('ยกเลิก')
+        await supabase.from('shift_assignments').delete().eq('period_id', currentPeriod.id).eq('work_date', activeDateStr)
+        return
+      }
+      const payload = assignments.map(a => ({
+        period_id: currentPeriod.id, employee_id: a.employee_id, work_date: activeDateStr,
+        shift_type: a.shift_type, is_holiday_ot: isHoliday,
+        is_half_shift: a.isHalfShift,
+        wood_excess: a.isClerk ? 0 : a.woodExcess,
+        film_amount: a.isClerk ? 0 : a.filmAmount,
+        ot_hours: a.otHours, actual_hours: a.partialHours || 0,
+        is_holiday_ot_exempt: a.isHolidayOTExempt,
+        is_cross_position: a.isCrossPosition,
+        cross_position_title: a.crossPositionTitle || '',
+        cross_position_extra_pay: a.crossPositionExtraPay || 0,
+      }))
+      const { error } = await supabase.from('shift_assignments' as any).upsert(payload, { onConflict: 'employee_id,work_date' })
+      if (error) throw error
+      const keepIds = assignments.map(a => a.employee_id)
+      await supabase.from('shift_assignments').delete().eq('period_id', currentPeriod.id).eq('work_date', activeDateStr).not('employee_id', 'in', `(${keepIds.join(',')})`)
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['shifts-v2'] })
+      queryClient.invalidateQueries({ queryKey: ['all-period-shifts'] })
+      toast.success(`บันทึกข้อมูล ${fmtDisplay(activeDateStr)} สำเร็จ`)
+    },
+    onError: (e: Error) => toast.error('บันทึกไม่สำเร็จ', { description: e.message }),
+  })
 
   if (!currentPeriod) return (
     <div className="vk-root" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
@@ -107,82 +214,370 @@ export default function ShiftEntryV2() {
   )
 
   return (
-    <div className="vk-root" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+    <div className="vk-root" style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
       <TopBarV2 title="กรอกกะรายวัน" subtitle={currentPeriod.label} onMenuClick={onMenuClick} />
 
-      {/* Period date strip */}
-      <div style={{ borderBottom: '1px solid var(--vk-rule)', background: 'var(--vk-bone)', padding: '12px 36px', display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-        <button className="vk-btn vk-btn--ghost" style={{ height: 32, padding: '0 10px' }} disabled={isAtStart} onClick={() => navigate(-1)}>
-          <ChevronLeft style={{ width: 15, height: 15 }} />
-        </button>
-        <div style={{ fontFamily: 'var(--vk-sans)', fontWeight: 700, fontSize: 18, letterSpacing: '-0.01em', minWidth: 140, textAlign: 'center' }}>
-          {fmtDisplay(activeDateStr)}
+      {/* Date strip */}
+      <div style={{
+        borderBottom: '1px solid var(--vk-rule)',
+        background: isHoliday ? 'var(--vk-marigold-tint)' : weekend ? 'rgba(120,60,180,0.04)' : 'var(--vk-bone)',
+        padding: '8px 16px', display: 'flex', flexDirection: 'column', gap: 8,
+      }}>
+        {/* Row 1: prev / date + weekend badge / next */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+          <button className="vk-btn vk-btn--ghost" style={{ height: 32, padding: '0 10px' }} disabled={isAtStart} onClick={() => navigate(-1)}>
+            <ChevronLeft style={{ width: 15, height: 15 }} />
+          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 210, justifyContent: 'center' }}>
+            <div style={{
+              fontFamily: 'var(--vk-sans)', fontWeight: 700, fontSize: 17, letterSpacing: '-0.01em',
+              color: isHoliday ? '#6F4A0E' : weekend ? '#5b21b6' : 'var(--vk-ink)',
+            }}>
+              {fmtDisplay(activeDateStr)}
+            </div>
+            {weekend && (
+              <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', color: '#5b21b6', background: 'rgba(91,33,182,0.08)', padding: '2px 8px', borderRadius: 999, whiteSpace: 'nowrap' }}>
+                วันหยุดสัปดาห์
+              </span>
+            )}
+          </div>
+          <button className="vk-btn vk-btn--ghost" style={{ height: 32, padding: '0 10px' }} disabled={isAtEnd} onClick={() => navigate(1)}>
+            <ChevronRight style={{ width: 15, height: 15 }} />
+          </button>
         </div>
-        <button className="vk-btn vk-btn--ghost" style={{ height: 32, padding: '0 10px' }} disabled={isAtEnd} onClick={() => navigate(1)}>
-          <ChevronRight style={{ width: 15, height: 15 }} />
-        </button>
-        <div style={{ height: 24, width: 1, background: 'var(--vk-rule-soft)' }} />
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: '4px 12px', border: `1px solid ${isHoliday ? 'var(--vk-marigold)' : 'var(--vk-rule-soft)'}`, borderRadius: 6, background: isHoliday ? 'var(--vk-marigold-tint)' : 'transparent', fontSize: 13, fontWeight: 600, color: isHoliday ? '#6F4A0E' : 'var(--vk-ink-2)' }}>
-          <input type="checkbox" checked={isHoliday} onChange={e => setIsHoliday(e.target.checked)} style={{ accentColor: 'var(--vk-marigold)' }} />
-          วันหยุดนักขัตฤกษ์ (OT ×2)
-        </label>
+        {/* Row 2: holiday checkbox + save button — always same height */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <label style={{
+            display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: '4px 12px',
+            border: `1px solid ${isHoliday ? 'var(--vk-marigold)' : 'var(--vk-rule-soft)'}`,
+            borderRadius: 6, background: isHoliday ? 'var(--vk-marigold-tint)' : 'transparent',
+            fontSize: 13, fontWeight: 600, color: isHoliday ? '#6F4A0E' : 'var(--vk-ink-2)',
+          }}>
+            <input type="checkbox" checked={isHoliday} onChange={e => setIsHoliday(e.target.checked)} style={{ accentColor: 'var(--vk-marigold)' }} />
+            วันหยุดนักขัตฤกษ์ (OT ×2)
+          </label>
+          <div style={{ marginLeft: 'auto' }}>
+            <button className="vk-btn vk-btn--primary" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
+              <Save style={{ width: 14, height: 14 }} />
+              {saveMutation.isPending ? 'กำลังบันทึก...' : 'บันทึกวันนี้'}
+            </button>
+          </div>
+        </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '240px 1fr', gap: 0, flex: 1 }}>
+      <div className="vk-shift-split">
         {/* Pool */}
-        <div style={{ borderRight: '1px solid var(--vk-rule)', padding: '20px 16px', background: 'var(--vk-bone)' }}>
+        <div style={{ padding: '16px 14px', background: 'transparent', overflowY: 'auto', maxHeight: '35vh' }} className="md:max-h-none">
           <div className="vk-eyebrow" style={{ marginBottom: 12 }}>POOL · ยังไม่ได้กรอก ({pool.length})</div>
-          <hr className="vk-rule-soft" style={{ marginBottom: 12 }} />
+          <hr className="vk-rule-soft" style={{ marginBottom: 10 }} />
           {pool.length === 0 ? (
             <div className="vk-small" style={{ color: 'var(--vk-ink-3)', padding: '12px 0' }}>กรอกครบทุกคนแล้ว ✓</div>
           ) : pool.map(emp => (
             <div key={emp.id}
               onClick={() => setSelected(s => s?.id === emp.id ? null : emp)}
-              style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', marginBottom: 4, borderRadius: 4, cursor: 'pointer', background: selected?.id === emp.id ? 'var(--vk-persimmon-tint)' : 'transparent', border: `1px solid ${selected?.id === emp.id ? 'var(--vk-persimmon)' : 'transparent'}`, transition: 'all 120ms' }}>
-              <span style={{ fontFamily: 'var(--vk-mono)', fontSize: 11, color: 'var(--vk-ink-3)' }}>{emp.employee_code}</span>
-              <span style={{ fontSize: 13, fontWeight: 500 }}>{emp.first_name} {emp.last_name}</span>
+              style={{
+                padding: '9px 12px', marginBottom: 5, cursor: 'pointer', borderRadius: 4,
+                background: selected?.id === emp.id ? 'var(--vk-persimmon-tint)' : 'var(--vk-paper)',
+                border: `1px solid ${selected?.id === emp.id ? 'var(--vk-persimmon)' : 'var(--vk-rule-soft)'}`,
+                transition: 'all 120ms',
+              }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <span style={{ fontWeight: 600, fontSize: 13 }}>
+                  {empName(emp)}{fmtNationality(emp.nationality) ? ` (${fmtNationality(emp.nationality)})` : ''}
+                </span>
+                {emp.position === 'clerk' && (
+                  <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 999, background: 'rgba(177,71,41,0.12)', color: 'var(--vk-persimmon)', letterSpacing: '0.04em', flexShrink: 0 }}>เสมียน</span>
+                )}
+              </div>
+              <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 10, color: 'var(--vk-ink-3)', marginTop: 1 }}>{emp.employee_code}</div>
             </div>
           ))}
         </div>
 
         {/* Shift columns */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', padding: '20px 24px', gap: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0, overflow: 'auto', alignItems: 'stretch' }}>
           {SHIFTS.map(sh => {
             const shiftEmps = assignments.filter(a => a.shift_type === sh.key)
-              .map(a => employees.find(e => e.id === a.employee_id)).filter(Boolean) as Employee[]
             const canDrop = !!selected
             return (
               <div key={sh.key}
-                onClick={() => { if (selected) saveMutation.mutate({ emp: selected, shiftKey: sh.key }) }}
-                style={{ background: 'var(--vk-bone)', border: `1px solid ${canDrop ? 'var(--vk-persimmon)' : 'var(--vk-rule-soft)'}`, padding: 16, minHeight: 180, cursor: canDrop ? 'pointer' : 'default', transition: 'border-color 160ms', borderRadius: 4 }}>
-                <div className="vk-eyebrow" style={{ color: 'var(--vk-persimmon-ink)', marginBottom: 2 }}>{sh.label}</div>
-                <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 11, color: 'var(--vk-ink-3)', marginBottom: 14 }}>{sh.hours}</div>
-                {shiftEmps.map(emp => (
-                  <div key={emp.id}
-                    onClick={e => { e.stopPropagation(); removeMutation.mutate(emp.id) }}
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 8px', background: 'var(--vk-paper)', border: '1px solid var(--vk-rule-soft)', borderRadius: 999, fontSize: 12, fontWeight: 500, marginRight: 5, marginBottom: 5, cursor: 'pointer' }}>
-                    <span style={{ fontFamily: 'var(--vk-mono)', fontSize: 10, color: 'var(--vk-ink-3)' }}>{emp.employee_code}</span>
-                    {emp.first_name}
-                    <span style={{ color: 'var(--vk-ink-3)', fontSize: 11 }}>×</span>
+                onClick={() => { if (selected) handleAssign(sh.key) }}
+                style={{
+                  background: 'var(--vk-bone)',
+                  borderRight: sh.key === 'morning' ? '1px solid var(--vk-rule-soft)' : 'none',
+                  borderLeft: sh.key !== 'morning' ? 'none' : 'none',
+                  outline: canDrop ? `2px solid var(--vk-persimmon)` : 'none',
+                  outlineOffset: -2,
+                  padding: '20px 24px', cursor: canDrop ? 'pointer' : 'default',
+                  transition: 'outline-color 160ms',
+                  display: 'flex', flexDirection: 'column',
+                  minHeight: '100%',
+                }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 16, borderBottom: '1px solid var(--vk-rule-soft)', paddingBottom: 12 }}>
+                  <div>
+                    <div style={{ fontFamily: 'var(--vk-sans)', fontWeight: 800, fontSize: 22, letterSpacing: '-0.02em', color: 'var(--vk-ink)' }}>{sh.label}</div>
+                    <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 12, color: 'var(--vk-ink-3)', marginTop: 2 }}>{sh.hours}</div>
                   </div>
-                ))}
-                {canDrop && (
-                  <div style={{ marginTop: 10, padding: 8, border: '1px dashed var(--vk-persimmon)', borderRadius: 4, color: 'var(--vk-persimmon-ink)', fontSize: 12, textAlign: 'center' }}>
-                    + วางที่นี่
-                  </div>
-                )}
+                  <span style={{ fontFamily: 'var(--vk-mono)', fontSize: 13, fontWeight: 700, color: 'var(--vk-ink-3)' }}>{shiftEmps.length} คน</span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {shiftEmps.map(emp => (
+                    <div key={emp.employee_id}
+                      onClick={e => { e.stopPropagation(); setDetailEmp(emp) }}
+                      style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        padding: '8px 12px', background: 'var(--vk-paper)',
+                        border: '1px solid var(--vk-rule-soft)', cursor: 'pointer',
+                        transition: 'border-color 120ms',
+                      }}
+                      onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--vk-persimmon)')}
+                      onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--vk-rule-soft)')}>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--vk-ink)' }}>
+                            {emp.name}{fmtNationality(emp.nationality) ? ` (${fmtNationality(emp.nationality)})` : ''}
+                          </span>
+                          {emp.isClerk && (
+                            <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 999, background: 'rgba(177,71,41,0.12)', color: 'var(--vk-persimmon)', letterSpacing: '0.04em', flexShrink: 0 }}>เสมียน</span>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 3 }}>
+                          <span style={{ fontFamily: 'var(--vk-mono)', fontSize: 10, color: 'var(--vk-ink-3)' }}>{emp.code}</span>
+                          {emp.isNew && <Pill color="jade">ใหม่</Pill>}
+                          {emp.isHalfShift && !emp.partialHours && !emp.isClerk && <Pill color="amber">8 ชม.</Pill>}
+                          {emp.partialHours > 0 && <Pill color="orange">{emp.partialHours} ชม.</Pill>}
+                          {emp.otHours > 0 && <Pill color="purple">OT {emp.otHours} ชม.</Pill>}
+                          {emp.woodExcess > 0 && <Pill color="blue">+ค่าไม้</Pill>}
+                          {emp.filmAmount > 0 && <Pill color="blue">+ค่าฟิล์ม</Pill>}
+                          {emp.isHolidayOTExempt && <Pill color="ink">×1</Pill>}
+                          {emp.isCrossPosition && <Pill color="jade">สลับตำแหน่ง</Pill>}
+                        </div>
+                      </div>
+                      <button onClick={e => { e.stopPropagation(); handleRemove(emp.employee_id) }}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--vk-ink-3)', padding: 4, display: 'flex', flexShrink: 0 }}>
+                        <X style={{ width: 14, height: 14 }} />
+                      </button>
+                    </div>
+                  ))}
+                  {canDrop && (
+                    <div style={{ padding: 10, border: '1px dashed var(--vk-persimmon)', color: 'var(--vk-persimmon-ink)', fontSize: 12, textAlign: 'center' }}>
+                      + วางที่นี่
+                    </div>
+                  )}
+                </div>
               </div>
             )
           })}
         </div>
       </div>
 
+      {/* Floating hint */}
       {selected && (
-        <div style={{ position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)', background: 'var(--vk-ink)', color: 'var(--vk-bone)', padding: '10px 20px', borderRadius: 999, fontSize: 13, fontFamily: 'var(--vk-sans)', fontWeight: 500, display: 'flex', gap: 14, alignItems: 'center', zIndex: 100 }}>
-          เลือก <b>{selected.first_name} {selected.last_name}</b> — คลิกที่กะที่ต้องการ
+        <div style={{
+          position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
+          background: 'var(--vk-ink)', color: 'var(--vk-bone)',
+          padding: '10px 20px', fontSize: 13, fontFamily: 'var(--vk-sans)', fontWeight: 500,
+          display: 'flex', gap: 14, alignItems: 'center', zIndex: 100, borderRadius: 999,
+        }}>
+          เลือก <b>{empName(selected)}</b> — คลิกที่กะที่ต้องการ
           <span style={{ cursor: 'pointer', opacity: 0.7, fontSize: 16 }} onClick={() => setSelected(null)}>×</span>
         </div>
       )}
+
+      {/* Employee detail modal */}
+      {detailEmp && (
+        <DetailModal
+          emp={detailEmp} isHoliday={isHoliday} weekend={weekend}
+          onUpdate={(patch) => updateAssignment(detailEmp.employee_id, patch)}
+          onClose={() => setDetailEmp(null)}
+        />
+      )}
     </div>
+  )
+}
+
+// ── Pill helper ────────────────────────────────────────────────────────
+type PillColor = 'jade' | 'amber' | 'orange' | 'purple' | 'blue' | 'ink'
+const PILL_STYLES: Record<PillColor, React.CSSProperties> = {
+  jade:   { background: 'rgba(30,140,80,0.1)',  color: '#1a7a40' },
+  amber:  { background: 'rgba(180,120,0,0.1)',  color: '#7a5200' },
+  orange: { background: 'rgba(200,80,0,0.1)',   color: '#a04000' },
+  purple: { background: 'rgba(100,50,180,0.1)', color: '#4a1a9a' },
+  blue:   { background: 'rgba(0,80,180,0.1)',   color: '#004090' },
+  ink:    { background: 'rgba(50,40,35,0.1)',   color: 'var(--vk-ink-2)' },
+}
+function Pill({ color, children }: { color: PillColor; children: React.ReactNode }) {
+  return (
+    <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 999, ...PILL_STYLES[color] }}>
+      {children}
+    </span>
+  )
+}
+
+// ── Detail Modal ───────────────────────────────────────────────────────
+function DetailModal({ emp, isHoliday, weekend, onUpdate, onClose }: {
+  emp: AssignedEmp; isHoliday: boolean; weekend: boolean
+  onUpdate: (patch: Partial<AssignedEmp>) => void
+  onClose: () => void
+}) {
+  const isPartial = emp.partialHours > 0
+
+  const inputStyle: React.CSSProperties = {
+    fontFamily: 'var(--vk-mono)', fontSize: 14, fontWeight: 600,
+    border: '1px solid var(--vk-rule)', background: 'var(--vk-paper)',
+    padding: '6px 10px', width: 90, textAlign: 'center',
+  }
+
+  return (
+    <div className="vk-root" style={{
+      position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(22,19,17,0.5)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+    }} onClick={e => { if (e.target === e.currentTarget) onClose() }}>
+      <div style={{
+        background: 'var(--vk-paper)', border: '1px solid var(--vk-rule)',
+        width: '100%', maxWidth: 400,
+      }}>
+        {/* Header */}
+        <div style={{ background: 'var(--vk-persimmon)', color: 'var(--vk-bone)', padding: '14px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 15 }}>{emp.name}</div>
+            <div style={{ fontSize: 11, opacity: 0.75, fontFamily: 'var(--vk-mono)', marginTop: 1 }}>{emp.code}{emp.isClerk ? ' · เสมียน' : ''}</div>
+          </div>
+          <button onClick={onClose} style={{ background: 'rgba(255,255,255,0.15)', border: 'none', cursor: 'pointer', color: 'var(--vk-bone)', padding: 6, display: 'flex', borderRadius: 4 }}>
+            <X style={{ width: 15, height: 15 }} />
+          </button>
+        </div>
+
+        <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: 18 }}>
+          {emp.isClerk ? (
+            /* ── Clerk: OT hours ── */
+            <>
+              <div style={{ fontSize: 12, padding: '8px 12px', background: isHoliday ? 'var(--vk-marigold-tint)' : weekend ? 'rgba(91,33,182,0.07)' : 'var(--vk-marigold-tint)', border: `1px solid ${isHoliday ? 'var(--vk-marigold)' : weekend ? 'rgba(91,33,182,0.2)' : 'var(--vk-marigold)'}`, color: isHoliday ? '#6F4A0E' : weekend ? '#3b0764' : '#6F4A0E' }}>
+                {weekend && !isHoliday ? 'เสมียนทำงานวันหยุด — ได้ OT 1 เท่าตามชั่วโมงที่กรอก' : 'เสมียนทำงาน 8 ชม./วัน — ชั่วโมงเกิน 8 คิด OT 1.5 เท่า'}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <label className="vk-eyebrow">{weekend ? 'ชั่วโมงทำงานวันหยุด' : 'ชั่วโมง OT วันนี้ (เกิน 8 ชม.)'}</label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <input type="number" min="0" step="0.5" max="16" style={inputStyle}
+                    value={emp.otHours || ''} placeholder="0"
+                    onChange={e => onUpdate({ otHours: Number(e.target.value) || 0 })} />
+                  <span style={{ fontSize: 13, color: 'var(--vk-ink-2)' }}>ชั่วโมง</span>
+                </div>
+              </div>
+            </>
+          ) : (
+            /* ── Worker: hours + wood/film ── */
+            <>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <label className="vk-eyebrow">ชั่วโมงทำงาน</label>
+                <div style={{ display: 'grid', gridTemplateColumns: isHoliday ? '1fr 1fr' : '1fr 1fr 1fr', gap: 8 }}>
+                  <HourBtn label="12 ชม." sub={isHoliday ? 'OT ×2' : 'ปกติ+กะ'} icon={<Clock style={{ width: 15, height: 15 }} />}
+                    active={!emp.isHalfShift && !isPartial} disabled={isPartial}
+                    onClick={() => onUpdate({ isHalfShift: false, partialHours: 0 })} />
+                  <HourBtn label="8 ชม." sub={isHoliday ? 'OT ×2' : 'ไม่มีค่ากะ'} icon={<Clock4 style={{ width: 15, height: 15 }} />}
+                    active={emp.isHalfShift && !isPartial} disabled={isPartial}
+                    onClick={() => onUpdate({ isHalfShift: true, partialHours: 0 })} />
+                  {!isHoliday && (
+                    <HourBtn label="< 8 ชม." sub="ลา/ป่วย" icon={<Clock4 style={{ width: 15, height: 15 }} />}
+                      active={isPartial} disabled={false}
+                      onClick={() => onUpdate({ isHalfShift: false, partialHours: emp.partialHours || 4 })} />
+                  )}
+                </div>
+                {isPartial && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+                    <input type="number" min="0.5" max="7.5" step="0.5" style={inputStyle}
+                      value={emp.partialHours || ''} placeholder="ชม."
+                      onChange={e => {
+                        const val = Number(e.target.value) || 0
+                        if (val >= 8) { toast.error('ไม่สามารถกรอกเกิน 7.5 ชม. สำหรับกะนี้'); return }
+                        onUpdate({ partialHours: val })
+                      }} />
+                    <span style={{ fontSize: 12, color: 'var(--vk-ink-3)' }}>ชม. ทำงานจริง</span>
+                    {emp.partialHours > 0 && emp.rate_per_12h > 0 && (
+                      <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--vk-persimmon)', fontFamily: 'var(--vk-mono)', whiteSpace: 'nowrap' }}>
+                        = {Math.round((357 / 8) * emp.partialHours).toLocaleString()} ฿
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <label className="vk-eyebrow">ค่าไม้ส่วนเกิน (฿)</label>
+                  <input type="number" min="0" style={inputStyle} value={emp.woodExcess || ''} placeholder="0"
+                    onChange={e => onUpdate({ woodExcess: Number(e.target.value) || 0 })} />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <label className="vk-eyebrow">ค่าฟิล์ม (฿)</label>
+                  <input type="number" min="0" style={inputStyle} value={emp.filmAmount || ''} placeholder="0"
+                    onChange={e => onUpdate({ filmAmount: Number(e.target.value) || 0 })} />
+                </div>
+              </div>
+
+              {isHoliday && (
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer', padding: '10px 12px', border: '1px solid var(--vk-rule)', background: 'var(--vk-bone)' }}>
+                  <input type="checkbox" checked={emp.isHolidayOTExempt}
+                    onChange={e => onUpdate({ isHolidayOTExempt: e.target.checked })}
+                    style={{ marginTop: 2, accentColor: 'var(--vk-persimmon)' }} />
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--vk-ink)' }}>ได้รับค่าจ้างปกติ (ไม่ได้เรท ×2)</div>
+                    <div style={{ fontSize: 11, color: 'var(--vk-ink-3)', marginTop: 2 }}>คิดเงินเหมือนวันทำงานปกติ ไม่ใช่ค่า OT วันหยุด</div>
+                  </div>
+                </label>
+              )}
+
+              {/* Job Rotation */}
+              <div style={{ borderTop: '1px solid var(--vk-rule-soft)', paddingTop: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+                  <input type="checkbox" checked={emp.isCrossPosition}
+                    onChange={e => onUpdate({ isCrossPosition: e.target.checked, ...(!e.target.checked ? { crossPositionTitle: '', crossPositionExtraPay: 0 } : {}) })}
+                    style={{ accentColor: 'var(--vk-persimmon)' }} />
+                  ทำงานข้ามตำแหน่ง (Job Rotation)
+                </label>
+                {emp.isCrossPosition && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingLeft: 4 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <label className="vk-eyebrow">ตำแหน่งที่ทำแทน *</label>
+                      <input className="vk-input" placeholder="เช่น ขับรถโฟล์คลิฟท์" value={emp.crossPositionTitle}
+                        onChange={e => onUpdate({ crossPositionTitle: e.target.value })} />
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <label className="vk-eyebrow">เงินพิเศษเพิ่ม (฿/วัน) *</label>
+                      <input className="vk-input" type="number" placeholder="เช่น 300" value={emp.crossPositionExtraPay || ''}
+                        onChange={e => onUpdate({ crossPositionExtraPay: Number(e.target.value) || 0 })} />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+
+        <div style={{ padding: '12px 20px', borderTop: '1px solid var(--vk-rule)', background: 'var(--vk-bone)', display: 'flex', justifyContent: 'flex-end' }}>
+          <button className="vk-btn vk-btn--primary" onClick={onClose}>ตกลง</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function HourBtn({ label, sub, icon, active, disabled, onClick }: {
+  label: string; sub: string; icon: React.ReactNode
+  active: boolean; disabled: boolean; onClick: () => void
+}) {
+  return (
+    <button type="button" onClick={onClick} disabled={disabled} style={{
+      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+      padding: '10px 6px', border: `1.5px solid ${active ? 'var(--vk-persimmon)' : 'var(--vk-rule)'}`,
+      background: active ? 'var(--vk-persimmon-tint)' : 'var(--vk-paper)',
+      color: active ? 'var(--vk-persimmon-ink)' : disabled ? 'var(--vk-ink-3)' : 'var(--vk-ink-2)',
+      cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.4 : 1, fontSize: 12, fontWeight: 700,
+    }}>
+      {icon}
+      <span>{label}</span>
+      <span style={{ fontSize: 10, fontWeight: 400 }}>{sub}</span>
+    </button>
   )
 }

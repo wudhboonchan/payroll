@@ -4,15 +4,23 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
 import { useAppStore } from '../../store/useAppStore'
 import { TopBarV2 } from '../../components/v2/layout/TopBarV2'
-import EmployeeFormModal from '../EmployeeFormModal'
-import { Plus, Search, AlertCircle, UserX, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
+import EmployeeFormModal from './EmployeeFormModalV2'
+import EmployeeImportModalV2 from './EmployeeImportModalV2'
+import { Plus, Upload, Search, AlertCircle, UserX, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
 import '../../styles/v2-tokens.css'
+
+function fmtNationality(nationality: string | null) {
+  if (!nationality || nationality === 'ไทย') return 'ไทย'
+  if (nationality === 'เมียนมา' || nationality.toLowerCase().includes('myanmar') || nationality.toLowerCase().includes('burma')) return 'เมียนมา/กะเหรี่ยง'
+  return nationality
+}
 
 interface Employee {
   id: string; employee_code: string; first_name: string; last_name: string
   prefix: string | null; nationality: string | null; status: string
   rate_per_12h: number; payment_method: string; bank_name: string | null
-  bank_account: string | null; position: string | null; data_complete: boolean
+  bank_account: string | null; position: string | null; job_title: string | null
+  data_complete: boolean
 }
 
 type SortCol = 'employee_code' | 'name' | 'nationality' | 'rate' | 'position'
@@ -31,19 +39,21 @@ export default function EmployeesV2() {
   const [showPendingOnly, setShowPendingOnly] = useState(false)
   const [showInactiveOnly, setShowInactiveOnly] = useState(false)
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [isImportOpen, setIsImportOpen] = useState(false)
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null)
   const [sortCol, setSortCol] = useState<SortCol>('employee_code')
   const [sortAsc, setSortAsc] = useState(true)
 
   const { data: employees = [], isLoading } = useQuery<Employee[]>({
-    queryKey: ['employees', user?.factory_id],
+    queryKey: ['employees-all', user?.factory_id],
     queryFn: async () => {
       const { data, error } = await supabase.from('employees')
-        .select('id,employee_code,first_name,last_name,prefix,nationality,status,rate_per_12h,payment_method,bank_name,bank_account,position,data_complete')
+        .select('id,employee_code,first_name,last_name,prefix,nationality,status,rate_per_12h,payment_method,bank_name,bank_account,position,job_title,data_complete')
         .eq('factory_id', user?.factory_id ?? '').order('employee_code')
       if (error) throw error; return data
     },
     enabled: !!user?.factory_id,
+    staleTime: 0,
   })
 
   const pendingCount  = employees.filter(e => e.data_complete === false).length
@@ -92,7 +102,7 @@ export default function EmployeesV2() {
     <div className="vk-root" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
       <TopBarV2 title="ฐานข้อมูลพนักงาน" subtitle={activeLabel} onMenuClick={onMenuClick} />
 
-      <div style={{ padding: '28px 36px 60px' }}>
+      <div className="vk-page">
 
         {/* Header row */}
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20, gap: 12, flexWrap: 'wrap' }}>
@@ -102,10 +112,16 @@ export default function EmployeesV2() {
               พนักงาน <span style={{ fontWeight: 400, color: 'var(--vk-ink-3)' }}>ทั้งหมด {employees.length} คน</span>
             </div>
           </div>
-          <button className="vk-btn vk-btn--primary" onClick={handleCreate}>
-            <Plus style={{ width: 15, height: 15 }} />
-            เพิ่มพนักงาน
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="vk-btn" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => setIsImportOpen(true)}>
+              <Upload style={{ width: 14, height: 14 }} />
+              นำเข้า Excel
+            </button>
+            <button className="vk-btn vk-btn--primary" onClick={handleCreate}>
+              <Plus style={{ width: 15, height: 15 }} />
+              เพิ่มพนักงาน
+            </button>
+          </div>
         </div>
 
         {/* Filters row */}
@@ -169,13 +185,14 @@ export default function EmployeesV2() {
             <thead>
               <tr>
                 {[
-                  { label: 'รหัส',        col: 'employee_code' as SortCol, align: 'left'  },
-                  { label: 'ชื่อ–นามสกุล', col: 'name'          as SortCol, align: 'left'  },
-                  { label: 'ตำแหน่ง',     col: 'position'      as SortCol, align: 'left'  },
-                  { label: 'สัญชาติ',     col: 'nationality'   as SortCol, align: 'left'  },
-                  { label: 'วิธีรับเงิน', col: null,                        align: 'left'  },
-                  { label: 'ค่าจ้าง/12ชม.', col: 'rate'         as SortCol, align: 'right' },
-                  { label: 'สถานะ',       col: null,                        align: 'right' },
+                  { label: 'รหัส',           col: 'employee_code' as SortCol, align: 'left'  },
+                  { label: 'ชื่อ–นามสกุล',   col: 'name'          as SortCol, align: 'left'  },
+                  { label: 'กลุ่มงาน',        col: 'position'      as SortCol, align: 'left'  },
+                  { label: 'ตำแหน่ง',         col: null,                        align: 'left'  },
+                  { label: 'สัญชาติ',         col: 'nationality'   as SortCol, align: 'left'  },
+                  { label: 'วิธีรับเงิน',     col: null,                        align: 'left'  },
+                  { label: 'ค่าจ้าง/เงินเดือน', col: 'rate'        as SortCol, align: 'right' },
+                  { label: 'สถานะ',           col: null,                        align: 'right' },
                 ].map((h, i) => (
                   <th key={i}
                     onClick={() => h.col && toggleSort(h.col)}
@@ -216,10 +233,13 @@ export default function EmployeesV2() {
                     {POSITIONS[emp.position ?? ''] || emp.position || '—'}
                   </td>
                   <td style={{ padding: '13px 14px', fontSize: 13, color: 'var(--vk-ink-3)', opacity: emp.status === 'inactive' ? 0.5 : 1 }}>
-                    {emp.nationality || 'ไทย'}
+                    {emp.job_title || '—'}
                   </td>
                   <td style={{ padding: '13px 14px', fontSize: 13, color: 'var(--vk-ink-3)', opacity: emp.status === 'inactive' ? 0.5 : 1 }}>
-                    {emp.payment_method === 'bank'
+                    {fmtNationality(emp.nationality)}
+                  </td>
+                  <td style={{ padding: '13px 14px', fontSize: 13, color: 'var(--vk-ink-3)', opacity: emp.status === 'inactive' ? 0.5 : 1 }}>
+                    {emp.payment_method === 'bank_transfer'
                       ? <span><span style={{ fontWeight: 600 }}>{emp.bank_name || '—'}</span> <span style={{ fontFamily: 'var(--vk-mono)', fontSize: 12 }}>{emp.bank_account || ''}</span></span>
                       : 'เงินสด'}
                   </td>
@@ -244,9 +264,14 @@ export default function EmployeesV2() {
           isOpen={isModalOpen}
           onClose={() => { setIsModalOpen(false); setSelectedEmployeeId(null) }}
           employeeId={selectedEmployeeId}
-          onSuccess={() => queryClient.invalidateQueries({ queryKey: ['employees'] })}
+          onSuccess={() => { queryClient.invalidateQueries({ queryKey: ['employees'] }); queryClient.invalidateQueries({ queryKey: ['employees-all'] }) }}
         />
       )}
+
+      <EmployeeImportModalV2
+        isOpen={isImportOpen}
+        onClose={() => setIsImportOpen(false)}
+      />
     </div>
   )
 }

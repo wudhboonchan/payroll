@@ -60,6 +60,13 @@
   --vk-dur:  160ms;
 }
 
+/* ── Global background so no white bleed on any device ── */
+html, body, #root {
+  background: var(--vk-paper);
+  margin: 0;
+  padding: 0;
+}
+
 /* ── Base reset for V2 pages ── */
 .vk-root {
   background: var(--vk-paper);
@@ -237,3 +244,165 @@
 /* ── Money colors ── */
 .vk-money-pos { color: var(--vk-jade); }
 .vk-money-neg { color: var(--vk-crimson); }
+
+/* ══════════════════════════════════════════════════════════════
+   RESPONSIVE UTILITIES  (mobile-first, breakpoint = 768px)
+   ══════════════════════════════════════════════════════════════ */
+
+/* Page padding — tight on mobile, generous on desktop */
+.vk-page {
+  padding: 20px 16px 48px;
+  width: 100%;
+  box-sizing: border-box;
+}
+@media (min-width: 768px) {
+  .vk-page { padding: 32px 36px 60px; max-width: 1100px; margin: 0 auto; }
+}
+.vk-page--wide { max-width: 1200px !important; }
+
+/* 4-column stat grid → 2 cols on mobile */
+.vk-grid-4 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border: 1px solid var(--vk-rule);
+}
+@media (min-width: 768px) {
+  .vk-grid-4 { grid-template-columns: repeat(4, 1fr); }
+}
+
+/* 3-column card grid → 1 col on mobile */
+.vk-grid-3 {
+  display: grid;
+  grid-template-columns: 1fr;
+  border: 1px solid var(--vk-rule);
+}
+@media (min-width: 640px) {
+  .vk-grid-3 { grid-template-columns: repeat(3, 1fr); }
+}
+
+/* 2-column layout → stack on mobile */
+.vk-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 24px;
+}
+@media (min-width: 768px) {
+  .vk-grid-2 { grid-template-columns: 1fr 1fr; gap: 36px; }
+}
+
+/* Sidebar-aware main panel: 0 margin on mobile, sidebar-width on desktop */
+.vk-main {
+  flex: 1;
+  margin-left: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--vk-paper);
+  min-height: 100vh;
+}
+@media (min-width: 768px) {
+  .vk-main { margin-left: var(--vk-sidebar-w); }
+}
+
+/* Two-panel split (left list + right content) → stack on mobile */
+.vk-split {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+@media (min-width: 768px) {
+  .vk-split {
+    display: grid;
+    grid-template-columns: 256px 1fr;
+    align-items: stretch;
+    flex: 1;
+    min-height: 0;
+    /* Full-height column bg + divider painted on container */
+    background: linear-gradient(
+      to right,
+      var(--vk-bone) 255px,
+      var(--vk-rule) 255px,
+      var(--vk-rule) 256px,
+      var(--vk-paper) 256px
+    );
+  }
+}
+
+/* Shift split (240px sidebar + content) */
+.vk-shift-split {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+}
+@media (min-width: 768px) {
+  .vk-shift-split {
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    align-items: stretch;
+    flex: 1;
+    min-height: 0;
+    /* Paint pool column bg + divider border as a gradient on the container itself
+       so it always fills full height no matter how tall the content is */
+    background: linear-gradient(
+      to right,
+      var(--vk-bone) 239px,
+      var(--vk-rule) 239px,
+      var(--vk-rule) 240px,
+      var(--vk-bone) 240px
+    );
+  }
+}
+
+/* Stat card cell borders — 2-col mobile grid border resets */
+.vk-grid-4 > *:nth-child(odd)  { border-right: 1px solid var(--vk-rule); }
+.vk-grid-4 > *:nth-child(1),
+.vk-grid-4 > *:nth-child(2)    { border-bottom: 1px solid var(--vk-rule); }
+@media (min-width: 768px) {
+  .vk-grid-4 > *:nth-child(odd)  { border-right: 1px solid var(--vk-rule); }
+  .vk-grid-4 > *:nth-child(2)    { border-right: 1px solid var(--vk-rule); border-bottom: none; }
+  .vk-grid-4 > *:nth-child(1),
+  .vk-grid-4 > *:nth-child(2)    { border-bottom: none; }
+  .vk-grid-4 > *:last-child       { border-right: none; }
+}
+
+/* 3-card export grid cell borders */
+.vk-grid-3 > * + * { border-top: 1px solid var(--vk-rule); }
+@media (min-width: 640px) {
+  .vk-grid-3 > * + * { border-top: none; border-left: 1px solid var(--vk-rule); }
+}
+
+/* Income/Deduct grid — 1 column on mobile, 2 on desktop */
+.vk-income-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+}
+@media (min-width: 640px) {
+  .vk-income-grid { grid-template-columns: 1fr 1fr; }
+}
+
+/* Income column: border-bottom on mobile (between cols), border-right on desktop */
+.vk-income-col {
+  border-bottom: 1px solid var(--vk-rule);
+}
+@media (min-width: 640px) {
+  .vk-income-col { border-bottom: none; border-right: 1px solid var(--vk-rule); }
+}
+.vk-deduct-col {
+  border-top: none;
+}
+
+/* Net pay number — responsive font size */
+.vk-netpay-num { font-size: 28px; }
+@media (min-width: 640px) { .vk-netpay-num { font-size: 42px; } }
+
+/* Slip scaler — shrink the 680px print document to fit mobile screens */
+.vk-slip-scaler {
+  width: 100%;
+  max-width: 680px;
+}
+.vk-slip-scaler > div {
+  transform-origin: top left;
+  /* --slip-scale is set via inline style by JS */
+}
