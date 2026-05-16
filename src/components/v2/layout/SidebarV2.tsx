@@ -162,9 +162,9 @@ export function SidebarV2({ isOpen, setIsOpen }: SidebarV2Props) {
 
         {/* V1 switcher */}
         <div style={{ padding: '0 10px 8px' }}>
-          <a href="/dashboard" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600, color: 'var(--vk-ink-3)', border: '1px dashed var(--vk-rule-soft)', textDecoration: 'none', background: 'transparent' }}>
+          <a href="/v1/dashboard" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600, color: 'var(--vk-ink-3)', border: '1px dashed var(--vk-rule-soft)', textDecoration: 'none', background: 'transparent' }}>
             <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 16, height: 16, borderRadius: 3, background: 'var(--vk-rule-soft)', color: 'var(--vk-ink)', fontSize: 9, fontWeight: 700, flexShrink: 0 }}>1</span>
-            กลับ V1 (ปัจจุบัน)
+            ดู V1 (Archive)
           </a>
         </div>
 

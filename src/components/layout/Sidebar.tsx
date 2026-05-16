@@ -235,14 +235,14 @@ export function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
         })}
       </nav>
 
-      {/* V2 Preview switcher */}
+      {/* Back to main app */}
       <div className="px-4 pb-2">
         <a
-          href="/v2/dashboard"
+          href="/dashboard"
           className="flex items-center gap-2 w-full px-3 py-2 rounded-md text-xs font-semibold border border-dashed border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors"
         >
           <span className="inline-flex items-center justify-center w-4 h-4 rounded bg-amber-400 text-white text-[9px] font-bold leading-none flex-shrink-0">2</span>
-          ดูหน้าตาใหม่ (V2 Preview)
+          กลับแอปหลัก (V2)
         </a>
       </div>
 
