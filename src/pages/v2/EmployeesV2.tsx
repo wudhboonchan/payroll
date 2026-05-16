@@ -109,7 +109,7 @@ export default function EmployeesV2() {
           <div>
             <div className="vk-eyebrow" style={{ marginBottom: 4 }}>EMPLOYEES · ฐานข้อมูลพนักงาน</div>
             <div style={{ fontFamily: 'var(--vk-sans)', fontWeight: 700, fontSize: 24, letterSpacing: '-0.02em' }}>
-              พนักงาน <span style={{ fontWeight: 400, color: 'var(--vk-ink-3)' }}>ทั้งหมด {employees.length} คน</span>
+              พนักงาน <span style={{ fontWeight: 400, color: 'var(--vk-ink-3)' }}>ทำงานอยู่ {employees.length - inactiveCount} คน</span>{inactiveCount > 0 && <span style={{ fontWeight: 400, fontSize: 14, color: 'var(--vk-ink-4)', marginLeft: 10 }}>({inactiveCount} ไม่ได้ทำงาน)</span>}
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
