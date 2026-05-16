@@ -255,8 +255,9 @@ export default function ShiftEntryV2() {
             }}>
               {fmtDisplay(activeDateStr)}
             </div>
+            {/* Mobile only: badge inline with date */}
             {weekend && (
-              <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', color: '#5b21b6', background: 'rgba(91,33,182,0.08)', padding: '2px 8px', borderRadius: 999, whiteSpace: 'nowrap' }}>
+              <span className="md:hidden" style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', color: '#5b21b6', background: 'rgba(91,33,182,0.08)', padding: '2px 8px', borderRadius: 999, whiteSpace: 'nowrap' }}>
                 วันหยุดสัปดาห์
               </span>
             )}
@@ -267,6 +268,12 @@ export default function ShiftEntryV2() {
         </div>
         {/* Row 2: holiday checkbox + save button — always same height */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {/* Desktop only: badge in this row */}
+          {weekend && (
+            <span className="hidden md:inline-flex" style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', color: '#5b21b6', background: 'rgba(91,33,182,0.08)', padding: '2px 8px', borderRadius: 999, whiteSpace: 'nowrap' }}>
+              วันหยุดสัปดาห์
+            </span>
+          )}
           <label style={{
             display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: '4px 12px',
             border: `1px solid ${isHoliday ? 'var(--vk-marigold)' : 'var(--vk-rule-soft)'}`,
