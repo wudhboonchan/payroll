@@ -48,11 +48,12 @@ function App() {
       <BrowserRouter>
         <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
           {loading ? (
-            <div className="min-h-screen flex items-center justify-center bg-slate-50">
-              <div className="flex flex-col items-center gap-4">
-                <div className="w-10 h-10 border-4 border-[#1D9E75] border-t-transparent rounded-full animate-spin" />
-                <p className="text-slate-500 font-medium">กำลังโหลดระบบ...</p>
+            <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F4F0E6' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
+                <div style={{ width: 36, height: 36, border: '3px solid #EFDCD0', borderTopColor: '#B14729', borderRadius: '50%', animation: 'spin 0.75s linear infinite' }} />
+                <p style={{ fontFamily: "'Plus Jakarta Sans', 'Anuphan', sans-serif", fontSize: 13, fontWeight: 600, color: '#7A6F60', letterSpacing: '0.04em' }}>กำลังโหลดระบบ...</p>
               </div>
+              <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
             </div>
           ) : (
             <Routes>
