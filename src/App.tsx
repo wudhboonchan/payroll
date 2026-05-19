@@ -67,11 +67,11 @@ function App() {
                   <Route path="/shifts"     element={<ShiftEntryV2 />} />
                   <Route path="/payroll"    element={<PayrollEntryV2 />} />
                   <Route path="/advances"   element={<AdvancesV2 />} />
-                  <Route path="/export"     element={<ExportV2 />} />
                 </Route>
                 <Route element={<RequireAuthV2 allowedRoles={['admin', 'superUser', 'normalUser']} />}>
                   <Route path="/payslip"    element={<PaySlipV2 />} />
                   <Route path="/share-links" element={<ShareLinksV2 />} />
+                  <Route path="/export"     element={<ExportV2 />} />
                 </Route>
                 <Route element={<RequireAuthV2 allowedRoles={['admin']} />}>
                   <Route path="/users"      element={<UserManagementV2 />} />

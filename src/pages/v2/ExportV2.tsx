@@ -248,6 +248,7 @@ function buildSlipHtml(entry: any, period: any, shifts: any[], branchName: strin
 export default function ExportV2() {
   const { onMenuClick } = useOutletContext<{ onMenuClick: () => void }>()
   const { user } = useAppStore()
+  const isNormalUser = user?.role === 'normalUser'
 
   const [exportType,       setExportType]       = useState<'month' | 'period'>('month')
   const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(null)
@@ -389,10 +390,17 @@ export default function ExportV2() {
   }
 
   // ── PDF Slips ────────────────────────────────────────────────────────────────
+  // For normalUser: active period = most recent period in list
+  const activePeriod = periods[0] ?? null
+
   const handleGeneratePDF = async () => {
     // Resolve period IDs
     let targetPeriodIds: string[] = []
-    if (pdfTarget === 'all') {
+    if (isNormalUser) {
+      // Locked to active period only, all employees
+      if (!activePeriod) { toast.error('ไม่พบงวดปัจจุบัน'); return }
+      targetPeriodIds = [activePeriod.id]
+    } else if (pdfTarget === 'all') {
       if (pdfMode === 'period') {
         if (!pdfPeriodId) { toast.error('กรุณาเลือกงวด'); return }
         targetPeriodIds = [pdfPeriodId]
@@ -421,7 +429,7 @@ export default function ExportV2() {
         employee:employees(id,employee_code,first_name,last_name,position,job_title,wage_type,rate_per_12h,payment_method,bank_name,bank_account,nationality),
         period:payroll_periods(period_start,period_end)
       `).in('period_id', targetPeriodIds)
-      if (pdfTarget === 'individual') q = q.eq('employee_id', pdfEmpId!)
+      if (!isNormalUser && pdfTarget === 'individual') q = q.eq('employee_id', pdfEmpId!)
 
       const { data: entries, error } = await q
       if (error) throw error
@@ -486,11 +494,12 @@ body>div>div{border:none!important;box-shadow:none!important;border-bottom:1px s
     return e.first_name.toLowerCase().includes(q) || (e.last_name||'').toLowerCase().includes(q) || (e.employee_code||'').toLowerCase().includes(q)
   })
 
-  const cards = [
-    { icon: Grid3x3,    color: 'var(--vk-jade)',      title: 'ตาราง Payroll รวม',        desc: 'ดาวน์โหลดข้อมูล Payroll ทุกคนในรูปแบบ .xlsx',                      btn: 'Download Excel', loading: isExportingXlsx, onClick: handleExportPayroll },
-    { icon: FileText,   color: 'var(--vk-crimson)',    title: 'PDF – Pay Slip รายบุคคล',  desc: 'สร้างไฟล์ PDF Pay Slip แยกตามรายชื่อพนักงาน หรือพิมพ์ทั้งบริษัท', btn: 'Download PDF',   loading: false,           onClick: ()=>setShowPdfModal(true) },
-    { icon: ShieldCheck,color: 'var(--vk-persimmon)',  title: 'ฟอร์มประกันสังคม',          desc: 'Export ข้อมูลเลขบัตร + ยอดประกันสังคม สำหรับยื่น สปส. รายเดือน',  btn: 'Download Excel', loading: isExportingSSO,  onClick: handleExportSSO },
+  const allCards = [
+    { icon: Grid3x3,    color: 'var(--vk-jade)',      title: 'ตาราง Payroll รวม',        desc: 'ดาวน์โหลดข้อมูล Payroll ทุกคนในรูปแบบ .xlsx',                      btn: 'Download Excel', loading: isExportingXlsx, onClick: handleExportPayroll, adminOnly: true  },
+    { icon: FileText,   color: 'var(--vk-crimson)',    title: 'PDF – Pay Slip รายบุคคล',  desc: 'สร้างไฟล์ PDF Pay Slip แยกตามรายชื่อพนักงาน หรือพิมพ์ทั้งบริษัท', btn: 'Download PDF',   loading: false,           onClick: ()=>setShowPdfModal(true), adminOnly: false },
+    { icon: ShieldCheck,color: 'var(--vk-persimmon)',  title: 'ฟอร์มประกันสังคม',          desc: 'Export ข้อมูลเลขบัตร + ยอดประกันสังคม สำหรับยื่น สปส. รายเดือน',  btn: 'Download Excel', loading: isExportingSSO,  onClick: handleExportSSO,          adminOnly: true  },
   ]
+  const cards = isNormalUser ? allCards.filter(c => !c.adminOnly) : allCards
 
   return (
     <>
@@ -500,29 +509,31 @@ body>div>div{border:none!important;box-shadow:none!important;border-bottom:1px s
         <div className="vk-eyebrow" style={{ marginBottom: 6 }}>EXPORT · ส่งออกข้อมูล</div>
         <div style={{ fontFamily: 'var(--vk-sans)', fontWeight: 700, fontSize: 26, letterSpacing: '-0.02em', marginBottom: 28 }}>ดาวน์โหลดไฟล์</div>
 
-        {/* Selectors */}
-        <div style={{ display: 'flex', gap: 10, marginBottom: 32, flexWrap: 'wrap', alignItems: 'center' }}>
-          <select value={exportType} onChange={e => setExportType(e.target.value as any)}
-            style={{ height: 36, fontFamily: 'var(--vk-sans)', fontSize: 13, border: '1px solid var(--vk-rule)', padding: '0 12px', background: 'var(--vk-paper)', color: 'var(--vk-ink)', outline: 'none' }}>
-            <option value="month">ส่งออกรายเดือน</option>
-            <option value="period">ส่งออกรายงวด</option>
-          </select>
-          {exportType === 'month' ? (
-            <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)}
-              style={{ height: 36, fontFamily: 'var(--vk-sans)', fontSize: 13, border: '1px solid var(--vk-rule)', padding: '0 12px', background: 'var(--vk-paper)', color: 'var(--vk-ink)', outline: 'none', minWidth: 180 }}>
-              {uniqueMonths.map(m => <option key={m} value={m}>{m}</option>)}
+        {/* Selectors — hidden for normalUser */}
+        {!isNormalUser && (
+          <div style={{ display: 'flex', gap: 10, marginBottom: 32, flexWrap: 'wrap', alignItems: 'center' }}>
+            <select value={exportType} onChange={e => setExportType(e.target.value as any)}
+              style={{ height: 36, fontFamily: 'var(--vk-sans)', fontSize: 13, border: '1px solid var(--vk-rule)', padding: '0 12px', background: 'var(--vk-paper)', color: 'var(--vk-ink)', outline: 'none' }}>
+              <option value="month">ส่งออกรายเดือน</option>
+              <option value="period">ส่งออกรายงวด</option>
             </select>
-          ) : (
-            <select value={selectedPeriodId ?? ''} onChange={e => setSelectedPeriodId(e.target.value)}
-              style={{ height: 36, fontFamily: 'var(--vk-sans)', fontSize: 13, border: '1px solid var(--vk-rule)', padding: '0 12px', background: 'var(--vk-paper)', color: 'var(--vk-ink)', outline: 'none', minWidth: 220 }}>
-              {periods.map(p => <option key={p.id} value={p.id}>{formatPeriodLabel(p.period_start, p.period_end)}{p.status === 'approved' ? ' ✓' : ' (ร่าง)'}</option>)}
-            </select>
-          )}
-          <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 13, color: 'var(--vk-ink-3)' }}>→ {label}</div>
-        </div>
+            {exportType === 'month' ? (
+              <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)}
+                style={{ height: 36, fontFamily: 'var(--vk-sans)', fontSize: 13, border: '1px solid var(--vk-rule)', padding: '0 12px', background: 'var(--vk-paper)', color: 'var(--vk-ink)', outline: 'none', minWidth: 180 }}>
+                {uniqueMonths.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+            ) : (
+              <select value={selectedPeriodId ?? ''} onChange={e => setSelectedPeriodId(e.target.value)}
+                style={{ height: 36, fontFamily: 'var(--vk-sans)', fontSize: 13, border: '1px solid var(--vk-rule)', padding: '0 12px', background: 'var(--vk-paper)', color: 'var(--vk-ink)', outline: 'none', minWidth: 220 }}>
+                {periods.map(p => <option key={p.id} value={p.id}>{formatPeriodLabel(p.period_start, p.period_end)}{p.status === 'approved' ? ' ✓' : ' (ร่าง)'}</option>)}
+              </select>
+            )}
+            <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 13, color: 'var(--vk-ink-3)' }}>→ {label}</div>
+          </div>
+        )}
 
         {/* Cards */}
-        <div className="vk-grid-3">
+        <div style={isNormalUser ? { display: 'flex', maxWidth: 360, border: '1px solid var(--vk-rule)' } : undefined} className={isNormalUser ? undefined : 'vk-grid-3'}>
           {cards.map((card, i) => {
             const Icon = card.icon
             return (
@@ -563,6 +574,22 @@ body>div>div{border:none!important;box-shadow:none!important;border-bottom:1px s
             {/* Modal body */}
             <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px', background: 'var(--vk-bone)', display: 'flex', flexDirection: 'column', gap: 20 }}>
 
+              {/* normalUser: locked view — active period only, all employees */}
+              {isNormalUser ? (
+                <div>
+                  <div className="vk-eyebrow" style={{ marginBottom: 10 }}>งวดที่จะ Export</div>
+                  <div style={{ padding: '14px 16px', border: '1px solid var(--vk-rule)', background: 'var(--vk-paper)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--vk-ink)' }}>
+                        {activePeriod ? formatPeriodLabel(activePeriod.period_start, activePeriod.period_end) : '—'}
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--vk-ink-3)', marginTop: 3 }}>พนักงานทุกคน · งวดปัจจุบันเท่านั้น</div>
+                    </div>
+                    <FileText style={{ width: 18, height: 18, color: 'var(--vk-crimson)', flexShrink: 0 }} />
+                  </div>
+                </div>
+              ) : (
+              <>
               {/* Target toggle */}
               <div>
                 <div className="vk-eyebrow" style={{ marginBottom: 10 }}>รูปแบบการพิมพ์</div>
@@ -660,6 +687,8 @@ body>div>div{border:none!important;box-shadow:none!important;border-bottom:1px s
                     {pdfMonths.length > 0 && <div style={{ fontSize: 11, color: 'var(--vk-persimmon)', marginTop: 6 }}>เลือกแล้ว {pdfMonths.length} เดือน</div>}
                   </div>
                 </div>
+              )}
+              </>
               )}
             </div>
 

@@ -23,7 +23,7 @@ const NAV = [
   { href: '/payroll',    label: 'กรอกค่าจ้าง',       icon: Calculator,      roles: ['admin','superUser'] },
   { href: '/payslip',    label: 'ดูสลิปเงินเดือน',   icon: FileText,        roles: ['admin','superUser','normalUser'] },
   { href: '/share-links',label: 'ลิงก์สลิปพนักงาน',  icon: Link2,           roles: ['admin','superUser','normalUser'] },
-  { href: '/export',     label: 'ส่งออกข้อมูล',      icon: Download,        roles: ['admin','superUser'] },
+  { href: '/export',     label: 'ส่งออกข้อมูล',      icon: Download,        roles: ['admin','superUser','normalUser'] },
   { href: '/users',      label: 'จัดการผู้ใช้งาน',   icon: UserCog,         roles: ['admin'] },
 ]
 
