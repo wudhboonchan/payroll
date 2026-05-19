@@ -5,7 +5,7 @@ import { supabase } from '../../lib/supabase'
 import { useAppStore } from '../../store/useAppStore'
 import { TopBarV2 } from '../../components/v2/layout/TopBarV2'
 import { toast } from 'sonner'
-import { Plus, CheckCircle, XCircle, Pencil, Check, X } from 'lucide-react'
+import { Plus, CheckCircle, XCircle, Pencil, Check, X, Trash2 } from 'lucide-react'
 import '../../styles/v2-tokens.css'
 
 interface PayrollPeriod { id: string; label: string; period_start: string; period_end: string; status: string; social_security_rate: number; approved_by: string | null; approver?: { full_name: string | null } | null }
@@ -26,6 +26,7 @@ export default function DashboardV2() {
   const queryClient = useQueryClient()
   const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(null)
   const [showCancelConfirm, setShowCancelConfirm] = useState(false)
+  const [showDeletePeriodConfirm, setShowDeletePeriodConfirm] = useState(false)
   const [editingSSRate, setEditingSSRate] = useState(false)
   const [ssRateDraft, setSSRateDraft] = useState('')
 
@@ -149,6 +150,26 @@ export default function DashboardV2() {
     onError: (e: Error) => toast.error('อัปเดตไม่สำเร็จ', { description: e.message }),
   })
 
+  const deletePeriodMutation = useMutation({
+    mutationFn: async () => {
+      if (!activePeriod) throw new Error('ไม่พบงวด')
+      // Delete all related data first, then the period itself
+      await supabase.from('shift_assignments').delete().eq('period_id', activePeriod.id)
+      await supabase.from('payroll_entries').delete().eq('period_id', activePeriod.id)
+      await supabase.from('advance_payments').delete().eq('period_id', activePeriod.id)
+      await supabase.from('payslip_tokens').delete().eq('period_id', activePeriod.id)
+      const { error } = await supabase.from('payroll_periods').delete().eq('id', activePeriod.id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['periods'] })
+      setSelectedPeriodId(null)
+      setShowDeletePeriodConfirm(false)
+      toast.success('ลบงวดเรียบร้อยแล้ว')
+    },
+    onError: (e: Error) => toast.error('ลบงวดไม่สำเร็จ', { description: e.message }),
+  })
+
   const createNextPeriodMutation = useMutation({
     mutationFn: async () => {
       if (!user?.factory_id) throw new Error('ไม่พบข้อมูลโรงงาน')
@@ -227,6 +248,14 @@ export default function DashboardV2() {
               <button className="vk-btn vk-btn--primary" onClick={() => createNextPeriodMutation.mutate()} disabled={createNextPeriodMutation.isPending}>
                 <Plus style={{ width: 15, height: 15 }} />
                 {createNextPeriodMutation.isPending ? 'กำลังสร้าง...' : periods.length === 0 ? `สร้างงวดแรก (${nextPeriodLabel})` : `สร้างงวดถัดไป (${nextPeriodLabel})`}
+              </button>
+            )}
+            {/* Delete button — only for draft periods with no data */}
+            {activePeriod && !isApproved && (stats?.gross ?? 0) === 0 && (stats?.uniqueDays ?? 0) === 0 && (
+              <button className="vk-btn" onClick={() => setShowDeletePeriodConfirm(true)}
+                style={{ color: 'var(--vk-crimson)', borderColor: 'var(--vk-crimson)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <Trash2 style={{ width: 14, height: 14 }} />
+                ลบงวดนี้
               </button>
             )}
           </div>
@@ -398,6 +427,46 @@ export default function DashboardV2() {
                 {cancelApproveMutation.isPending ? 'กำลังยกเลิก...' : 'ยืนยัน ยกเลิกอนุมัติ'}
               </button>
               <button className="vk-btn" onClick={() => setShowCancelConfirm(false)}>ปิด</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete period confirm modal */}
+      {showDeletePeriodConfirm && (
+        <div className="vk-root" style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(22,19,17,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+          onClick={() => setShowDeletePeriodConfirm(false)}>
+          <div style={{ background: 'var(--vk-paper)', border: '1px solid var(--vk-rule)', width: '100%', maxWidth: 380 }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ background: 'var(--vk-crimson)', color: '#fff', padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 10 }}>
+              <Trash2 style={{ width: 16, height: 16, flexShrink: 0 }} />
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 15 }}>ลบงวดนี้ออกจากระบบ</div>
+                <div style={{ fontSize: 11, opacity: 0.65, marginTop: 2 }}>งวด {activePeriod?.label}</div>
+              </div>
+            </div>
+            <div style={{ padding: '20px', background: 'var(--vk-bone)', display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <p style={{ fontSize: 14, color: 'var(--vk-ink-2)', lineHeight: 1.6, margin: 0 }}>
+                งวดนี้จะถูก<strong>ลบออกจากระบบถาวร</strong> และระบบจะพร้อมให้คุณสร้างงวดใหม่ได้ทันที
+              </p>
+              <div style={{ padding: '10px 14px', background: 'var(--vk-crimson-tint)', border: '1px solid var(--vk-crimson)', fontSize: 12, color: 'var(--vk-crimson)', lineHeight: 1.5 }}>
+                ⚠️ การดำเนินการนี้<strong>ไม่สามารถเรียกคืนได้</strong>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, padding: '14px 20px', borderTop: '1px solid var(--vk-rule)', background: 'var(--vk-paper)' }}>
+              <button className="vk-btn" onClick={() => setShowDeletePeriodConfirm(false)} style={{ flex: 1 }}>ยกเลิก</button>
+              <button
+                onClick={() => deletePeriodMutation.mutate()}
+                disabled={deletePeriodMutation.isPending}
+                style={{
+                  flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  background: 'var(--vk-crimson)', color: '#fff', border: 'none', cursor: 'pointer',
+                  fontFamily: 'var(--vk-sans)', fontWeight: 700, fontSize: 13, padding: '0 16px', height: 36,
+                  opacity: deletePeriodMutation.isPending ? 0.6 : 1,
+                }}>
+                <Trash2 style={{ width: 14, height: 14 }} />
+                {deletePeriodMutation.isPending ? 'กำลังลบ...' : 'ยืนยัน ลบงวด'}
+              </button>
             </div>
           </div>
         </div>
