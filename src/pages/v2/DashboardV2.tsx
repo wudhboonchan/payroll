@@ -176,8 +176,13 @@ export default function DashboardV2() {
       let nextStart: Date, nextEnd: Date
       if (periods.length === 0) {
         const now = new Date()
-        nextStart = new Date(now.getFullYear(), now.getMonth(), 1)
-        nextEnd = new Date(now.getFullYear(), now.getMonth(), 15)
+        if (now.getDate() <= 15) {
+          nextStart = new Date(now.getFullYear(), now.getMonth(), 1)
+          nextEnd   = new Date(now.getFullYear(), now.getMonth(), 15)
+        } else {
+          nextStart = new Date(now.getFullYear(), now.getMonth(), 16)
+          nextEnd   = new Date(now.getFullYear(), now.getMonth() + 1, 0) // last day of month
+        }
       } else {
         const latestEnd = parseLocal(periods[0].period_end)
         nextStart = new Date(latestEnd.getFullYear(), latestEnd.getMonth(), latestEnd.getDate()+1)
@@ -199,7 +204,11 @@ export default function DashboardV2() {
   const nextPeriodLabel = (() => {
     if (periods.length === 0) {
       const now = new Date()
-      return formatPeriodLabel(fmt(new Date(now.getFullYear(),now.getMonth(),1)), fmt(new Date(now.getFullYear(),now.getMonth(),15)))
+      if (now.getDate() <= 15) {
+        return formatPeriodLabel(fmt(new Date(now.getFullYear(),now.getMonth(),1)), fmt(new Date(now.getFullYear(),now.getMonth(),15)))
+      } else {
+        return formatPeriodLabel(fmt(new Date(now.getFullYear(),now.getMonth(),16)), fmt(new Date(now.getFullYear(),now.getMonth()+1,0)))
+      }
     }
     const latestEnd = parseLocal(periods[0].period_end)
     const ns = new Date(latestEnd.getFullYear(), latestEnd.getMonth(), latestEnd.getDate()+1)
