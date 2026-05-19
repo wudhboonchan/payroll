@@ -250,8 +250,8 @@ export default function DashboardV2() {
                 {createNextPeriodMutation.isPending ? 'กำลังสร้าง...' : periods.length === 0 ? `สร้างงวดแรก (${nextPeriodLabel})` : `สร้างงวดถัดไป (${nextPeriodLabel})`}
               </button>
             )}
-            {/* Delete button — only for draft periods with no data */}
-            {activePeriod && !isApproved && (stats?.gross ?? 0) === 0 && (stats?.uniqueDays ?? 0) === 0 && (
+            {/* Delete button — only for draft periods with no data (wait for stats to load) */}
+            {activePeriod && !isApproved && stats !== undefined && stats.gross === 0 && stats.uniqueDays === 0 && (
               <button className="vk-btn" onClick={() => setShowDeletePeriodConfirm(true)}
                 style={{ color: 'var(--vk-crimson)', borderColor: 'var(--vk-crimson)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                 <Trash2 style={{ width: 14, height: 14 }} />
