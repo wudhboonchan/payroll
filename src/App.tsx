@@ -12,6 +12,7 @@ import PaySlipPage from './pages/PaySlip'
 import ExportPage from './pages/Export'
 import ShareLinksPage from './pages/ShareLinks'
 import EmployeeSlipPage from './pages/EmployeeSlip'
+import LiffSlip from './pages/LiffSlip'
 import SettingsPage from './pages/Settings'
 import AttendanceOverview from './pages/AttendanceOverview'
 import UserManagement from './pages/UserManagement'
@@ -81,6 +82,7 @@ function App() {
               {/* ── V1 Archive (reference only) ──────────────────────── */}
               <Route path="/v1/login" element={<Login />} />
               <Route path="/slip/:token" element={<EmployeeSlipPage />} />
+              <Route path="/liff-slip"  element={<LiffSlip />} />
               <Route element={<AppLayout />}>
                 <Route element={<RequireAuth allowedRoles={['admin', 'superUser']} />}>
                   <Route path="/v1/dashboard"  element={<Dashboard />} />
