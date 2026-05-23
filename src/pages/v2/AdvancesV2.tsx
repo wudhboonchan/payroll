@@ -4,7 +4,7 @@ import { supabase } from '../../lib/supabase'
 import { useAppStore } from '../../store/useAppStore'
 import { TopBarV2 } from '../../components/v2/layout/TopBarV2'
 import { useState } from 'react'
-import { Plus, Trash2, Pencil } from 'lucide-react'
+import { Plus, Trash2, Pencil, AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
 import '../../styles/v2-tokens.css'
 
@@ -19,6 +19,7 @@ export default function AdvancesV2() {
   const { user } = useAppStore()
   const queryClient = useQueryClient()
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [modalMode, setModalMode] = useState<'advance' | 'carryover'>('advance')
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingEmp, setEditingEmp] = useState<{ employee_code: string; first_name: string; last_name: string; nationality?: string | null } | null>(null)
@@ -26,15 +27,16 @@ export default function AdvancesV2() {
 
   const isEdit = !!editingId
 
-  const openCreate = () => {
+  const openCreate = (mode: 'advance' | 'carryover' = 'advance') => {
     setEditingId(null)
-    setForm({ employee_id: '', amount: '', notes: '' })
+    setModalMode(mode)
+    setForm({ employee_id: '', amount: '', notes: mode === 'carryover' ? 'ยอดเบิกเกินค้างจากงวดก่อน' : '' })
     setIsModalOpen(true)
   }
 
   const openEdit = (a: any) => {
     setEditingId(a.id)
-    // employee_id may come from the row directly or from the joined employee object
+    setModalMode(a.is_carryover ? 'carryover' : 'advance')
     const empId = a.employee_id || ''
     setForm({ employee_id: empId, amount: String(a.amount), notes: a.notes || '' })
     setEditingEmp(a.employee as any)
@@ -45,6 +47,7 @@ export default function AdvancesV2() {
     setIsModalOpen(false)
     setEditingId(null)
     setEditingEmp(null)
+    setModalMode('advance')
     setForm({ employee_id: '', amount: '', notes: '' })
   }
 
@@ -69,12 +72,16 @@ export default function AdvancesV2() {
     queryKey: ['advances-v2', currentPeriod?.id],
     queryFn: async () => {
       if (!currentPeriod) return []
-      const { data, error } = await supabase.from('advance_payments').select('id,employee_id,amount,notes,created_at,employee:employees(employee_code,first_name,last_name,nationality)').eq('period_id', currentPeriod.id).order('created_at', { ascending: false })
+      const { data, error } = await supabase.from('advance_payments').select('id,employee_id,amount,notes,is_carryover,created_at,employee:employees(employee_code,first_name,last_name,nationality)').eq('period_id', currentPeriod.id).order('is_carryover', { ascending: false }).order('created_at', { ascending: false })
       if (error) throw error; return data
     }, enabled: !!currentPeriod,
   })
 
-  const totalAdv = advances.reduce((s, a) => s + Number(a.amount), 0)
+  const carryovers = advances.filter(a => a.is_carryover)
+  const regularAdvances = advances.filter(a => !a.is_carryover)
+  const totalCarryover = carryovers.reduce((s, a) => s + Number(a.amount), 0)
+  const totalRegular = regularAdvances.reduce((s, a) => s + Number(a.amount), 0)
+  const totalAdv = totalCarryover + totalRegular
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -89,6 +96,7 @@ export default function AdvancesV2() {
         const { error } = await supabase.from('advance_payments').insert({
           period_id: currentPeriod.id, employee_id: form.employee_id,
           amount: parseFloat(form.amount), notes: form.notes || null,
+          is_carryover: modalMode === 'carryover',
         })
         if (error) throw error
       }
@@ -115,19 +123,86 @@ export default function AdvancesV2() {
       <TopBarV2 title="เบิกล่วงหน้า" subtitle={currentPeriod?.label} onMenuClick={onMenuClick} />
 
       <div className="vk-page">
+        {/* Header */}
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 28, gap: 12 }}>
           <div>
             <div className="vk-eyebrow" style={{ marginBottom: 4 }}>ADVANCES · เบิกล่วงหน้า</div>
             <div style={{ fontFamily: 'var(--vk-sans)', fontWeight: 700, fontSize: 24, letterSpacing: '-0.02em' }}>
               รวม <span style={{ fontFamily: 'var(--vk-mono)', color: 'var(--vk-crimson)' }}>฿ {totalAdv.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
             </div>
+            {totalCarryover > 0 && (
+              <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#92400e' }}>
+                <AlertTriangle style={{ width: 12, height: 12 }} />
+                <span>มียอดตกค้างจากงวดก่อน <strong>฿ {totalCarryover.toLocaleString('en-US', { minimumFractionDigits: 2 })}</strong></span>
+              </div>
+            )}
           </div>
-          <button className="vk-btn vk-btn--primary" onClick={openCreate} disabled={!currentPeriod}>
-            <Plus style={{ width: 15, height: 15 }} /> เพิ่มรายการ
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="vk-btn vk-btn--ghost" onClick={() => openCreate('carryover')} disabled={!currentPeriod}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, borderColor: '#d97706', color: '#92400e' }}>
+              <AlertTriangle style={{ width: 13, height: 13 }} /> บันทึกยอดค้างจากงวดก่อน
+            </button>
+            <button className="vk-btn vk-btn--primary" onClick={() => openCreate('advance')} disabled={!currentPeriod}>
+              <Plus style={{ width: 15, height: 15 }} /> เพิ่มรายการเบิก
+            </button>
+          </div>
         </div>
 
-        <hr className="vk-rule" />
+        {/* ── ส่วนยอดตกค้าง ─────────────────────────────────────────── */}
+        {carryovers.length > 0 && (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', background: '#fffbeb', border: '1px solid #fde68a', marginBottom: 0 }}>
+              <AlertTriangle style={{ width: 13, height: 13, color: '#d97706', flexShrink: 0 }} />
+              <span style={{ fontFamily: 'var(--vk-sans)', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#92400e' }}>
+                ยอดตกค้างจากงวดก่อน — {carryovers.length} รายการ · ฿ {totalCarryover.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+              </span>
+            </div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 0 }}>
+              <tbody>
+                {carryovers.map(a => {
+                  const emp = a.employee as any
+                  return (
+                    <tr key={a.id} style={{ borderBottom: '1px solid #fde68a', background: '#fffbeb', cursor: 'pointer' }}
+                      onClick={() => openEdit(a)}
+                      onMouseEnter={e => (e.currentTarget.style.background = '#fef3c7')}
+                      onMouseLeave={e => (e.currentTarget.style.background = '#fffbeb')}>
+                      <td style={{ padding: '12px 14px', fontFamily: 'var(--vk-mono)', fontSize: 12, color: '#92400e', width: 90 }}>{emp?.employee_code}</td>
+                      <td style={{ padding: '12px 14px', fontWeight: 600, fontSize: 14, color: '#78350f' }}>
+                        {emp?.first_name} {emp?.last_name}{fmtNationality(emp?.nationality) ? ` (${fmtNationality(emp?.nationality)})` : ''}
+                      </td>
+                      <td style={{ padding: '12px 14px', fontSize: 13, color: '#92400e' }}>{a.notes || '—'}</td>
+                      <td style={{ padding: '12px 14px', textAlign: 'right', fontFamily: 'var(--vk-mono)', fontSize: 14, fontVariantNumeric: 'tabular-nums', color: '#b45309', fontWeight: 700 }}>
+                        – {Number(a.amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                      </td>
+                      <td style={{ padding: '12px 14px', textAlign: 'right' }}>
+                        <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+                          <button className="vk-btn vk-btn--ghost" style={{ width: 30, height: 30, padding: 0 }}
+                            onClick={e => { e.stopPropagation(); openEdit(a) }}>
+                            <Pencil style={{ width: 13, height: 13, color: '#92400e' }} />
+                          </button>
+                          <button className="vk-btn vk-btn--ghost" style={{ width: 30, height: 30, padding: 0 }}
+                            onClick={e => { e.stopPropagation(); setDeleteTarget({ id: a.id, name: `${a.employee?.first_name ?? ''} ${a.employee?.last_name ?? ''}`.trim() }) }}>
+                            <Trash2 style={{ width: 13, height: 13, color: '#b45309' }} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </>
+        )}
+
+        {/* ── ส่วนเบิกล่วงหน้างวดนี้ ───────────────────────────────── */}
+        <hr className="vk-rule" style={{ marginTop: carryovers.length > 0 ? 0 : undefined }} />
+        {regularAdvances.length > 0 && (
+          <div style={{ padding: '7px 14px', background: 'var(--vk-paper)', borderBottom: '1px solid var(--vk-rule)' }}>
+            <span style={{ fontFamily: 'var(--vk-sans)', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--vk-ink-3)' }}>
+              เบิกล่วงหน้างวดนี้ — {regularAdvances.length} รายการ · ฿ {totalRegular.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+            </span>
+          </div>
+        )}
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr>
@@ -137,7 +212,7 @@ export default function AdvancesV2() {
             </tr>
           </thead>
           <tbody>
-            {advances.map(a => {
+            {regularAdvances.map(a => {
               const emp = a.employee as any
               return (
                 <tr key={a.id} style={{ borderBottom: '1px solid var(--vk-rule-soft)', cursor: 'pointer' }}
@@ -168,6 +243,7 @@ export default function AdvancesV2() {
               )
             })}
             {advances.length === 0 && <tr><td colSpan={5} style={{ padding: '40px', textAlign: 'center' }} className="vk-eyebrow">ยังไม่มีรายการเบิกล่วงหน้า</td></tr>}
+            {advances.length > 0 && regularAdvances.length === 0 && <tr><td colSpan={5} style={{ padding: '24px', textAlign: 'center', fontSize: 13, color: 'var(--vk-ink-3)' }}>ยังไม่มีการเบิกล่วงหน้างวดนี้</td></tr>}
           </tbody>
         </table>
       </div>
@@ -179,9 +255,22 @@ export default function AdvancesV2() {
           <div style={{ background: 'var(--vk-paper)', border: '1px solid var(--vk-rule)', width: '100%', maxWidth: 400, overflow: 'hidden' }}
             onClick={e => e.stopPropagation()}>
             {/* Modal header */}
-            <div style={{ background: 'var(--vk-persimmon)', color: 'var(--vk-bone)', padding: '16px 20px' }}>
-              <div style={{ fontWeight: 700, fontSize: 16 }}>{isEdit ? 'แก้ไขรายการเบิกล่วงหน้า' : 'เพิ่มรายการเบิกล่วงหน้า'}</div>
-              <div style={{ fontSize: 11, opacity: 0.75, marginTop: 2 }}>{isEdit ? 'แก้ไขจำนวนเงินหรือหมายเหตุ' : 'กรอกข้อมูลพนักงานและจำนวนเงิน'}</div>
+            <div style={{ background: modalMode === 'carryover' ? '#d97706' : 'var(--vk-persimmon)', color: '#fff', padding: '16px 20px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {modalMode === 'carryover' && <AlertTriangle style={{ width: 15, height: 15, flexShrink: 0 }} />}
+                <div style={{ fontWeight: 700, fontSize: 16 }}>
+                  {isEdit
+                    ? (modalMode === 'carryover' ? 'แก้ไขยอดตกค้างจากงวดก่อน' : 'แก้ไขรายการเบิกล่วงหน้า')
+                    : (modalMode === 'carryover' ? 'บันทึกยอดตกค้างจากงวดก่อน' : 'เพิ่มรายการเบิกล่วงหน้า')
+                  }
+                </div>
+              </div>
+              <div style={{ fontSize: 11, opacity: 0.8, marginTop: 2 }}>
+                {modalMode === 'carryover'
+                  ? 'ยอดนี้จะถูกนำไปหักในงวดปัจจุบัน รวมกับยอดเบิกล่วงหน้าปกติ'
+                  : (isEdit ? 'แก้ไขจำนวนเงินหรือหมายเหตุ' : 'กรอกข้อมูลพนักงานและจำนวนเงิน')
+                }
+              </div>
             </div>
             <div style={{ padding: '24px 20px', display: 'flex', flexDirection: 'column', gap: 14, background: 'var(--vk-bone)' }}>
               <div>
