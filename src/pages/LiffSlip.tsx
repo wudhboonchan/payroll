@@ -335,19 +335,21 @@ export default function LiffSlip() {
 
         if (rpcError) throw rpcError
 
-        const result = info as { linked: boolean; employee_id?: string; period_id?: string; has_slip?: boolean }
+        const result = info as { status: string; employee_id?: string; period_id?: string }
 
-        if (!result.linked) {
+        if (result.status === 'not_linked') {
           setPageState('link')
           return
         }
 
-        if (!result.has_slip) {
-          setEmployeeId(result.employee_id!)
+        if (result.status === 'no_approved_slip') {
+          // บัญชีผูกแล้ว แต่ยังไม่มีงวดที่อนุมัติ
+          setEmployeeId(result.employee_id ?? '')
           setPageState('no_slip')
           return
         }
 
+        // status === 'ok'
         setEmployeeId(result.employee_id!)
         setPeriodId(result.period_id!)
         setPageState('slip')
@@ -492,11 +494,12 @@ export default function LiffSlip() {
 
   if (pageState === 'no_slip') {
     return (
-      <div className="vk-root" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--vk-paper)', gap: 16, padding: 24 }}>
+      <div className="vk-root" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--vk-paper)', gap: 16, padding: 24, textAlign: 'center' }}>
         <AlertCircle style={{ width: 40, height: 40, color: 'var(--vk-ink-3)' }} />
-        <p style={{ fontFamily: 'var(--vk-sans)', fontWeight: 700, fontSize: 17, color: 'var(--vk-ink)' }}>ยังไม่มีสลิปในระบบ</p>
-        <p style={{ fontFamily: 'var(--vk-sans)', fontSize: 13, color: 'var(--vk-ink-3)', textAlign: 'center', lineHeight: 1.7 }}>
-          สลิปจะแสดงเมื่อแอดมินออกค่าจ้างงวดนั้นเสร็จแล้ว
+        <p style={{ fontFamily: 'var(--vk-sans)', fontWeight: 700, fontSize: 17, color: 'var(--vk-ink)' }}>ยังไม่มีสลิปที่เปิดดูได้</p>
+        <p style={{ fontFamily: 'var(--vk-sans)', fontSize: 13, color: 'var(--vk-ink-3)', lineHeight: 1.8, maxWidth: 280 }}>
+          สลิปจะแสดงเมื่อแอดมิน<strong>อนุมัติงวด</strong>เรียบร้อยแล้ว<br />
+          กรุณารอการแจ้งจากผู้ดูแลระบบค่ะ
         </p>
       </div>
     )
