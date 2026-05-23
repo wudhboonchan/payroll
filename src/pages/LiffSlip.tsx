@@ -242,58 +242,30 @@ export default function LiffSlip() {
     })()
   }, [])
 
-  // ── Payroll entry data ───────────────────────────────────────────────────────
-  const { data: entryData } = useQuery({
+  // ── Payroll entry data (single RPC to bypass RLS) ───────────────────────────
+  const { data: rpcData } = useQuery({
     queryKey: ['liff-entry', employeeId, periodId],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('payroll_entries')
-        .select(`
-          *,
-          employee:employees(id, employee_code, first_name, last_name, position, rate_per_12h, payment_method, bank_name, bank_account, national_id),
-          period:payroll_periods(period_start, period_end)
-        `)
-        .eq('employee_id', employeeId)
-        .eq('period_id', periodId)
-        .single()
+      const { data, error } = await supabase.rpc('liff_get_entry_data', {
+        p_employee_id: employeeId,
+        p_period_id:   periodId,
+      })
       if (error) throw error
-      return data
+      return data as { entry: any; factory: any; shifts: any[] } | null
     },
     enabled: pageState === 'slip' && !!employeeId && !!periodId,
   })
 
-  const { data: factoryData } = useQuery({
-    queryKey: ['liff-factory', entryData?.employee?.id],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('factories')
-        .select('name')
-        .single()
-      return data
-    },
-    enabled: !!entryData,
-  })
-
-  const { data: shifts = [] } = useQuery({
-    queryKey: ['liff-shifts', employeeId, periodId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('shift_assignments' as any)
-        .select('work_date, is_holiday_ot, is_holiday_ot_exempt, is_half_shift, actual_hours, ot_hours')
-        .eq('employee_id', employeeId)
-        .eq('period_id', periodId)
-      if (error) throw error
-      return data as any[]
-    },
-    enabled: pageState === 'slip' && !!employeeId && !!periodId,
-  })
+  const entryData  = rpcData?.entry   ?? null
+  const factoryData = rpcData?.factory ?? null
+  const shifts      = rpcData?.shifts  ?? []
 
   // ── Slip computation (mirrors EmployeeSlip) ──────────────────────────────────
   const slipProps = useMemo(() => {
     if (!entryData) return null
     const emp    = entryData.employee as any
     const period = entryData.period   as any
-    const entry  = entryData          as any
+    const entry  = entryData as any
     const isClerk = emp.position === 'clerk'
 
     // shift counts
