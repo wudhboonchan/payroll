@@ -195,7 +195,7 @@ export default function AdvancesV2() {
         )}
 
         {/* ── ส่วนเบิกล่วงหน้างวดนี้ ───────────────────────────────── */}
-        <hr className="vk-rule" style={{ marginTop: carryovers.length > 0 ? 0 : undefined }} />
+        <hr className="vk-rule" style={{ marginTop: carryovers.length > 0 ? 24 : undefined }} />
         {regularAdvances.length > 0 && (
           <div style={{ padding: '7px 14px', background: 'var(--vk-paper)', borderBottom: '1px solid var(--vk-rule)' }}>
             <span style={{ fontFamily: 'var(--vk-sans)', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--vk-ink-3)' }}>
