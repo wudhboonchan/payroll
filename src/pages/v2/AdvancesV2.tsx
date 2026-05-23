@@ -210,7 +210,7 @@ export default function AdvancesV2() {
             {/* ── section divider ── */}
             {carryovers.length > 0 && (
               <>
-                <tr><td colSpan={5} style={{ padding: 0, height: 56, background: 'var(--vk-bone)', borderTop: 'none', borderBottom: 'none' }} /></tr>
+                <tr><td colSpan={5} style={{ padding: 0, height: 56, background: 'var(--vk-paper)' }} /></tr>
                 <tr>
                   <td colSpan={5} style={{ padding: '9px 14px', background: 'var(--vk-paper)', borderTop: '2px solid var(--vk-rule)', borderBottom: '1px solid var(--vk-rule)' }}>
                     <span style={{ fontFamily: 'var(--vk-sans)', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--vk-ink-3)' }}>
