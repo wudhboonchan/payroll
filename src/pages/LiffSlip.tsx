@@ -243,7 +243,7 @@ export default function LiffSlip() {
   }, [])
 
   // ── Payroll entry data (single RPC to bypass RLS) ───────────────────────────
-  const { data: rpcData } = useQuery({
+  const { data: rpcData, error: rpcDataError } = useQuery({
     queryKey: ['liff-entry', employeeId, periodId],
     queryFn: async () => {
       const { data, error } = await supabase.rpc('liff_get_entry_data', {
@@ -251,9 +251,11 @@ export default function LiffSlip() {
         p_period_id:   periodId,
       })
       if (error) throw error
-      return data as { entry: any; factory: any; shifts: any[] } | null
+      if (!data) throw new Error('ไม่พบข้อมูลสลิปในระบบ')
+      return data as { entry: any; factory: any; shifts: any[] }
     },
     enabled: pageState === 'slip' && !!employeeId && !!periodId,
+    retry: false,
   })
 
   const entryData  = rpcData?.entry   ?? null
@@ -395,6 +397,13 @@ export default function LiffSlip() {
   }
 
   // slip state
+  if (rpcDataError) return (
+    <div className="vk-root" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--vk-paper)', gap: 16, padding: 24 }}>
+      <AlertCircle style={{ width: 40, height: 40, color: 'var(--vk-crimson)' }} />
+      <p style={{ fontFamily: 'var(--vk-sans)', fontWeight: 700, fontSize: 17, color: 'var(--vk-ink)' }}>โหลดสลิปไม่สำเร็จ</p>
+      <p style={{ fontFamily: 'var(--vk-sans)', fontSize: 12, color: 'var(--vk-ink-3)', textAlign: 'center' }}>{(rpcDataError as any)?.message}</p>
+    </div>
+  )
   if (!slipProps) return <LoadingScreen text="กำลังโหลดสลิป..." />
 
   return (
