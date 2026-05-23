@@ -51,44 +51,32 @@ function LinkingForm({ lineUid, onLinked }: { lineUid: string; onLinked: () => v
     setLoading(true)
     setError('')
 
-    const { data: emp } = await supabase
-      .from('employees')
-      .select('id, national_id, line_uid')
-      .eq('employee_code', empCode.trim().toUpperCase())
-      .single()
+    const { data, error: rpcError } = await supabase.rpc('liff_link_employee', {
+      p_employee_code:     empCode.trim(),
+      p_national_id_last4: nationalId.trim(),
+      p_line_uid:          lineUid,
+    })
 
-    if (!emp) {
-      setError('ไม่พบรหัสพนักงานนี้ในระบบ')
-      setLoading(false)
-      return
-    }
-
-    if (emp.line_uid && emp.line_uid !== lineUid) {
-      setError('รหัสพนักงานนี้ถูกเชื่อมกับบัญชี LINE อื่นแล้ว กรุณาติดต่อผู้ดูแลระบบ')
-      setLoading(false)
-      return
-    }
-
-    const last4 = (emp.national_id || '').replace(/[-\s]/g, '').slice(-4)
-    if (last4 !== nationalId.trim()) {
-      setError('เลขบัตรประชาชน 4 ตัวท้ายไม่ถูกต้อง')
-      setLoading(false)
-      return
-    }
-
-    const { error: updateError } = await supabase
-      .from('employees')
-      .update({ line_uid: lineUid })
-      .eq('id', emp.id)
-
-    if (updateError) {
+    if (rpcError) {
       setError('เกิดข้อผิดพลาด กรุณาลองใหม่')
       setLoading(false)
       return
     }
 
-    setDone(true)
-    setTimeout(() => onLinked(), 1200)
+    const result = data as { success?: boolean; error?: string }
+    if (result?.error === 'not_found') {
+      setError('ไม่พบรหัสพนักงานนี้ในระบบ')
+    } else if (result?.error === 'already_linked') {
+      setError('รหัสพนักงานนี้ถูกเชื่อมกับบัญชี LINE อื่นแล้ว กรุณาติดต่อผู้ดูแลระบบ')
+    } else if (result?.error === 'wrong_national_id') {
+      setError('เลขบัตรประชาชน 4 ตัวท้ายไม่ถูกต้อง')
+    } else if (result?.success) {
+      setDone(true)
+      setTimeout(() => onLinked(), 1200)
+    } else {
+      setError('เกิดข้อผิดพลาด กรุณาลองใหม่')
+    }
+    setLoading(false)
   }
 
   if (done) {
@@ -225,34 +213,27 @@ export default function LiffSlip() {
 
         setLineUid(profile.userId)
 
-        const { data: emp } = await supabase
-          .from('employees')
-          .select('id')
-          .eq('line_uid', profile.userId)
-          .single()
+        const { data: info, error: rpcError } = await supabase.rpc('liff_get_slip_info', {
+          p_line_uid: profile.userId,
+        })
 
-        if (!emp) {
+        if (rpcError) throw rpcError
+
+        const result = info as { linked: boolean; employee_id?: string; period_id?: string; has_slip?: boolean }
+
+        if (!result.linked) {
           setPageState('link')
           return
         }
 
-        // หา payroll entry ล่าสุด
-        const { data: entry } = await supabase
-          .from('payroll_entries')
-          .select('id, period_id')
-          .eq('employee_id', emp.id)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .single()
-
-        if (!entry) {
-          setEmployeeId(emp.id)
+        if (!result.has_slip) {
+          setEmployeeId(result.employee_id!)
           setPageState('no_slip')
           return
         }
 
-        setEmployeeId(emp.id)
-        setPeriodId(entry.period_id)
+        setEmployeeId(result.employee_id!)
+        setPeriodId(result.period_id!)
         setPageState('slip')
       } catch (e: any) {
         setErrorMsg(e?.message || 'เกิดข้อผิดพลาด')
