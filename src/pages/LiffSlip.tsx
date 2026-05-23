@@ -3,7 +3,6 @@ import { isWeekend } from 'date-fns'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import { getLiffProfile } from '../lib/liff'
-import { VKSlipDocument } from '../components/v2/VKSlipDocument'
 import type { SlipIncomeRow, SlipDeductRow } from '../components/v2/VKSlipDocument'
 import { ShieldAlert, Eye, Loader2, AlertCircle, Link2, CheckCircle2 } from 'lucide-react'
 import '../styles/v2-tokens.css'
@@ -156,6 +155,123 @@ function LinkingForm({ lineUid, onLinked }: { lineUid: string; onLinked: () => v
         </div>
       </div>
       <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+    </div>
+  )
+}
+
+// ── Mobile Slip View ──────────────────────────────────────────────────────────
+interface MobileSlipProps {
+  branchName: string
+  employeeName: string
+  employeeCode: string
+  positionLabel?: string
+  periodLabel: string
+  paymentMethod: string
+  bankName?: string
+  bankAccount?: string
+  income: SlipIncomeRow[]
+  deductions: SlipDeductRow[]
+  totalIncome: number
+  totalDeduct: number
+  netPay: number
+  workingDays?: number
+}
+
+const mono = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2 })
+const F = 'Sarabun, "Noto Sans Thai", sans-serif'
+
+function MobileSlipView(p: MobileSlipProps) {
+  return (
+    <div style={{ fontFamily: F, color: '#1a1a1a', background: '#fff', borderRadius: 16, overflow: 'hidden', boxShadow: '0 2px 24px rgba(0,0,0,0.10)' }}>
+
+      {/* ── Header ── */}
+      <div style={{ background: 'var(--vk-persimmon)', padding: '20px 20px 16px', color: '#fff' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+          <img src="/logo.png" style={{ width: 44, height: 44, objectFit: 'contain', background: '#fff', borderRadius: 8, padding: 3, flexShrink: 0 }} />
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 14, lineHeight: 1.3 }}>ห้างหุ้นส่วนจำกัด วิราญกร</div>
+            <div style={{ fontSize: 11, opacity: 0.7, marginTop: 2 }}>ใบสลิปเงินเดือน</div>
+          </div>
+        </div>
+        {/* period badge */}
+        <div style={{ background: 'rgba(255,255,255,0.18)', borderRadius: 8, padding: '8px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: 12, opacity: 0.8 }}>งวดจ่ายเงิน</span>
+          <span style={{ fontSize: 13, fontWeight: 700 }}>{p.periodLabel}</span>
+        </div>
+      </div>
+
+      {/* ── Employee Info ── */}
+      <div style={{ padding: '16px 20px', borderBottom: '1px solid #f0f0f0', background: '#fafafa' }}>
+        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', color: '#aaa', textTransform: 'uppercase', marginBottom: 6 }}>พนักงาน</div>
+        <div style={{ fontWeight: 800, fontSize: 18, color: '#1a1a1a' }}>{p.employeeName}</div>
+        <div style={{ fontSize: 12, color: '#888', marginTop: 3 }}>
+          <span style={{ fontFamily: 'monospace' }}>{p.employeeCode}</span>
+          {p.positionLabel ? ` · ${p.positionLabel}` : ''}
+        </div>
+        <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
+          <div style={{ flex: 1, background: '#fff', border: '1px solid #eee', borderRadius: 8, padding: '8px 12px' }}>
+            <div style={{ fontSize: 10, color: '#aaa', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 3 }}>วิธีรับเงิน</div>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>{p.paymentMethod === 'bank_transfer' ? 'โอนธนาคาร' : 'เงินสด'}</div>
+            {p.bankName && <div style={{ fontSize: 11, color: '#999', marginTop: 2 }}>{p.bankName}{p.bankAccount ? ` · ${p.bankAccount}` : ''}</div>}
+          </div>
+          {p.workingDays ? (
+            <div style={{ flex: 1, background: '#fff', border: '1px solid #eee', borderRadius: 8, padding: '8px 12px' }}>
+              <div style={{ fontSize: 10, color: '#aaa', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 3 }}>วันทำงาน</div>
+              <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--vk-persimmon)' }}>{p.workingDays}<span style={{ fontSize: 12, fontWeight: 400, color: '#aaa', marginLeft: 4 }}>วัน</span></div>
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      {/* ── Income ── */}
+      <div style={{ padding: '16px 20px', borderBottom: '1px solid #f0f0f0' }}>
+        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', color: '#aaa', textTransform: 'uppercase', marginBottom: 10 }}>รายได้</div>
+        {p.income.map((r, i) => (
+          <div key={i} style={{ marginBottom: 10 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+              <span style={{ fontSize: 14, fontWeight: 500 }}>{r.label}</span>
+              <span style={{ fontFamily: 'monospace', fontSize: 14, fontWeight: 700 }}>{mono(r.value)}</span>
+            </div>
+            {r.detail && <div style={{ fontSize: 11, color: 'var(--vk-persimmon)', marginTop: 2, fontFamily: 'monospace' }}>{r.detail}</div>}
+            {r.subs?.map((s, j) => <div key={j} style={{ fontSize: 11, color: '#aaa', marginTop: 1, paddingLeft: 8 }}>· {s}</div>)}
+          </div>
+        ))}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f9f9f9', borderRadius: 8, padding: '10px 12px', marginTop: 4 }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: '#555' }}>รวมรายได้</span>
+          <span style={{ fontFamily: 'monospace', fontSize: 15, fontWeight: 800, color: '#1a7a3c' }}>{mono(p.totalIncome)}</span>
+        </div>
+      </div>
+
+      {/* ── Deductions ── */}
+      <div style={{ padding: '16px 20px', borderBottom: '1px solid #f0f0f0' }}>
+        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', color: '#aaa', textTransform: 'uppercase', marginBottom: 10 }}>รายการหัก</div>
+        {p.deductions.length === 0
+          ? <div style={{ fontSize: 13, color: '#ccc', padding: '4px 0' }}>ไม่มีรายการหัก</div>
+          : p.deductions.map((r, i) => (
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
+              <span style={{ fontSize: 14, fontWeight: 500 }}>{r.label}</span>
+              <span style={{ fontFamily: 'monospace', fontSize: 14, fontWeight: 700, color: '#c0392b' }}>{mono(r.value)}</span>
+            </div>
+          ))}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fff5f5', borderRadius: 8, padding: '10px 12px', marginTop: 4 }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: '#555' }}>รวมรายการหัก</span>
+          <span style={{ fontFamily: 'monospace', fontSize: 15, fontWeight: 800, color: '#c0392b' }}>{mono(p.totalDeduct)}</span>
+        </div>
+      </div>
+
+      {/* ── Net Pay ── */}
+      <div style={{ padding: '20px 20px', background: 'linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%)' }}>
+        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', marginBottom: 8 }}>เงินได้สุทธิ · NET PAY</div>
+        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between' }}>
+          <div style={{ fontSize: 38, fontWeight: 900, fontFamily: 'monospace', color: '#fff', letterSpacing: '-0.02em', lineHeight: 1 }}>{mono(p.netPay)}</div>
+          <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', paddingBottom: 4 }}>บาท</div>
+        </div>
+      </div>
+
+      {/* ── Footer ── */}
+      <div style={{ padding: '10px 20px', background: '#f7f7f7', textAlign: 'center' }}>
+        <div style={{ fontSize: 10, color: '#ccc' }}>เอกสารแสดงรายได้อย่างเป็นทางการ · ห้างหุ้นส่วนจำกัด วิราญกร</div>
+      </div>
     </div>
   )
 }
@@ -408,10 +524,8 @@ export default function LiffSlip() {
 
   return (
     <>
-      <div style={{ minHeight: '100vh', background: '#f1f5f9', padding: '24px 16px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-        <div style={{ width: '100%', maxWidth: 680 }}>
-          <VKSlipDocument {...slipProps} />
-        </div>
+      <div className="vk-root" style={{ minHeight: '100vh', background: 'var(--vk-bone)', padding: '20px 16px 40px' }}>
+        <MobileSlipView {...slipProps} />
       </div>
 
       {/* Privacy warning */}
