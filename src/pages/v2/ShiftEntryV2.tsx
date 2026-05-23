@@ -332,8 +332,8 @@ export default function ShiftEntryV2() {
         {/* Pool */}
         <div style={{ padding: '16px 14px', background: 'transparent', overflowY: 'auto', maxHeight: '35vh' }} className="md:max-h-none">
           {/* Pool header with select-all */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-            <div className="vk-eyebrow">POOL · ยังไม่ได้กรอก ({pool.length})</div>
+          <div style={{ marginBottom: 10 }}>
+            <div className="vk-eyebrow" style={{ marginBottom: 6 }}>POOL · ยังไม่ได้กรอก ({pool.length})</div>
             {pool.length > 0 && (
               <button
                 onClick={allEligibleSelected ? clearSelection : selectAll}
@@ -341,7 +341,7 @@ export default function ShiftEntryV2() {
                   display: 'inline-flex', alignItems: 'center', gap: 4,
                   fontSize: 10, fontWeight: 700, letterSpacing: '0.06em',
                   color: allEligibleSelected ? 'var(--vk-persimmon)' : 'var(--vk-ink-3)',
-                  background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px',
+                  background: 'none', border: 'none', cursor: 'pointer', padding: '2px 0',
                   textTransform: 'uppercase',
                 }}>
                 <CheckSquare style={{ width: 12, height: 12 }} />
