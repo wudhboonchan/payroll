@@ -148,70 +148,77 @@ export default function AdvancesV2() {
           </div>
         </div>
 
-        {/* ── ส่วนยอดตกค้าง ─────────────────────────────────────────── */}
-        {carryovers.length > 0 && (
-          <>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', background: '#fffbeb', border: '1px solid #fde68a', marginBottom: 0 }}>
-              <AlertTriangle style={{ width: 13, height: 13, color: '#d97706', flexShrink: 0 }} />
-              <span style={{ fontFamily: 'var(--vk-sans)', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#92400e' }}>
-                ยอดตกค้างจากงวดก่อน — {carryovers.length} รายการ · ฿ {totalCarryover.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-              </span>
-            </div>
-            <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 0 }}>
-              <tbody>
-                {carryovers.map(a => {
-                  const emp = a.employee as any
-                  return (
-                    <tr key={a.id} style={{ borderBottom: '1px solid #fde68a', background: '#fffbeb', cursor: 'pointer' }}
-                      onClick={() => openEdit(a)}
-                      onMouseEnter={e => (e.currentTarget.style.background = '#fef3c7')}
-                      onMouseLeave={e => (e.currentTarget.style.background = '#fffbeb')}>
-                      <td style={{ padding: '12px 14px', fontFamily: 'var(--vk-mono)', fontSize: 12, color: '#92400e', width: 90 }}>{emp?.employee_code}</td>
-                      <td style={{ padding: '12px 14px', fontWeight: 600, fontSize: 14, color: '#78350f' }}>
-                        {emp?.first_name} {emp?.last_name}{fmtNationality(emp?.nationality) ? ` (${fmtNationality(emp?.nationality)})` : ''}
-                      </td>
-                      <td style={{ padding: '12px 14px', fontSize: 13, color: '#92400e' }}>{a.notes || '—'}</td>
-                      <td style={{ padding: '12px 14px', textAlign: 'right', fontFamily: 'var(--vk-mono)', fontSize: 14, fontVariantNumeric: 'tabular-nums', color: '#b45309', fontWeight: 700 }}>
-                        – {Number(a.amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                      </td>
-                      <td style={{ padding: '12px 14px', textAlign: 'right' }}>
-                        <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
-                          <button className="vk-btn vk-btn--ghost" style={{ width: 30, height: 30, padding: 0 }}
-                            onClick={e => { e.stopPropagation(); openEdit(a) }}>
-                            <Pencil style={{ width: 13, height: 13, color: '#92400e' }} />
-                          </button>
-                          <button className="vk-btn vk-btn--ghost" style={{ width: 30, height: 30, padding: 0 }}
-                            onClick={e => { e.stopPropagation(); setDeleteTarget({ id: a.id, name: `${a.employee?.first_name ?? ''} ${a.employee?.last_name ?? ''}`.trim() }) }}>
-                            <Trash2 style={{ width: 13, height: 13, color: '#b45309' }} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </>
-        )}
-
-        {/* ── ส่วนเบิกล่วงหน้างวดนี้ ───────────────────────────────── */}
-        <hr className="vk-rule" style={{ marginTop: carryovers.length > 0 ? 24 : undefined }} />
-        {regularAdvances.length > 0 && (
-          <div style={{ padding: '7px 14px', background: 'var(--vk-paper)', borderBottom: '1px solid var(--vk-rule)' }}>
-            <span style={{ fontFamily: 'var(--vk-sans)', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--vk-ink-3)' }}>
-              เบิกล่วงหน้างวดนี้ — {regularAdvances.length} รายการ · ฿ {totalRegular.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-            </span>
-          </div>
-        )}
+        {/* ── ตารางรวม (columns align ทุกแถว) ─────────────────────── */}
+        <hr className="vk-rule" />
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <colgroup>
+            <col style={{ width: 90 }} />
+            <col />
+            <col />
+            <col style={{ width: 160 }} />
+            <col style={{ width: 80 }} />
+          </colgroup>
           <thead>
             <tr>
               {['รหัส','ชื่อ–นามสกุล','หมายเหตุ','จำนวนเงิน',''].map((h, i) => (
-                <th key={i} style={{ textAlign: i >= 3 ? 'right' : 'left', fontFamily: 'var(--vk-sans)', fontWeight: 600, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--vk-ink-3)', padding: '12px 14px', borderBottom: '1px solid var(--vk-rule)', background: 'var(--vk-paper)' }}>{h}</th>
+                <th key={i} style={{ textAlign: i >= 3 ? 'right' : 'left', fontFamily: 'var(--vk-sans)', fontWeight: 600, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--vk-ink-3)', padding: '10px 14px', borderBottom: '2px solid var(--vk-rule)', background: 'var(--vk-paper)' }}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
+
+            {/* ── section: ยอดตกค้าง ── */}
+            {carryovers.length > 0 && (
+              <tr>
+                <td colSpan={5} style={{ padding: '8px 14px', background: '#fef3c7', borderBottom: '1px solid #fde68a', borderLeft: '3px solid #d97706' }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontFamily: 'var(--vk-sans)', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#92400e' }}>
+                    <AlertTriangle style={{ width: 12, height: 12 }} />
+                    ยอดตกค้างจากงวดก่อน — {carryovers.length} รายการ · ฿ {totalCarryover.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                  </span>
+                </td>
+              </tr>
+            )}
+            {carryovers.map(a => {
+              const emp = a.employee as any
+              return (
+                <tr key={a.id} style={{ borderBottom: '1px solid #fde68a', background: '#fffbeb', cursor: 'pointer', borderLeft: '3px solid #d97706' }}
+                  onClick={() => openEdit(a)}
+                  onMouseEnter={e => (e.currentTarget.style.background = '#fef3c7')}
+                  onMouseLeave={e => (e.currentTarget.style.background = '#fffbeb')}>
+                  <td style={{ padding: '13px 14px', fontFamily: 'var(--vk-mono)', fontSize: 12, color: '#92400e' }}>{emp?.employee_code}</td>
+                  <td style={{ padding: '13px 14px', fontWeight: 600, fontSize: 14, color: '#78350f' }}>
+                    {emp?.first_name} {emp?.last_name}{fmtNationality(emp?.nationality) ? ` (${fmtNationality(emp?.nationality)})` : ''}
+                  </td>
+                  <td style={{ padding: '13px 14px', fontSize: 13, color: '#92400e' }}>{a.notes || '—'}</td>
+                  <td style={{ padding: '13px 14px', textAlign: 'right', fontFamily: 'var(--vk-mono)', fontSize: 14, fontVariantNumeric: 'tabular-nums', color: '#b45309', fontWeight: 700 }}>
+                    – {Number(a.amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                  </td>
+                  <td style={{ padding: '13px 14px', textAlign: 'right' }}>
+                    <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+                      <button className="vk-btn vk-btn--ghost" style={{ width: 30, height: 30, padding: 0 }} onClick={e => { e.stopPropagation(); openEdit(a) }}>
+                        <Pencil style={{ width: 13, height: 13, color: '#92400e' }} />
+                      </button>
+                      <button className="vk-btn vk-btn--ghost" style={{ width: 30, height: 30, padding: 0 }} onClick={e => { e.stopPropagation(); setDeleteTarget({ id: a.id, name: `${a.employee?.first_name ?? ''} ${a.employee?.last_name ?? ''}`.trim() }) }}>
+                        <Trash2 style={{ width: 13, height: 13, color: '#b45309' }} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              )
+            })}
+
+            {/* ── section divider ── */}
+            {carryovers.length > 0 && (
+              <tr>
+                <td colSpan={5} style={{ padding: '8px 14px', background: 'var(--vk-paper)', borderBottom: '1px solid var(--vk-rule)', borderTop: '2px solid var(--vk-rule)' }}>
+                  <span style={{ fontFamily: 'var(--vk-sans)', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--vk-ink-3)' }}>
+                    เบิกล่วงหน้างวดนี้ — {regularAdvances.length} รายการ · ฿ {totalRegular.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                  </span>
+                </td>
+              </tr>
+            )}
+
+            {/* ── section: เบิกปกติ ── */}
             {regularAdvances.map(a => {
               const emp = a.employee as any
               return (
@@ -229,12 +236,10 @@ export default function AdvancesV2() {
                   </td>
                   <td style={{ padding: '13px 14px', textAlign: 'right' }}>
                     <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
-                      <button className="vk-btn vk-btn--ghost" style={{ width: 30, height: 30, padding: 0 }}
-                        onClick={e => { e.stopPropagation(); openEdit(a) }}>
+                      <button className="vk-btn vk-btn--ghost" style={{ width: 30, height: 30, padding: 0 }} onClick={e => { e.stopPropagation(); openEdit(a) }}>
                         <Pencil style={{ width: 13, height: 13, color: 'var(--vk-ink-3)' }} />
                       </button>
-                      <button className="vk-btn vk-btn--ghost" style={{ width: 30, height: 30, padding: 0 }}
-                        onClick={e => { e.stopPropagation(); setDeleteTarget({ id: a.id, name: `${a.employee?.first_name ?? ''} ${a.employee?.last_name ?? ''}`.trim() }) }}>
+                      <button className="vk-btn vk-btn--ghost" style={{ width: 30, height: 30, padding: 0 }} onClick={e => { e.stopPropagation(); setDeleteTarget({ id: a.id, name: `${a.employee?.first_name ?? ''} ${a.employee?.last_name ?? ''}`.trim() }) }}>
                         <Trash2 style={{ width: 13, height: 13, color: 'var(--vk-crimson)' }} />
                       </button>
                     </div>
@@ -242,8 +247,13 @@ export default function AdvancesV2() {
                 </tr>
               )
             })}
-            {advances.length === 0 && <tr><td colSpan={5} style={{ padding: '40px', textAlign: 'center' }} className="vk-eyebrow">ยังไม่มีรายการเบิกล่วงหน้า</td></tr>}
-            {advances.length > 0 && regularAdvances.length === 0 && <tr><td colSpan={5} style={{ padding: '24px', textAlign: 'center', fontSize: 13, color: 'var(--vk-ink-3)' }}>ยังไม่มีการเบิกล่วงหน้างวดนี้</td></tr>}
+
+            {advances.length === 0 && (
+              <tr><td colSpan={5} style={{ padding: '48px', textAlign: 'center' }} className="vk-eyebrow">ยังไม่มีรายการเบิกล่วงหน้า</td></tr>
+            )}
+            {advances.length > 0 && regularAdvances.length === 0 && (
+              <tr><td colSpan={5} style={{ padding: '24px', textAlign: 'center', fontSize: 13, color: 'var(--vk-ink-3)' }}>ยังไม่มีการเบิกล่วงหน้างวดนี้</td></tr>
+            )}
           </tbody>
         </table>
       </div>
