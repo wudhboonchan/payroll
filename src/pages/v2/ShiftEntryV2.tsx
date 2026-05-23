@@ -379,9 +379,9 @@ export default function ShiftEntryV2() {
                     </svg>
                   )}
                 </div>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                    <span style={{ fontWeight: 600, fontSize: 13 }}>
+                <div style={{ minWidth: 0, overflow: 'hidden' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'nowrap', overflow: 'hidden' }}>
+                    <span style={{ fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {empName(emp)}{fmtNationality(emp.nationality) ? ` (${fmtNationality(emp.nationality)})` : ''}
                     </span>
                     {emp.position === 'clerk' && (
