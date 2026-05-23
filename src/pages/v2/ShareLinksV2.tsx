@@ -87,6 +87,26 @@ export default function ShareLinksV2() {
     queryClient.invalidateQueries({ queryKey: ['payslip_tokens'] })
   }, [queryClient])
 
+  // LINE stats — independent of tokens, query employees directly
+  const { data: lineStats = { linked: 0, viewed: 0, total: 0 } } = useQuery({
+    queryKey: ['line_stats', user?.factory_id],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('employees')
+        .select('id,line_uid,liff_viewed_at')
+        .eq('factory_id', user?.factory_id ?? '')
+        .eq('status', 'active')
+      if (error) throw error
+      return {
+        total:  data.length,
+        linked: data.filter(e => e.line_uid).length,
+        viewed: data.filter(e => e.liff_viewed_at).length,
+      }
+    },
+    enabled: !!user?.factory_id,
+    staleTime: 0,
+    refetchInterval: 8000,
+  })
+
   const activePeriod = periods.find(p => p.id === selectedPeriodId) ?? periods[0]
   const isApproved = activePeriod?.status === 'approved'
 
@@ -123,10 +143,11 @@ export default function ShareLinksV2() {
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'employees' }, () => {
         queryClient.invalidateQueries({ queryKey: ['payslip_tokens', activePeriod.id] })
+        queryClient.invalidateQueries({ queryKey: ['line_stats', user?.factory_id] })
       })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
-  }, [activePeriod?.id, queryClient])
+  }, [activePeriod?.id, queryClient, user?.factory_id])
 
   const generateMutation = useMutation({
     mutationFn: async () => {
@@ -284,17 +305,17 @@ export default function ShareLinksV2() {
             </div>
           ))}
         </div>
-        {/* LINE stat cards */}
+        {/* LINE stat cards — data from employees table, independent of tokens */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0, border: '1px solid var(--vk-rule)', borderTop: 'none', marginBottom: 32 }}>
           {[
-            { label: 'ผูก LINE แล้ว', value: counts.liff_linked, color: '#06b6d4', icon: <Smartphone style={{ width: 13, height: 13 }} /> },
-            { label: 'เปิดดูสลิปผ่าน LINE', value: counts.liff_viewed, color: '#8b5cf6', icon: <Eye style={{ width: 13, height: 13 }} /> },
+            { label: 'ผูก LINE แล้ว', value: lineStats.linked, color: '#06b6d4', icon: <Smartphone style={{ width: 13, height: 13 }} /> },
+            { label: 'เปิดดูสลิปผ่าน LINE', value: lineStats.viewed, color: '#8b5cf6', icon: <Eye style={{ width: 13, height: 13 }} /> },
           ].map((s, i) => (
             <div key={i} style={{ padding: '14px 24px', borderRight: i === 0 ? '1px solid var(--vk-rule)' : 'none', background: 'var(--vk-paper)', display: 'flex', alignItems: 'center', gap: 12 }}>
               <div style={{ color: s.color, opacity: 0.7 }}>{s.icon}</div>
               <div>
                 <div className="vk-eyebrow" style={{ marginBottom: 4 }}>{s.label}</div>
-                <div style={{ fontFamily: 'var(--vk-mono)', fontWeight: 700, fontSize: 22, color: s.color, lineHeight: 1 }}>{s.value}<span style={{ fontSize: 12, fontWeight: 400, color: 'var(--vk-ink-3)', marginLeft: 4 }}>/ {counts.total} คน</span></div>
+                <div style={{ fontFamily: 'var(--vk-mono)', fontWeight: 700, fontSize: 22, color: s.color, lineHeight: 1 }}>{s.value}<span style={{ fontSize: 12, fontWeight: 400, color: 'var(--vk-ink-3)', marginLeft: 4 }}>/ {lineStats.total} คน</span></div>
               </div>
             </div>
           ))}
