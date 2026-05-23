@@ -5,7 +5,7 @@ import { supabase } from '../../lib/supabase'
 import { useAppStore } from '../../store/useAppStore'
 import { TopBarV2 } from '../../components/v2/layout/TopBarV2'
 import { toast } from 'sonner'
-import { Copy, Check, RefreshCw, Link2, Search, FileDown, RotateCcw, AlertCircle } from 'lucide-react'
+import { Copy, Check, RefreshCw, Link2, Search, FileDown, RotateCcw, AlertCircle, Smartphone, Eye, EyeOff } from 'lucide-react'
 import '../../styles/v2-tokens.css'
 
 type SlipStatus = 'pending' | 'confirmed' | 'disputed' | 'auto_confirmed'
@@ -23,6 +23,8 @@ interface TokenRow {
     first_name: string
     last_name: string
     nationality?: string
+    line_uid?: string | null
+    liff_viewed_at?: string | null
   }
 }
 
@@ -88,7 +90,7 @@ export default function ShareLinksV2() {
     queryFn: async () => {
       if (!activePeriod) return []
       const { data, error } = await supabase.from('payslip_tokens')
-        .select('id,token,expires_at,employee_status,dispute_reason,created_at,employees(employee_code,first_name,last_name,nationality)')
+        .select('id,token,expires_at,employee_status,dispute_reason,created_at,employees(employee_code,first_name,last_name,nationality,line_uid,liff_viewed_at)')
         .eq('period_id', activePeriod.id).order('created_at')
       if (error) throw error
       // Derive auto_confirmed client-side (same as V1)
@@ -167,6 +169,8 @@ export default function ShareLinksV2() {
     pending:        tokens.filter(t => t.employee_status === 'pending').length,
     disputed:       tokens.filter(t => t.employee_status === 'disputed').length,
     auto_confirmed: tokens.filter(t => t.employee_status === 'auto_confirmed').length,
+    liff_linked:    tokens.filter(t => t.employees?.line_uid).length,
+    liff_viewed:    tokens.filter(t => t.employees?.liff_viewed_at).length,
   }), [tokens])
 
   const filtered = useMemo(() => {
@@ -259,16 +263,31 @@ export default function ShareLinksV2() {
         )}
 
         {/* Stat cards */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 0, border: '1px solid var(--vk-rule)', marginBottom: 32 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 0, border: '1px solid var(--vk-rule)', marginBottom: 16 }}>
           {[
-            { label: 'ทั้งหมด',          value: counts.total,          color: 'var(--vk-ink)' },
-            { label: 'ยืนยันแล้ว',        value: counts.confirmed,      color: 'var(--vk-jade)' },
-            { label: 'รอยืนยัน',          value: counts.pending,        color: 'var(--vk-persimmon)' },
-            { label: 'ทักท้วง',           value: counts.disputed,       color: 'var(--vk-crimson)' },
+            { label: 'ทั้งหมด',    value: counts.total,     color: 'var(--vk-ink)' },
+            { label: 'ยืนยันแล้ว', value: counts.confirmed,  color: 'var(--vk-jade)' },
+            { label: 'รอยืนยัน',   value: counts.pending,   color: 'var(--vk-persimmon)' },
+            { label: 'ทักท้วง',    value: counts.disputed,  color: 'var(--vk-crimson)' },
           ].map((s, i) => (
             <div key={i} style={{ padding: '20px 24px', borderRight: i < 3 ? '1px solid var(--vk-rule)' : 'none', background: 'var(--vk-bone)' }}>
               <div className="vk-eyebrow" style={{ marginBottom: 8 }}>{s.label}</div>
               <div style={{ fontFamily: 'var(--vk-mono)', fontWeight: 600, fontSize: 32, color: s.color, fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>{s.value}</div>
+            </div>
+          ))}
+        </div>
+        {/* LINE stat cards */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0, border: '1px solid var(--vk-rule)', borderTop: 'none', marginBottom: 32 }}>
+          {[
+            { label: 'ผูก LINE แล้ว', value: counts.liff_linked, color: '#06b6d4', icon: <Smartphone style={{ width: 13, height: 13 }} /> },
+            { label: 'เปิดดูสลิปผ่าน LINE', value: counts.liff_viewed, color: '#8b5cf6', icon: <Eye style={{ width: 13, height: 13 }} /> },
+          ].map((s, i) => (
+            <div key={i} style={{ padding: '14px 24px', borderRight: i === 0 ? '1px solid var(--vk-rule)' : 'none', background: 'var(--vk-paper)', display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ color: s.color, opacity: 0.7 }}>{s.icon}</div>
+              <div>
+                <div className="vk-eyebrow" style={{ marginBottom: 4 }}>{s.label}</div>
+                <div style={{ fontFamily: 'var(--vk-mono)', fontWeight: 700, fontSize: 22, color: s.color, lineHeight: 1 }}>{s.value}<span style={{ fontSize: 12, fontWeight: 400, color: 'var(--vk-ink-3)', marginLeft: 4 }}>/ {counts.total} คน</span></div>
+              </div>
             </div>
           ))}
         </div>
@@ -327,7 +346,7 @@ export default function ShareLinksV2() {
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
-                {['รหัส', 'ชื่อ – ลิงก์', 'สถานะ', ''].map((h, i) => (
+                {['รหัส', 'ชื่อ – ลิงก์', 'LINE', 'สถานะ', ''].map((h, i) => (
                   <th key={i} style={{ textAlign: i >= 2 ? 'right' : 'left', fontFamily: 'var(--vk-sans)', fontWeight: 600, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--vk-ink-3)', padding: '10px 14px', borderBottom: '1px solid var(--vk-rule)', background: 'var(--vk-paper)', whiteSpace: 'nowrap' }}>{h}</th>
                 ))}
               </tr>
@@ -358,6 +377,26 @@ export default function ShareLinksV2() {
                         </div>
                       )}
                       {isExpired && <div style={{ fontSize: 11, color: 'var(--vk-persimmon)', marginTop: 4 }}>⏰ ลิงก์หมดอายุแล้ว</div>}
+                    </td>
+                    <td style={{ padding: '12px 14px', textAlign: 'right', verticalAlign: 'top', paddingTop: 14 }}>
+                      {emp?.liff_viewed_at ? (
+                        <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, color: '#8b5cf6' }}>
+                            <Eye style={{ width: 11, height: 11 }} />เปิดดูแล้ว
+                          </span>
+                          <span style={{ fontSize: 10, color: 'var(--vk-ink-3)', fontFamily: 'var(--vk-mono)' }}>
+                            {new Date(emp.liff_viewed_at).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+                      ) : emp?.line_uid ? (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#06b6d4' }}>
+                          <Smartphone style={{ width: 11, height: 11 }} />ผูกแล้ว
+                        </span>
+                      ) : (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--vk-ink-3)' }}>
+                          <EyeOff style={{ width: 11, height: 11 }} />ยังไม่ผูก
+                        </span>
+                      )}
                     </td>
                     <td style={{ padding: '12px 14px', textAlign: 'right', verticalAlign: 'top', paddingTop: 15 }}>
                       <span className="vk-pill" data-tone={s.tone}>● {s.label}</span>
