@@ -82,6 +82,11 @@ export default function ShareLinksV2() {
     }
   }, [periods])
 
+  // Force-refresh tokens when page mounts (picks up liff_viewed_at / line_uid changes)
+  useEffect(() => {
+    queryClient.invalidateQueries({ queryKey: ['payslip_tokens'] })
+  }, [queryClient])
+
   const activePeriod = periods.find(p => p.id === selectedPeriodId) ?? periods[0]
   const isApproved = activePeriod?.status === 'approved'
 
@@ -109,11 +114,14 @@ export default function ShareLinksV2() {
     refetchInterval: 8000,
   })
 
-  // Realtime subscription
+  // Realtime subscriptions — payslip_tokens + employees (for line_uid / liff_viewed_at)
   useEffect(() => {
     if (!activePeriod?.id) return
     const channel = supabase.channel(`tokens-v2-${activePeriod.id}`)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'payslip_tokens', filter: `period_id=eq.${activePeriod.id}` }, () => {
+        queryClient.invalidateQueries({ queryKey: ['payslip_tokens', activePeriod.id] })
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'employees' }, () => {
         queryClient.invalidateQueries({ queryKey: ['payslip_tokens', activePeriod.id] })
       })
       .subscribe()
