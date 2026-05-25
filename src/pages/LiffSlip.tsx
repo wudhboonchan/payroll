@@ -65,6 +65,8 @@ function LinkingForm({ lineUid, onLinked }: { lineUid: string; onLinked: () => v
     const result = data as { success?: boolean; error?: string }
     if (result?.error === 'not_found') {
       setError('ไม่พบรหัสพนักงานนี้ในระบบ')
+    } else if (result?.error === 'inactive') {
+      setError('บัญชีพนักงานนี้ถูกระงับการใช้งานแล้ว กรุณาติดต่อผู้ดูแลระบบ')
     } else if (result?.error === 'already_linked') {
       setError('รหัสพนักงานนี้ถูกเชื่อมกับบัญชี LINE อื่นแล้ว กรุณาติดต่อผู้ดูแลระบบ')
     } else if (result?.error === 'wrong_national_id') {
@@ -339,6 +341,12 @@ export default function LiffSlip() {
 
         if (result.status === 'not_linked') {
           setPageState('link')
+          return
+        }
+
+        if (result.status === 'inactive') {
+          setErrorMsg('บัญชีพนักงานนี้ถูกระงับการใช้งานแล้ว กรุณาติดต่อผู้ดูแลระบบ')
+          setPageState('error')
           return
         }
 
