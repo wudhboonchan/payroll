@@ -66,17 +66,28 @@ export default function ShiftEntryV2() {
   const splitRef = useRef<HTMLDivElement>(null)
   const [splitHeight, setSplitHeight] = useState<number | null>(null)
 
-  // Measure actual top position of the split panel so Chrome/Edge lock scroll correctly.
-  // calc(100vh - X) breaks when parent has overflow:auto; measuring avoids that.
+  // Chrome/Edge fix: vk-main has overflow:auto which becomes the scroll container
+  // and breaks inner scroll-lock. We lock it while ShiftEntry is mounted,
+  // measure the actual split height, and restore on unmount.
   useEffect(() => {
+    const main = document.querySelector('.vk-main') as HTMLElement | null
+    const prevOverflow = main?.style.overflow ?? ''
+    if (main) main.style.overflow = 'hidden'
+
     const update = () => {
       if (splitRef.current) {
         setSplitHeight(window.innerHeight - splitRef.current.getBoundingClientRect().top)
       }
     }
-    update()
+    // Wait one frame so layout settles after overflow change
+    const raf = requestAnimationFrame(update)
     window.addEventListener('resize', update)
-    return () => window.removeEventListener('resize', update)
+
+    return () => {
+      if (main) main.style.overflow = prevOverflow
+      cancelAnimationFrame(raf)
+      window.removeEventListener('resize', update)
+    }
   }, [])
 
   // ── periods ──
