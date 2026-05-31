@@ -1,12 +1,10 @@
 {
-  "rewrites": [
+  "routes": [
     {
-      "source": "/supabase-api/:path*",
-      "destination": "https://nlyumhbzlruhpcorwswk.supabase.co/:path*"
+      "src": "/supabase-api/(.*)",
+      "dest": "https://nlyumhbzlruhpcorwswk.supabase.co/$1"
     },
-    {
-      "source": "/(.*)",
-      "destination": "/index.html"
-    }
+    { "handle": "filesystem" },
+    { "src": "/(.*)", "dest": "/index.html" }
   ]
 }
