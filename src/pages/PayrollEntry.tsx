@@ -14,6 +14,7 @@ interface Employee {
   id: string; employee_code: string; first_name: string; last_name: string
   prefix: string | null; nationality: string | null; position: string
   job_title: string | null; wage_type: string; rate_per_12h: number
+  exempt_social_security: boolean
 }
 
 interface Shift {
@@ -61,7 +62,7 @@ export default function PayrollEntry() {
     queryKey: ['employees-payroll', user?.factory_id],
     queryFn: async () => {
       const { data, error } = await supabase.from('employees')
-        .select('id,employee_code,first_name,last_name,prefix,nationality,position,job_title,wage_type,rate_per_12h')
+        .select('id,employee_code,first_name,last_name,prefix,nationality,position,job_title,wage_type,rate_per_12h,exempt_social_security')
         .eq('factory_id', user?.factory_id ?? '').eq('status','active').order('employee_code')
       if (error) throw error; return data
     }, enabled: !!user?.factory_id, staleTime: 0,
@@ -102,6 +103,7 @@ export default function PayrollEntry() {
   const empAdvances = allAdvances.filter(a => a.employee_id === selectedEmpId)
   const ssRate = currentPeriod?.social_security_rate ?? 0.05
   const isThai = !selectedEmp?.nationality || selectedEmp.nationality === 'ไทย'
+  const ssRateForEmp = isThai && !selectedEmp?.exempt_social_security ? ssRate : 0
 
   // ── local overrides ──
   const [overrideNormal, setOverrideNormal] = useState<number | null>(null)
@@ -176,7 +178,7 @@ export default function PayrollEntry() {
       amount_special: autoSp + extraEntries.amount_special,
       amount_diligence: extraEntries.amount_diligence,
       amount_position: extraEntries.amount_position,
-      social_security_rate: isThai ? ssRate : 0,
+      social_security_rate: ssRateForEmp,
       deduct_advance: advTotal,
       deduct_safety_equipment: extraEntries.deduct_safety_equipment,
       deduct_uniform: extraEntries.deduct_uniform,
@@ -202,6 +204,7 @@ export default function PayrollEntry() {
       const advances = allAdvances.filter(a => a.employee_id === emp.id)
       const isEmpClerk = emp.position === 'clerk'
       const empIsThai  = !emp.nationality || emp.nationality === 'ไทย'
+      const empSsRate  = empIsThai && !emp.exempt_social_security ? (currentPeriod?.social_security_rate ?? 0.05) : 0
       const normShifts  = shifts.filter(s => !s.is_holiday_ot || s.is_holiday_ot_exempt)
       const holShifts   = shifts.filter(s => s.is_holiday_ot && !s.is_holiday_ot_exempt)
       const normDays    = normShifts.filter(s => !s.is_half_shift && !s.actual_hours).length
@@ -230,7 +233,7 @@ export default function PayrollEntry() {
         amount_film: isEmpClerk ? 0 : autoF,
         amount_special: autoSp,
         amount_diligence: 0, amount_position: 0,
-        social_security_rate: empIsThai ? (currentPeriod?.social_security_rate ?? 0.05) : 0,
+        social_security_rate: empSsRate,
         deduct_advance: advTotal, deduct_safety_equipment: 0, deduct_uniform: 0,
       })
       const checks: [number, number][] = [
@@ -517,7 +520,7 @@ export default function PayrollEntry() {
                     <div className="vk-deduct-col" style={{ padding: '20px 24px', background: 'var(--vk-bone)', display: 'flex', flexDirection: 'column' }}>
                       <div className="vk-eyebrow" style={{ color: 'var(--vk-crimson)', marginBottom: 14 }}>DEDUCT · รายการหัก</div>
                       {[
-                        { label: `ประกันสังคม ${(ssRate*100).toFixed(0)}%`, value: calc.deduct_social_security },
+                        { label: selectedEmp?.exempt_social_security ? 'ประกันสังคม (ยกเว้น)' : `ประกันสังคม ${(ssRate*100).toFixed(0)}%`, value: calc.deduct_social_security },
                         { label: 'เบิกล่วงหน้า', value: totalAdvance },
                         { label: 'หักอุปกรณ์ความปลอดภัย', value: extraEntries.deduct_safety_equipment },
                         { label: 'หักเครื่องแบบ', value: extraEntries.deduct_uniform },

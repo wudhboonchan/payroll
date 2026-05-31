@@ -28,6 +28,7 @@ const employeeSchema = z
     status: z.enum(['active', 'inactive']).default('active'),
     notes: z.string().optional(),
     data_complete: z.boolean().default(false),
+    exempt_social_security: z.boolean().default(false),
   })
   .superRefine((data, ctx) => {
     if (data.nationality === 'ไทย' && !data.last_name?.trim()) {
@@ -62,6 +63,7 @@ interface Employee {
   position: 'worker' | 'clerk'; job_title: string | null; wage_type: 'daily' | 'monthly'
   payment_method: 'cash' | 'bank_transfer'; bank_name: string | null; bank_account: string | null
   rate_per_12h: number; status: 'active' | 'inactive'; notes: string | null; data_complete: boolean
+  exempt_social_security: boolean
 }
 
 const fieldStyle: React.CSSProperties = {
@@ -85,6 +87,7 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
   const paymentMethod = watch('payment_method')
   const nationality = watch('nationality')
   const dataComplete = watch('data_complete')
+  const exemptSS = watch('exempt_social_security')
   const wageType = watch('wage_type')
   const position = watch('position')
   const currentRate = watch('rate_per_12h') || 0
@@ -132,6 +135,7 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
         bank_name: employeeData.bank_name || '', bank_account: employeeData.bank_account || '',
         rate_per_12h: employeeData.rate_per_12h, status: employeeData.status || 'active',
         notes: employeeData.notes || '', data_complete: employeeData.data_complete ?? false,
+        exempt_social_security: employeeData.exempt_social_security ?? false,
       })
     } else if (!employeeId && isOpen) {
       reset({
@@ -139,6 +143,7 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
         nationality: 'ไทย', position: 'worker', job_title: '', wage_type: 'daily',
         payment_method: 'bank_transfer', bank_name: '', bank_account: '',
         rate_per_12h: 0, status: 'active', notes: '', data_complete: false,
+        exempt_social_security: false,
       })
     }
   }, [employeeData, employeeId, isOpen, reset])
@@ -390,6 +395,27 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
                 <input className="vk-input" {...register('notes')} />
               </div>
             </div>
+
+            {/* ยกเว้นประกันสังคม — เฉพาะพนักงานสัญชาติไทย */}
+            {isThai && (
+              <label style={{
+                display: 'flex', alignItems: 'flex-start', gap: 12, padding: '14px 16px',
+                border: `1px solid ${exemptSS ? '#f59e0b' : 'var(--vk-rule-soft)'}`,
+                background: exemptSS ? '#fffbeb' : 'var(--vk-bone)',
+                cursor: 'pointer',
+              }}>
+                <input type="checkbox" {...register('exempt_social_security')}
+                  style={{ marginTop: 2, accentColor: '#f59e0b', flexShrink: 0 }} />
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: exemptSS ? '#92400e' : 'var(--vk-ink)' }}>
+                    ไม่หักประกันสังคม
+                  </div>
+                  <div style={{ fontSize: 11, color: exemptSS ? '#b45309' : 'var(--vk-ink-3)', marginTop: 2, lineHeight: 1.5 }}>
+                    คิดเงินเต็มจำนวน ไม่หักประกันสังคม — สำหรับพนักงานไทยที่ได้รับการยกเว้น
+                  </div>
+                </div>
+              </label>
+            )}
 
             {/* Data complete checkbox */}
             <div style={{
