@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase'
 import { useAppStore } from '../store/useAppStore'
 import { TopBar } from '../components/layout/TopBar'
 import { useState } from 'react'
-import { Plus, Trash2, Pencil, AlertTriangle } from 'lucide-react'
+import { Plus, Trash2, Pencil, AlertTriangle, Search, X } from 'lucide-react'
 import { toast } from 'sonner'
 import '../styles/tokens.css'
 
@@ -24,6 +24,7 @@ export default function Advances() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingEmp, setEditingEmp] = useState<{ employee_code: string; first_name: string; last_name: string; nationality?: string | null } | null>(null)
   const [form, setForm] = useState({ employee_id: '', amount: '', notes: '' })
+  const [empSearch, setEmpSearch] = useState('')
 
   const isEdit = !!editingId
 
@@ -49,6 +50,7 @@ export default function Advances() {
     setEditingEmp(null)
     setModalMode('advance')
     setForm({ employee_id: '', amount: '', notes: '' })
+    setEmpSearch('')
   }
 
   const { data: periods = [] } = useQuery<any[]>({
@@ -119,12 +121,12 @@ export default function Advances() {
   })
 
   return (
-    <>
+    <div className="vk-root" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
       <TopBar title="เบิกล่วงหน้า" subtitle={currentPeriod?.label} onMenuClick={onMenuClick} />
 
-      <div className="vk-page">
-        {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 28, gap: 12 }}>
+      {/* ── Sticky header (never scrolls) ─────────────────────────── */}
+      <div style={{ flexShrink: 0, padding: '24px 36px 0', maxWidth: 1136, width: '100%', margin: '0 auto', boxSizing: 'border-box' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20, gap: 12 }}>
           <div>
             <div className="vk-eyebrow" style={{ marginBottom: 4 }}>ADVANCES · เบิกล่วงหน้า</div>
             <div style={{ fontFamily: 'var(--vk-sans)', fontWeight: 700, fontSize: 24, letterSpacing: '-0.02em' }}>
@@ -147,9 +149,14 @@ export default function Advances() {
             </button>
           </div>
         </div>
+        <hr className="vk-rule" style={{ margin: 0 }} />
+      </div>
+
+      {/* ── Scrollable table area ──────────────────────────────────── */}
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+      <div style={{ maxWidth: 1136, width: '100%', margin: '0 auto', padding: '0 36px 48px', boxSizing: 'border-box' }}>
 
         {/* ── ตารางรวม (columns align ทุกแถว) ─────────────────────── */}
-        <hr className="vk-rule" />
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <colgroup>
             <col style={{ width: 90 }} />
@@ -259,7 +266,8 @@ export default function Advances() {
             )}
           </tbody>
         </table>
-      </div>
+      </div>{/* end inner wrapper */}
+      </div>{/* end scroll area */}
 
       {/* Modal */}
       {isModalOpen && (
@@ -289,15 +297,73 @@ export default function Advances() {
               <div>
                 <label className="vk-eyebrow" style={{ display: 'block', marginBottom: 5 }}>พนักงาน</label>
                 {isEdit ? (
-                    <div style={{ padding: '8px 12px', border: '1px solid var(--vk-rule)', background: 'var(--vk-paper)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ fontFamily: 'var(--vk-mono)', fontSize: 11, color: 'var(--vk-ink-3)' }}>{editingEmp?.employee_code}</span>
-                      <span style={{ fontWeight: 600, color: 'var(--vk-ink)' }}>{editingEmp?.first_name} {editingEmp?.last_name}{fmtNationality(editingEmp?.nationality ?? null) ? ` (${fmtNationality(editingEmp?.nationality ?? null)})` : ''}</span>
-                    </div>
+                  <div style={{ padding: '8px 12px', border: '1px solid var(--vk-rule)', background: 'var(--vk-paper)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontFamily: 'var(--vk-mono)', fontSize: 11, color: 'var(--vk-ink-3)' }}>{editingEmp?.employee_code}</span>
+                    <span style={{ fontWeight: 600, color: 'var(--vk-ink)' }}>{editingEmp?.first_name} {editingEmp?.last_name}{fmtNationality(editingEmp?.nationality ?? null) ? ` (${fmtNationality(editingEmp?.nationality ?? null)})` : ''}</span>
+                  </div>
                 ) : (
-                  <select className="vk-input" value={form.employee_id} onChange={e => setForm(f => ({ ...f, employee_id: e.target.value }))}>
-                    <option value="">-- เลือกพนักงาน --</option>
-                    {employees.map(e => <option key={e.id} value={e.id}>{e.employee_code} · {e.first_name} {e.last_name}{fmtNationality(e.nationality) ? ` (${fmtNationality(e.nationality)})` : ''}</option>)}
-                  </select>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {/* Search box */}
+                    <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                      <Search style={{ position: 'absolute', left: 9, width: 13, height: 13, color: 'var(--vk-ink-3)', pointerEvents: 'none' }} />
+                      <input
+                        className="vk-input"
+                        placeholder="พิมพ์ชื่อหรือรหัสเพื่อค้นหา..."
+                        value={empSearch}
+                        onChange={e => setEmpSearch(e.target.value)}
+                        style={{ paddingLeft: 30, paddingRight: empSearch ? 28 : 10 }}
+                        autoFocus
+                      />
+                      {empSearch && (
+                        <button onClick={() => setEmpSearch('')} style={{ position: 'absolute', right: 6, background: 'none', border: 'none', cursor: 'pointer', padding: 2, color: 'var(--vk-ink-3)' }}>
+                          <X style={{ width: 12, height: 12 }} />
+                        </button>
+                      )}
+                    </div>
+                    {/* Employee list */}
+                    <div style={{ border: '1px solid var(--vk-rule)', background: 'var(--vk-paper)', maxHeight: 200, overflowY: 'auto' }}>
+                      {employees
+                        .filter(e => {
+                          const q = empSearch.toLowerCase()
+                          return !q || e.employee_code.toLowerCase().includes(q) || e.first_name.toLowerCase().includes(q) || (e.last_name || '').toLowerCase().includes(q)
+                        })
+                        .map(e => {
+                          const selected = form.employee_id === e.id
+                          return (
+                            <div key={e.id}
+                              onClick={() => setForm(f => ({ ...f, employee_id: e.id }))}
+                              style={{
+                                padding: '9px 12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10,
+                                background: selected ? 'var(--vk-persimmon-tint)' : 'transparent',
+                                borderBottom: '1px solid var(--vk-rule-soft)',
+                              }}
+                              onMouseEnter={el => { if (!selected) el.currentTarget.style.background = 'var(--vk-bone)' }}
+                              onMouseLeave={el => { if (!selected) el.currentTarget.style.background = 'transparent' }}>
+                              <span style={{ fontFamily: 'var(--vk-mono)', fontSize: 11, color: selected ? 'var(--vk-persimmon)' : 'var(--vk-ink-3)', flexShrink: 0 }}>{e.employee_code}</span>
+                              <span style={{ fontSize: 13, fontWeight: selected ? 700 : 400, color: selected ? 'var(--vk-persimmon)' : 'var(--vk-ink)', flex: 1 }}>
+                                {e.first_name} {e.last_name}{fmtNationality(e.nationality) ? ` (${fmtNationality(e.nationality)})` : ''}
+                              </span>
+                              {selected && <span style={{ fontSize: 11, color: 'var(--vk-persimmon)' }}>✓</span>}
+                            </div>
+                          )
+                        })}
+                      {employees.filter(e => {
+                        const q = empSearch.toLowerCase()
+                        return !q || e.employee_code.toLowerCase().includes(q) || e.first_name.toLowerCase().includes(q) || (e.last_name || '').toLowerCase().includes(q)
+                      }).length === 0 && (
+                        <div style={{ padding: '16px', textAlign: 'center', fontSize: 13, color: 'var(--vk-ink-3)' }}>ไม่พบพนักงานที่ค้นหา</div>
+                      )}
+                    </div>
+                    {/* Selected display */}
+                    {form.employee_id && (() => {
+                      const sel = employees.find(e => e.id === form.employee_id)
+                      return sel ? (
+                        <div style={{ fontSize: 12, color: 'var(--vk-persimmon)', fontWeight: 600 }}>
+                          เลือก: {sel.employee_code} · {sel.first_name} {sel.last_name}
+                        </div>
+                      ) : null
+                    })()}
+                  </div>
                 )}
               </div>
               <div>
@@ -347,6 +413,6 @@ export default function Advances() {
           </div>
         </div>
       )}
-    </>
+    </div>
   )
 }
