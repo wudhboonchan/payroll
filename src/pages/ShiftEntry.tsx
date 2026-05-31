@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
@@ -546,24 +546,26 @@ export default function ShiftEntry() {
         </div>
       </div>
 
-      {/* Floating selection hint */}
+      {/* Floating selection hint — top-right so it doesn't cover pool list */}
       {hasSelection && (
         <div style={{
-          position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
+          position: 'fixed',
+          top: 'calc(var(--vk-topbar-h) + var(--vk-date-strip-h) + 12px)',
+          right: 16,
           background: 'var(--vk-ink-2)', color: 'var(--vk-bone)',
-          padding: '10px 16px 10px 18px',
+          padding: '10px 14px 10px 16px',
           fontFamily: 'var(--vk-sans)',
-          display: 'flex', alignItems: 'center', gap: 12,
-          zIndex: 100, borderRadius: 14,
+          display: 'flex', alignItems: 'flex-start', gap: 10,
+          zIndex: 100, borderRadius: 10,
           boxShadow: '0 4px 20px rgba(22,19,17,0.35)',
-          maxWidth: 'calc(100vw - 32px)',
+          maxWidth: 280,
         }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', color: 'var(--vk-persimmon)', textTransform: 'uppercase', marginBottom: 2 }}>
               เลือกแล้ว {selectedIds.size} คน
             </div>
             <div style={{ fontSize: 13, fontWeight: 600 }}>คลิกที่กะที่ต้องการ</div>
-            <div style={{ fontSize: 11, color: 'var(--vk-ink-4)', marginTop: 1 }}>
+            <div style={{ fontSize: 11, color: 'var(--vk-ink-4)', marginTop: 2, lineHeight: 1.5, wordBreak: 'break-word' }}>
               {pool.filter(e => selectedIds.has(e.id)).map(e => empName(e)).join(', ')}
             </div>
           </div>
@@ -641,6 +643,8 @@ function DetailModal({ emp, isHoliday, weekend, onUpdate, onClose }: {
   onUpdate: (patch: Partial<AssignedEmp>) => void
   onClose: () => void
 }) {
+  // earlyReturn = กลับก่อน (8–12 ชม.) vs underHalf = ลา/ป่วย (< 8 ชม.)
+  const [earlyReturn, setEarlyReturn] = React.useState(emp.partialHours >= 8)
   const isPartial = emp.partialHours > 0
 
   const inputStyle: React.CSSProperties = {
@@ -691,32 +695,42 @@ function DetailModal({ emp, isHoliday, weekend, onUpdate, onClose }: {
             <>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <label className="vk-eyebrow">ชั่วโมงทำงาน</label>
-                <div style={{ display: 'grid', gridTemplateColumns: isHoliday ? '1fr 1fr' : '1fr 1fr 1fr', gap: 8 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  {/* Row 1: full options */}
                   <HourBtn label="12 ชม." sub={isHoliday ? 'OT ×2' : 'ปกติ+กะ'} icon={<Clock style={{ width: 15, height: 15 }} />}
-                    active={!emp.isHalfShift && !isPartial} disabled={isPartial}
+                    active={!emp.isHalfShift && !isPartial} disabled={false}
                     onClick={() => onUpdate({ isHalfShift: false, partialHours: 0 })} />
                   <HourBtn label="8 ชม." sub={isHoliday ? 'OT ×2' : 'ไม่มีค่ากะ'} icon={<Clock4 style={{ width: 15, height: 15 }} />}
-                    active={emp.isHalfShift && !isPartial} disabled={isPartial}
+                    active={emp.isHalfShift && !isPartial} disabled={false}
                     onClick={() => onUpdate({ isHalfShift: true, partialHours: 0 })} />
-                  {!isHoliday && (
-                    <HourBtn label="< 8 ชม." sub="ลา/ป่วย" icon={<Clock4 style={{ width: 15, height: 15 }} />}
-                      active={isPartial} disabled={false}
-                      onClick={() => onUpdate({ isHalfShift: false, partialHours: emp.partialHours || 4 })} />
-                  )}
+                  {/* Row 2: partial options */}
+                  <HourBtn label="8–12 ชม." sub="กลับก่อน" icon={<Clock4 style={{ width: 15, height: 15 }} />}
+                    active={isPartial && earlyReturn} disabled={false}
+                    onClick={() => { setEarlyReturn(true); onUpdate({ isHalfShift: false, partialHours: emp.partialHours >= 8 && emp.partialHours < 12 ? emp.partialHours : 10 }) }} />
+                  <HourBtn label="< 8 ชม." sub="ลา/ป่วย" icon={<Clock4 style={{ width: 15, height: 15 }} />}
+                    active={isPartial && !earlyReturn} disabled={false}
+                    onClick={() => { setEarlyReturn(false); onUpdate({ isHalfShift: false, partialHours: emp.partialHours > 0 && emp.partialHours < 8 ? emp.partialHours : 4 }) }} />
                 </div>
                 {isPartial && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
-                    <input type="number" min="0.5" max="7.5" step="0.5" style={inputStyle}
-                      value={emp.partialHours || ''} placeholder="ชม."
+                    <input
+                      type="number"
+                      min={earlyReturn ? 8.5 : 0.5}
+                      max={earlyReturn ? 11.5 : 7.5}
+                      step="0.5"
+                      style={inputStyle}
+                      value={emp.partialHours || ''}
+                      placeholder={earlyReturn ? '10' : '4'}
                       onChange={e => {
                         const val = Number(e.target.value) || 0
-                        if (val >= 8) { toast.error('ไม่สามารถกรอกเกิน 7.5 ชม. สำหรับกะนี้'); return }
+                        if (earlyReturn && (val <= 8 || val >= 12)) { toast.error('กลับก่อน: ต้องอยู่ระหว่าง 8.5–11.5 ชม.'); return }
+                        if (!earlyReturn && val >= 8) { toast.error('ลา/ป่วย: ต้องน้อยกว่า 8 ชม.'); return }
                         onUpdate({ partialHours: val })
                       }} />
                     <span style={{ fontSize: 12, color: 'var(--vk-ink-3)' }}>ชม. ทำงานจริง</span>
                     {emp.partialHours > 0 && emp.rate_per_12h > 0 && (
                       <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--vk-persimmon)', fontFamily: 'var(--vk-mono)', whiteSpace: 'nowrap' }}>
-                        = {Math.round((357 / 8) * emp.partialHours).toLocaleString()} ฿
+                        = {Math.round((emp.rate_per_12h / 12) * emp.partialHours).toLocaleString()} ฿
                       </span>
                     )}
                   </div>
