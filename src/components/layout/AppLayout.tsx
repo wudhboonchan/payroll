@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Navigate, Outlet, useLocation, useOutletContext } from 'react-router-dom'
 import { useAppStore } from '../../store/useAppStore'
 import { Sidebar } from './Sidebar'
-import '../../styles/v2-tokens.css'
+import '../../styles/tokens.css'
 
 interface RequireAuthProps { allowedRoles?: string[] }
 

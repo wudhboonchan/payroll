@@ -1,5 +1,5 @@
 /* ============================================================
-   VIRANKORN PAYROLL V2 — Design tokens
+   VIRANKORN PAYROLL — Design tokens
    ============================================================ */
 
 :root {
@@ -68,7 +68,7 @@ html, body, #root {
   padding: 0;
 }
 
-/* ── Base reset for V2 pages ── */
+/* ── Base reset ── */
 .vk-root {
   background: var(--vk-paper);
   color: var(--vk-ink);

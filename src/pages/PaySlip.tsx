@@ -7,7 +7,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { Printer } from 'lucide-react'
 import { calculatePayroll } from '../lib/payrollCalc'
 import { VKSlipDocument } from '../components/VKSlipDocument'
-import '../styles/v2-tokens.css'
+import '../styles/tokens.css'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 function fmtNationality(n: string | null) {

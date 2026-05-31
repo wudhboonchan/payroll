@@ -6,7 +6,7 @@ import { useAppStore } from '../store/useAppStore'
 import { TopBar } from '../components/layout/TopBar'
 import { toast } from 'sonner'
 import { Copy, Check, RefreshCw, Link2, Search, FileDown, RotateCcw, AlertCircle, Smartphone, Eye, EyeOff } from 'lucide-react'
-import '../styles/v2-tokens.css'
+import '../styles/tokens.css'
 
 type SlipStatus = 'pending' | 'confirmed' | 'disputed' | 'auto_confirmed'
 type FilterStatus = 'all' | SlipStatus

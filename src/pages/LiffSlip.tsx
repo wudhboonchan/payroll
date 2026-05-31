@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabase'
 import { getLiffProfile } from '../lib/liff'
 import type { SlipIncomeRow, SlipDeductRow } from '../components/VKSlipDocument'
 import { ShieldAlert, Eye, Loader2, AlertCircle, Link2, CheckCircle2 } from 'lucide-react'
-import '../styles/v2-tokens.css'
+import '../styles/tokens.css'
 
 // ── types ─────────────────────────────────────────────────────────────────────
 type PageState = 'loading' | 'link' | 'slip' | 'no_slip' | 'error'

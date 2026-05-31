@@ -7,7 +7,7 @@ import { TopBar } from '../components/layout/TopBar'
 import EmployeeFormModal from './EmployeeFormModal'
 import EmployeeImportModal from './EmployeeImportModal'
 import { Plus, Upload, Search, AlertCircle, UserX, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
-import '../styles/v2-tokens.css'
+import '../styles/tokens.css'
 
 function fmtNationality(nationality: string | null) {
   if (!nationality || nationality === 'ไทย') return 'ไทย'

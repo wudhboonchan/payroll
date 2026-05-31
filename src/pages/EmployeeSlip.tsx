@@ -11,7 +11,7 @@ import { Button } from '../components/ui/button'
 import { Label } from '../components/ui/label'
 
 import { CheckCircle2, AlertCircle, Clock, Loader2, ShieldAlert, Eye } from 'lucide-react'
-import '../styles/v2-tokens.css'
+import '../styles/tokens.css'
 
 interface PayslipRPCResponse {
   token_data: {

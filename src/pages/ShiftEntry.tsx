@@ -6,7 +6,7 @@ import { useAppStore } from '../store/useAppStore'
 import { TopBar } from '../components/layout/TopBar'
 import { toast } from 'sonner'
 import { ChevronLeft, ChevronRight, Save, X, Clock, Clock4, CheckSquare, Search } from 'lucide-react'
-import '../styles/v2-tokens.css'
+import '../styles/tokens.css'
 
 // ── helpers ────────────────────────────────────────────────────────────
 function parseLocal(s: string) { const [y,m,d]=s.split('-').map(Number); return new Date(y,m-1,d) }

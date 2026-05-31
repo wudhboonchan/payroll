@@ -6,7 +6,7 @@ import { TopBar } from '../components/layout/TopBar'
 import { useState } from 'react'
 import { Plus, Trash2, Pencil, AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
-import '../styles/v2-tokens.css'
+import '../styles/tokens.css'
 
 function fmtNationality(nationality: string | null) {
   if (!nationality || nationality === 'ไทย') return null

@@ -8,7 +8,7 @@ import { toast } from 'sonner'
 import { Save, CheckCircle2, AlertCircle } from 'lucide-react'
 import { calculatePayroll } from '../lib/payrollCalc'
 import type { PayrollCalculationInput } from '../lib/payrollCalc'
-import '../styles/v2-tokens.css'
+import '../styles/tokens.css'
 
 interface Employee {
   id: string; employee_code: string; first_name: string; last_name: string

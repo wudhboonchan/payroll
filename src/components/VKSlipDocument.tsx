@@ -3,7 +3,7 @@
  * and the public EmployeeSlip page.  All styling is inline so it works inside a
  * popup print window without any external CSS file.
  */
-import '../styles/v2-tokens.css'
+import '../styles/tokens.css'
 
 export interface SlipIncomeRow {
   label: string

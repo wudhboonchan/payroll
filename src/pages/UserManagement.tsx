@@ -7,7 +7,7 @@ import { TopBar } from '../components/layout/TopBar'
 import { useState } from 'react'
 import { Plus, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
-import '../styles/v2-tokens.css'
+import '../styles/tokens.css'
 
 // Admin client — uses service role key to create users without email confirmation / rate limits
 const adminClient = createClient(

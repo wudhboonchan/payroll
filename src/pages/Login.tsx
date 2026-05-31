@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAppStore } from '../store/useAppStore'
 import { toast } from 'sonner'
-import '../styles/v2-tokens.css'
+import '../styles/tokens.css'
 
 export default function Login() {
   const navigate = useNavigate()

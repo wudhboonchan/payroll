@@ -12,7 +12,7 @@ import {
   parseEmployeeExcel,
   type ParsedRow,
 } from '../lib/employeeExcel'
-import '../styles/v2-tokens.css'
+import '../styles/tokens.css'
 
 interface Props {
   isOpen: boolean

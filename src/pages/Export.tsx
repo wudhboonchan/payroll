@@ -9,7 +9,7 @@ import { Download, FileText, Grid3x3, ShieldCheck, Loader2, Search, Check, X } f
 import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
 import { formatPeriodLabel } from '../lib/formatters'
-import '../styles/v2-tokens.css'
+import '../styles/tokens.css'
 
 interface PayrollPeriod { id: string; period_start: string; period_end: string; status: string | null }
 

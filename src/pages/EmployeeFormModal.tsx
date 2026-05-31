@@ -8,7 +8,7 @@ import { useAppStore } from '@/store/useAppStore'
 import { toast } from 'sonner'
 import { UserPlus, X, AlertTriangle } from 'lucide-react'
 import { NATIONALITIES } from '@/lib/constants'
-import '../styles/v2-tokens.css'
+import '../styles/tokens.css'
 
 const employeeSchema = z
   .object({
