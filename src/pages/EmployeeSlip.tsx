@@ -213,7 +213,9 @@ export default function EmployeeSlip() {
     if (!slipData) return { income: [] as SlipIncomeRow[], deductions: [] as SlipDeductRow[], workingDays: 0, periodLabel: '', posLabel: '' }
 
     // Rates — derive from amounts same as PaySlipV2
-    const baseNormal  = 357
+    const parsedData = typeof rawData === 'string' ? JSON.parse(rawData) : rawData
+    const rate = Number(parsedData?.employee?.rate_per_12h) || 0
+    const baseNormal = rate === 0 ? 0 : 357
     // For clerks, rate_per_12h is in the RPC employee object. We approximate from amounts if needed.
     // We use days counts from slipData (populated from shift queries).
     const dn = slipData.days_normal ?? 0

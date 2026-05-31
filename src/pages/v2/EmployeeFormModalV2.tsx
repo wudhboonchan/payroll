@@ -24,7 +24,7 @@ const employeeSchema = z
     payment_method: z.enum(['cash', 'bank_transfer']),
     bank_name: z.string().optional(),
     bank_account: z.string().optional(),
-    rate_per_12h: z.coerce.number().min(1, 'กรุณาระบุค่าแรง'),
+    rate_per_12h: z.coerce.number().min(0, 'ค่าแรงต้องไม่น้อยกว่า 0'),
     status: z.enum(['active', 'inactive']).default('active'),
     notes: z.string().optional(),
     data_complete: z.boolean().default(false),

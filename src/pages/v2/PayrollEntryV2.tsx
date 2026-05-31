@@ -183,7 +183,7 @@ export default function PayrollEntryV2() {
     }
     // Rate breakdown values for display
     const rate = Number(selectedEmp.rate_per_12h) || 0
-    const baseNormal = 357
+    const baseNormal = rate === 0 ? 0 : 357
     const baseShift  = Math.max(0, rate - baseNormal)
     const clerkDaily = rate / 30
     const clerkHourly = clerkDaily / 8
@@ -300,8 +300,8 @@ export default function PayrollEntryV2() {
 
       <div className="vk-split">
         {/* Left panel — hidden on mobile when employee is selected */}
-        <div style={{ background: 'transparent', overflowY: 'auto', padding: '16px 12px', maxHeight: '40vh' }}
-          className={`md:max-h-none ${selectedEmpId ? 'hidden md:block' : ''}`}>
+        <div style={{ padding: '16px 12px' }}
+          className={`vk-sidebar-scrollable vk-sidebar-scrollable-payroll ${selectedEmpId ? 'hidden md:block' : ''}`}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
             <div className="vk-eyebrow">พนักงาน ({employees.length})</div>
           </div>
@@ -316,12 +316,9 @@ export default function PayrollEntryV2() {
             const active = emp.id === selectedEmpId
             return (
               <div key={emp.id} onClick={() => setSelectedEmpId(emp.id)}
-                style={{
-                  padding: '9px 12px', marginBottom: 4, cursor: 'pointer',
-                  background: active ? 'var(--vk-persimmon-tint)' : 'var(--vk-paper)',
-                  border: `1px solid ${active ? 'var(--vk-persimmon)' : 'var(--vk-rule-soft)'}`,
-                  transition: 'all 120ms',
-                }}>
+                className="vk-employee-card"
+                data-selected={active}>
+
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{
                     width: 8, height: 8, borderRadius: '50%', flexShrink: 0,

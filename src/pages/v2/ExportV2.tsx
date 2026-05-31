@@ -70,7 +70,7 @@ function buildSlipHtml(entry: any, period: any, shifts: any[], branchName: strin
 
   // ── rate breakdown ──
   const empRate    = Number(emp.rate_per_12h) || 0
-  const baseNormal = 357
+  const baseNormal = empRate === 0 ? 0 : 357
   const baseShift  = Math.max(0, empRate - baseNormal)
   const clerkDaily = empRate / 30
   const clerkHourly = clerkDaily / 8

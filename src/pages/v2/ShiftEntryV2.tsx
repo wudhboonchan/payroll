@@ -330,7 +330,7 @@ export default function ShiftEntryV2() {
 
       <div className="vk-shift-split">
         {/* Pool */}
-        <div style={{ padding: '16px 14px', background: 'transparent', overflowY: 'auto', maxHeight: '35vh' }} className="md:max-h-none">
+        <div style={{ padding: '16px 14px' }} className="vk-sidebar-scrollable vk-sidebar-scrollable-shift">
           {/* Pool header with select-all */}
           <div style={{ marginBottom: 10 }}>
             <div className="vk-eyebrow" style={{ marginBottom: 6 }}>POOL · ยังไม่ได้กรอก ({pool.length})</div>
@@ -358,14 +358,10 @@ export default function ShiftEntryV2() {
             return (
               <div key={emp.id}
                 onClick={() => !isBlockedClerk && toggleSelect(emp)}
-                style={{
-                  padding: '9px 12px', marginBottom: 5, cursor: isBlockedClerk ? 'not-allowed' : 'pointer', borderRadius: 4,
-                  background: isSelected ? 'var(--vk-persimmon-tint)' : 'var(--vk-paper)',
-                  border: `1px solid ${isSelected ? 'var(--vk-persimmon)' : 'var(--vk-rule-soft)'}`,
-                  opacity: isBlockedClerk ? 0.4 : 1,
-                  transition: 'all 120ms',
-                  display: 'flex', alignItems: 'center', gap: 10,
-                }}>
+                className="vk-employee-card"
+                data-selected={isSelected}
+                data-blocked={isBlockedClerk}>
+
                 {/* Checkbox indicator */}
                 <div style={{
                   width: 16, height: 16, borderRadius: 4, flexShrink: 0,

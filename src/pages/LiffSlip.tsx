@@ -410,7 +410,7 @@ export default function LiffSlip() {
     const amtOt1x   = isClerk ? computed_ot_1x : 0
 
     // formula details (same as EmployeeSlip)
-    const baseNormal = 357
+    const baseNormal = Number(emp.rate_per_12h) === 0 ? 0 : 357
     const dnDays = days_normal
     const dsDays = isClerk ? shifts.filter(s => isWeekend(new Date(s.work_date)) && !s.is_holiday_ot).length : days_shift
     const dn = dnDays > 0 ? Number(entry.amount_normal || 0) / dnDays : 0

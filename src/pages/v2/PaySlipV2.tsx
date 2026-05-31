@@ -221,7 +221,7 @@ export default function PaySlipV2() {
 
   // ── rate breakdown ──
   const empRate     = Number(selectedEmp?.rate_per_12h) || 0
-  const baseNormal  = 357
+  const baseNormal  = empRate === 0 ? 0 : 357
   const baseShift   = Math.max(0, empRate - baseNormal)
   const clerkDaily  = empRate / 30
   const clerkHourly = clerkDaily / 8
@@ -330,8 +330,8 @@ export default function PaySlipV2() {
       <div className="vk-split">
 
         {/* ── Left panel — hidden on mobile when employee is selected ── */}
-        <div style={{ background: 'transparent', overflowY: 'auto', padding: '16px 12px', maxHeight: '40vh' }}
-          className={`md:max-h-none ${selectedEmpId ? 'hidden md:block' : ''}`}>
+        <div style={{ padding: '16px 12px' }}
+          className={`vk-sidebar-scrollable vk-sidebar-scrollable-payroll ${selectedEmpId ? 'hidden md:block' : ''}`}>
           <div className="vk-eyebrow" style={{ marginBottom: 8 }}>พนักงาน ({employees.length})</div>
           <div style={{ display: 'flex', gap: 8, fontSize: 10, color: 'var(--vk-ink-3)', marginBottom: 10, flexWrap: 'wrap' }}>
             <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
@@ -348,12 +348,9 @@ export default function PaySlipV2() {
             const n = fmtNationality(emp.nationality)
             return (
               <div key={emp.id} onClick={() => setSelectedEmpId(emp.id)}
-                style={{
-                  padding: '9px 12px', marginBottom: 4, cursor: 'pointer',
-                  background: active ? 'var(--vk-persimmon-tint)' : 'var(--vk-paper)',
-                  border: `1px solid ${active ? 'var(--vk-persimmon)' : 'var(--vk-rule-soft)'}`,
-                  transition: 'all 120ms',
-                }}>
+                className="vk-employee-card"
+                data-selected={active}>
+
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, background: hasSaved ? 'var(--vk-jade)' : '#d4cfc9' }} />
                   <div style={{ minWidth: 0, flex: 1 }}>

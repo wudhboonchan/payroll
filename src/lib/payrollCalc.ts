@@ -102,7 +102,8 @@ export function calculateTraPhetPayroll(input: PayrollCalculationInput): Payroll
   const totalNormalDays = fullShiftDays + half_shift_days;
 
   // New Logic: Normal pay is fixed at 357 THB per 8h. Shift pay is the remainder of the daily rate.
-  const base_normal_rate = 357;
+  // If rate_per_12h is 0, they receive 0 base wage.
+  const base_normal_rate = rate_per_12h === 0 ? 0 : 357;
   const base_shift_rate = Math.max(0, rate_per_12h - base_normal_rate);
 
   // Normal pay = 357 * totalNormalDays (including half shift days which only get 8h)

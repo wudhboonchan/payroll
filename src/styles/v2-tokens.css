@@ -313,22 +313,22 @@ html, body, #root {
 @media (min-width: 768px) {
   .vk-split {
     display: grid;
-    grid-template-columns: 256px 1fr;
+    grid-template-columns: 300px 1fr;
     align-items: stretch;
     flex: 1;
     min-height: 0;
     /* Full-height column bg + divider painted on container */
     background: linear-gradient(
       to right,
-      var(--vk-bone) 255px,
-      var(--vk-rule) 255px,
-      var(--vk-rule) 256px,
-      var(--vk-paper) 256px
+      var(--vk-bone) 299px,
+      var(--vk-rule) 299px,
+      var(--vk-rule) 300px,
+      var(--vk-paper) 300px
     );
   }
 }
 
-/* Shift split (240px sidebar + content) */
+/* Shift split (300px sidebar + content) */
 .vk-shift-split {
   display: flex;
   flex-direction: column;
@@ -338,7 +338,7 @@ html, body, #root {
 @media (min-width: 768px) {
   .vk-shift-split {
     display: grid;
-    grid-template-columns: 240px 1fr;
+    grid-template-columns: 300px 1fr;
     align-items: stretch;
     flex: 1;
     min-height: 0;
@@ -346,13 +346,73 @@ html, body, #root {
        so it always fills full height no matter how tall the content is */
     background: linear-gradient(
       to right,
-      var(--vk-bone) 239px,
-      var(--vk-rule) 239px,
-      var(--vk-rule) 240px,
-      var(--vk-bone) 240px
+      var(--vk-bone) 299px,
+      var(--vk-rule) 299px,
+      var(--vk-rule) 300px,
+      var(--vk-bone) 300px
     );
   }
 }
+
+/* Responsive scrollable sidebar panel */
+.vk-sidebar-scrollable {
+  background: transparent;
+  overflow-y: auto;
+  box-sizing: border-box;
+}
+
+.vk-sidebar-scrollable-shift {
+  max-height: 35vh;
+}
+
+.vk-sidebar-scrollable-payroll {
+  max-height: 40vh;
+}
+
+@media (min-width: 768px) {
+  .vk-sidebar-scrollable {
+    min-height: 0;
+    height: 100%;
+  }
+  .vk-sidebar-scrollable-shift,
+  .vk-sidebar-scrollable-payroll {
+    max-height: none;
+  }
+}
+
+/* Premium Employee cards in list/pool */
+.vk-employee-card {
+  padding: 10px 14px;
+  margin-bottom: 6px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #ffffff;
+  border: 1px solid var(--vk-rule-soft);
+  cursor: pointer;
+  transition: all var(--vk-dur) var(--vk-ease);
+  box-shadow: 0 1px 3px rgba(29, 26, 21, 0.03);
+}
+
+.vk-employee-card:hover:not([data-blocked="true"]) {
+  transform: translateY(-1px);
+  border-color: var(--vk-persimmon);
+  box-shadow: 0 4px 12px rgba(29, 26, 21, 0.06);
+}
+
+.vk-employee-card[data-selected="true"] {
+  background: var(--vk-persimmon-tint) !important;
+  border-color: var(--vk-persimmon) !important;
+  box-shadow: 0 2px 6px rgba(177, 71, 41, 0.08) !important;
+}
+
+.vk-employee-card[data-blocked="true"] {
+  opacity: 0.4;
+  cursor: not-allowed;
+  background: var(--vk-paper-2);
+}
+
 
 /* Stat card cell borders — 2-col mobile grid border resets */
 .vk-grid-4 > *:nth-child(odd)  { border-right: 1px solid var(--vk-rule); }
