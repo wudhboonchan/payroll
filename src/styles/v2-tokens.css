@@ -405,9 +405,10 @@ html, body, #root {
 @media (min-width: 768px) {
   .vk-pool-list {
     flex: 1;
-    min-height: 0;    /* critical: prevents flex child from ignoring overflow */
+    min-height: 0;
     overflow-y: auto;
-    -webkit-overflow-scrolling: touch; /* smooth scroll on all webkit browsers */
+    -webkit-overflow-scrolling: touch;
+    scrollbar-gutter: stable; /* reserves scrollbar space so it never overlaps the border */
   }
 }
 
