@@ -305,7 +305,7 @@ export default function ShiftEntryV2() {
       {/* Date strip */}
       <div style={{
         borderBottom: '1px solid var(--vk-rule)',
-        background: isHoliday ? 'var(--vk-marigold-tint)' : weekend ? 'rgba(120,60,180,0.04)' : 'var(--vk-bone)',
+        background: isHoliday ? 'var(--vk-marigold-tint)' : weekend ? '#FAF6FD' : 'var(--vk-bone)',
         padding: '8px 16px', display: 'flex', flexDirection: 'column', gap: 8,
         position: 'sticky',
         top: 'var(--vk-topbar-h)',
