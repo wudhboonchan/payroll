@@ -99,10 +99,13 @@ export default function Employees() {
   const activeLabel = showPendingOnly ? `ข้อมูลไม่ครบ (${pendingCount})` : showInactiveOnly ? `พ้นสภาพ (${inactiveCount})` : `ปกติ (${filtered.length})`
 
   return (
-    <>
+    // Fill the AppLayout inner-div as a flex column so we control our own scroll
+    <div className="vk-root" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+
       <TopBar title="ฐานข้อมูลพนักงาน" subtitle={activeLabel} onMenuClick={onMenuClick} />
 
-      <div className="vk-page">
+      {/* ── Controls area (never scrolls) ─────────────────────────── */}
+      <div style={{ flexShrink: 0, padding: '28px 36px 12px', maxWidth: 1136, width: '100%', margin: '0 auto', boxSizing: 'border-box' }}>
 
         {/* Header row */}
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20, gap: 12, flexWrap: 'wrap' }}>
@@ -135,8 +138,7 @@ export default function Employees() {
         </div>
 
         {/* Filters — row 2: filter buttons */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-          {/* Pending filter */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <button
             onClick={() => { setShowPendingOnly(p => !p); setShowInactiveOnly(false) }}
             style={{
@@ -153,8 +155,6 @@ export default function Employees() {
               <span style={{ background: 'var(--vk-marigold)', color: '#fff', borderRadius: 999, fontSize: 11, fontWeight: 700, padding: '0 6px', lineHeight: '18px' }}>{pendingCount}</span>
             )}
           </button>
-
-          {/* Inactive filter */}
           <button
             onClick={() => { setShowInactiveOnly(p => !p); setShowPendingOnly(false) }}
             style={{
@@ -172,7 +172,12 @@ export default function Employees() {
             )}
           </button>
         </div>
+      </div>
 
+      {/* ── Table scroll area — full width so scrollbar doesn't eat into table ── */}
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+      {/* Inner wrapper matches controls maxWidth so columns align */}
+      <div style={{ maxWidth: 1136, width: '100%', margin: '0 auto', padding: '0 36px 48px', boxSizing: 'border-box' }}>
         {isLoading ? (
           <div style={{ padding: '60px 0', textAlign: 'center' }} className="vk-eyebrow">กำลังโหลด...</div>
         ) : sorted.length === 0 ? (
@@ -181,12 +186,9 @@ export default function Employees() {
             <div className="vk-small" style={{ color: 'var(--vk-ink-3)' }}>ลองเปลี่ยนคำค้นหา หรือเพิ่มพนักงานใหม่</div>
           </div>
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0 }}>
-            <thead style={{
-              position: 'sticky',
-              top: 'var(--vk-topbar-h)',
-              zIndex: 20,
-            }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            {/* thead sticky at top:0 of THIS scroll container — always works, zero bleed-through */}
+            <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
               <tr>
                 {[
                   { label: 'รหัส',           col: 'employee_code' as SortCol, align: 'left'  },
@@ -260,9 +262,10 @@ export default function Employees() {
             </tbody>
           </table>
         )}
-      </div>
+      </div>{/* end inner wrapper */}
+      </div>{/* end table scroll area */}
 
-      {/* Reuse existing EmployeeFormModal — works the same as V1 */}
+      {/* Modals */}
       {isModalOpen && (
         <EmployeeFormModal
           isOpen={isModalOpen}
@@ -276,6 +279,6 @@ export default function Employees() {
         isOpen={isImportOpen}
         onClose={() => setIsImportOpen(false)}
       />
-    </>
+    </div>
   )
 }
