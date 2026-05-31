@@ -182,7 +182,11 @@ export default function Employees() {
           </div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0 }}>
-            <thead>
+            <thead style={{
+              position: 'sticky',
+              top: 'var(--vk-topbar-h)',
+              zIndex: 20,
+            }}>
               <tr>
                 {[
                   { label: 'รหัส',           col: 'employee_code' as SortCol, align: 'left'  },
@@ -200,12 +204,9 @@ export default function Employees() {
                       textAlign: h.align as any,
                       fontFamily: 'var(--vk-sans)', fontWeight: 600, fontSize: 11,
                       textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--vk-ink-3)',
-                      padding: '12px 14px', boxShadow: 'inset 0 -1px 0 var(--vk-rule)',
+                      padding: '12px 14px', borderBottom: '1px solid var(--vk-rule)',
                       background: 'var(--vk-paper)', cursor: h.col ? 'pointer' : 'default',
                       whiteSpace: 'nowrap', userSelect: 'none',
-                      position: 'sticky',
-                      top: 'var(--vk-topbar-h)',
-                      zIndex: 10,
                     }}>
                     <span style={{ display: 'inline-flex', alignItems: 'center' }}>
                       {h.label}{h.col && <SortIcon col={h.col} />}
