@@ -487,13 +487,14 @@ export default function ShiftEntryV2() {
                   cursor: canDrop ? 'pointer' : 'default',
                   transition: 'outline-color 160ms',
                 }}>
-                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '16px 16px 12px', borderBottom: '1px solid var(--vk-rule-soft)', flexShrink: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '16px 16px 10px', flexShrink: 0 }}>
                   <div>
                     <div style={{ fontFamily: 'var(--vk-sans)', fontWeight: 800, fontSize: 22, letterSpacing: '-0.02em', color: 'var(--vk-ink)' }}>{sh.label}</div>
                     <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 12, color: 'var(--vk-ink-3)', marginTop: 2 }}>{sh.hours}</div>
                   </div>
                   <span style={{ fontFamily: 'var(--vk-mono)', fontSize: 13, fontWeight: 700, color: 'var(--vk-ink-3)' }}>{shiftEmps.length} คน</span>
                 </div>
+                <div style={{ margin: '0 16px 4px', borderTop: '1px solid var(--vk-rule-soft)', flexShrink: 0 }} />
                 <div className="vk-shift-list-scroll">
                   {shiftEmps.map(emp => (
                     <div key={emp.employee_id}
