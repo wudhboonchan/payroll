@@ -341,18 +341,10 @@ html, body, #root {
     display: grid;
     grid-template-columns: 300px 1fr;
     align-items: stretch;
-    /* Height is set by JS (splitHeight) measuring actual top position.
-       calc() fallback for first paint before JS runs. */
     height: calc(100dvh - var(--vk-topbar-h) - var(--vk-date-strip-h));
     min-height: 0;
     overflow: hidden;
-    background: linear-gradient(
-      to right,
-      var(--vk-bone) 299px,
-      var(--vk-rule) 299px,
-      var(--vk-rule) 300px,
-      var(--vk-bone) 300px
-    );
+    background: var(--vk-bone);
   }
 }
 
@@ -386,9 +378,10 @@ html, body, #root {
 }
 @media (min-width: 768px) {
   .vk-pool-wrapper {
-    height: 100%;   /* parent (.vk-shift-split) now has explicit px height → this works */
-    min-height: 0;  /* allow shrinking below content size so overflow-y activates */
+    height: 100%;
+    min-height: 0;
     overflow: hidden;
+    border-right: 1px solid var(--vk-rule); /* border on the element itself, never overlapped by scrollbar */
   }
 }
 
