@@ -63,6 +63,21 @@ export default function ShiftEntryV2() {
   const [clerkQueue, setClerkQueue] = useState<AssignedEmp[]>([])
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
   const confirmResolveRef = useRef<(ok: boolean) => void>(null as any)
+  const splitRef = useRef<HTMLDivElement>(null)
+  const [splitHeight, setSplitHeight] = useState<number | null>(null)
+
+  // Measure actual top position of the split panel so Chrome/Edge lock scroll correctly.
+  // calc(100vh - X) breaks when parent has overflow:auto; measuring avoids that.
+  useEffect(() => {
+    const update = () => {
+      if (splitRef.current) {
+        setSplitHeight(window.innerHeight - splitRef.current.getBoundingClientRect().top)
+      }
+    }
+    update()
+    window.addEventListener('resize', update)
+    return () => window.removeEventListener('resize', update)
+  }, [])
 
   // ── periods ──
   const { data: periods = [] } = useQuery<Period[]>({
@@ -361,9 +376,9 @@ export default function ShiftEntryV2() {
         </div>
       </div>
 
-      <div className="vk-shift-split">
+      <div ref={splitRef} className="vk-shift-split" style={splitHeight ? { height: splitHeight } : undefined}>
         {/* Pool */}
-        <div className="vk-pool-wrapper vk-sidebar-scrollable vk-sidebar-scrollable-shift" style={{ overflow: 'hidden' }}>
+        <div className="vk-pool-wrapper">
           {/* Pool header with search & select-all */}
           <div className="vk-pool-header">
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
@@ -451,33 +466,30 @@ export default function ShiftEntryV2() {
           </div>
         </div>
 
-        {/* Shift columns */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0, overflow: 'hidden', alignItems: 'stretch', height: '100%' }}>
+        {/* Shift columns container */}
+        <div className="vk-shift-columns-container">
           {SHIFTS.map(sh => {
             const shiftEmps = assignments.filter(a => a.shift_type === sh.key)
             const canDrop = hasSelection
             return (
               <div key={sh.key}
                 onClick={() => { if (hasSelection) handleAssign(sh.key) }}
+                className="vk-shift-column"
                 style={{
-                  background: 'var(--vk-bone)',
                   borderRight: sh.key === 'morning' ? '1px solid var(--vk-rule-soft)' : 'none',
                   outline: canDrop ? `2px solid var(--vk-persimmon)` : 'none',
                   outlineOffset: -2,
-                  padding: '20px 24px', cursor: canDrop ? 'pointer' : 'default',
+                  cursor: canDrop ? 'pointer' : 'default',
                   transition: 'outline-color 160ms',
-                  display: 'flex', flexDirection: 'column',
-                  height: '100%',
-                  overflow: 'hidden',
                 }}>
-                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 16, borderBottom: '1px solid var(--vk-rule-soft)', paddingBottom: 12, flexShrink: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '16px 16px 12px', borderBottom: '1px solid var(--vk-rule-soft)', flexShrink: 0 }}>
                   <div>
                     <div style={{ fontFamily: 'var(--vk-sans)', fontWeight: 800, fontSize: 22, letterSpacing: '-0.02em', color: 'var(--vk-ink)' }}>{sh.label}</div>
                     <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 12, color: 'var(--vk-ink-3)', marginTop: 2 }}>{sh.hours}</div>
                   </div>
                   <span style={{ fontFamily: 'var(--vk-mono)', fontSize: 13, fontWeight: 700, color: 'var(--vk-ink-3)' }}>{shiftEmps.length} คน</span>
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, overflowY: 'auto', paddingBottom: 20 }}>
+                <div className="vk-shift-list-scroll">
                   {shiftEmps.map(emp => (
                     <div key={emp.employee_id}
                        onClick={e => { e.stopPropagation(); setDetailEmp(emp) }}
