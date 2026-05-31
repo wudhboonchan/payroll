@@ -203,6 +203,9 @@ export default function EmployeesV2() {
                       padding: '12px 14px', borderBottom: '1px solid var(--vk-rule)',
                       background: 'var(--vk-paper)', cursor: h.col ? 'pointer' : 'default',
                       whiteSpace: 'nowrap', userSelect: 'none',
+                      position: 'sticky',
+                      top: 'var(--vk-topbar-h)',
+                      zIndex: 10,
                     }}>
                     <span style={{ display: 'inline-flex', alignItems: 'center' }}>
                       {h.label}{h.col && <SortIcon col={h.col} />}

@@ -342,6 +342,8 @@ html, body, #root {
     align-items: stretch;
     flex: 1;
     min-height: 0;
+    height: calc(100vh - var(--vk-topbar-h) - 93px - 41px);
+    overflow: hidden;
     /* Paint pool column bg + divider border as a gradient on the container itself
        so it always fills full height no matter how tall the content is */
     background: linear-gradient(

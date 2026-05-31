@@ -307,6 +307,9 @@ export default function ShiftEntryV2() {
         borderBottom: '1px solid var(--vk-rule)',
         background: isHoliday ? 'var(--vk-marigold-tint)' : weekend ? 'rgba(120,60,180,0.04)' : 'var(--vk-bone)',
         padding: '8px 16px', display: 'flex', flexDirection: 'column', gap: 8,
+        position: 'sticky',
+        top: 'var(--vk-topbar-h)',
+        zIndex: 20,
       }}>
         {/* Row 1: prev / date + weekend badge / next */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
@@ -449,7 +452,7 @@ export default function ShiftEntryV2() {
         </div>
 
         {/* Shift columns */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0, overflow: 'auto', alignItems: 'stretch' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0, overflow: 'hidden', alignItems: 'stretch', height: '100%' }}>
           {SHIFTS.map(sh => {
             const shiftEmps = assignments.filter(a => a.shift_type === sh.key)
             const canDrop = hasSelection
@@ -464,27 +467,28 @@ export default function ShiftEntryV2() {
                   padding: '20px 24px', cursor: canDrop ? 'pointer' : 'default',
                   transition: 'outline-color 160ms',
                   display: 'flex', flexDirection: 'column',
-                  minHeight: '100%',
+                  height: '100%',
+                  overflow: 'hidden',
                 }}>
-                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 16, borderBottom: '1px solid var(--vk-rule-soft)', paddingBottom: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 16, borderBottom: '1px solid var(--vk-rule-soft)', paddingBottom: 12, flexShrink: 0 }}>
                   <div>
                     <div style={{ fontFamily: 'var(--vk-sans)', fontWeight: 800, fontSize: 22, letterSpacing: '-0.02em', color: 'var(--vk-ink)' }}>{sh.label}</div>
                     <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 12, color: 'var(--vk-ink-3)', marginTop: 2 }}>{sh.hours}</div>
                   </div>
                   <span style={{ fontFamily: 'var(--vk-mono)', fontSize: 13, fontWeight: 700, color: 'var(--vk-ink-3)' }}>{shiftEmps.length} คน</span>
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, overflowY: 'auto', paddingBottom: 20 }}>
                   {shiftEmps.map(emp => (
                     <div key={emp.employee_id}
-                      onClick={e => { e.stopPropagation(); setDetailEmp(emp) }}
-                      style={{
-                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                        padding: '8px 12px', background: 'var(--vk-paper)',
-                        border: '1px solid var(--vk-rule-soft)', cursor: 'pointer',
-                        transition: 'border-color 120ms',
-                      }}
-                      onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--vk-persimmon)')}
-                      onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--vk-rule-soft)')}>
+                       onClick={e => { e.stopPropagation(); setDetailEmp(emp) }}
+                       style={{
+                         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                         padding: '8px 12px', background: 'var(--vk-paper)',
+                         border: '1px solid var(--vk-rule-soft)', cursor: 'pointer',
+                         transition: 'border-color 120ms',
+                       }}
+                       onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--vk-persimmon)')}
+                       onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--vk-rule-soft)')}>
                       <div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                           <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--vk-ink)' }}>
