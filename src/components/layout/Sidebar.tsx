@@ -1,7 +1,7 @@
 import { Link, useLocation } from 'react-router-dom'
 import { useEffect, useState } from 'react'
-import { useAppStore } from '../../../store/useAppStore'
-import { supabase } from '../../../lib/supabase'
+import { useAppStore } from '../../store/useAppStore'
+import { supabase } from '../../lib/supabase'
 import { toast } from 'sonner'
 import {
   LayoutDashboard, Users, CalendarClock, Calculator,
@@ -11,7 +11,7 @@ import {
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuSeparator, DropdownMenuTrigger,
-} from '../../ui/dropdown-menu'
+} from '../ui/dropdown-menu'
 
 interface Factory { id: string; name: string; companies: any }
 
