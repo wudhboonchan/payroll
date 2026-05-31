@@ -1,12 +1,12 @@
 import { useOutletContext } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { supabase } from '../../lib/supabase'
-import { useAppStore } from '../../store/useAppStore'
-import { TopBarV2 } from '../../components/v2/layout/TopBarV2'
+import { supabase } from '../lib/supabase'
+import { useAppStore } from '../store/useAppStore'
+import { TopBar } from '../components/layout/TopBar'
 import { useState } from 'react'
 import { Plus, Trash2, Pencil, AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
-import '../../styles/v2-tokens.css'
+import '../styles/v2-tokens.css'
 
 function fmtNationality(nationality: string | null) {
   if (!nationality || nationality === 'ไทย') return null
@@ -14,7 +14,7 @@ function fmtNationality(nationality: string | null) {
   return nationality
 }
 
-export default function AdvancesV2() {
+export default function Advances() {
   const { onMenuClick } = useOutletContext<{ onMenuClick: () => void }>()
   const { user } = useAppStore()
   const queryClient = useQueryClient()
@@ -120,7 +120,7 @@ export default function AdvancesV2() {
 
   return (
     <>
-      <TopBarV2 title="เบิกล่วงหน้า" subtitle={currentPeriod?.label} onMenuClick={onMenuClick} />
+      <TopBar title="เบิกล่วงหน้า" subtitle={currentPeriod?.label} onMenuClick={onMenuClick} />
 
       <div className="vk-page">
         {/* Header */}

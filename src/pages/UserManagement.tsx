@@ -1,269 +1,164 @@
-import { useState } from 'react'
+import { useOutletContext } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { createClient } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 import { useAppStore } from '../store/useAppStore'
 import { TopBar } from '../components/layout/TopBar'
-import { Button } from '../components/ui/button'
-import { Input } from '../components/ui/input'
-import { Label } from '../components/ui/label'
-import { Badge } from '../components/ui/badge'
+import { useState } from 'react'
+import { Plus, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
-import { Plus, Trash2, X, Users, Building2 } from 'lucide-react'
+import '../styles/v2-tokens.css'
 
-interface Profile {
-  id: string
-  full_name: string | null
-  role: string | null
-  factory_id: string | null
-  factory?: { name: string } | null
-}
-
-interface Factory {
-  id: string
-  name: string
-}
-
-// Separate client with no session persistence — for creating users without affecting admin session
-const tempClient = createClient(
-  `${window.location.origin}/supabase-api`,
-  import.meta.env.VITE_SUPABASE_ANON_KEY || '',
+// Admin client — uses service role key to create users without email confirmation / rate limits
+const adminClient = createClient(
+  import.meta.env.VITE_SUPABASE_URL || '',
+  import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY || '',
   { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } }
 )
 
 export default function UserManagement() {
+  const { onMenuClick } = useOutletContext<{ onMenuClick: () => void }>()
   const { user } = useAppStore()
   const queryClient = useQueryClient()
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [form, setForm] = useState({ email: '', password: '', full_name: '', factory_id: '' })
   const [formError, setFormError] = useState('')
 
-  const { data: profiles = [], isLoading } = useQuery({
+  const { data: profiles = [] } = useQuery<any[]>({
     queryKey: ['user-profiles'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('id, full_name, role, factory_id, factory:factories(name)')
-        .eq('role', 'normalUser')
-        .order('full_name')
-      if (error) throw error
-      return data as Profile[]
+      const { data, error } = await adminClient.from('profiles').select('id,full_name,role,factory_id,factory:factories(name)').eq('role','normalUser').order('full_name')
+      if (error) throw error; return data
     },
+    staleTime: 0,
   })
 
-  const { data: factories = [] } = useQuery({
+  const { data: factories = [] } = useQuery<any[]>({
     queryKey: ['all-factories'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('factories')
-        .select('id, name')
-        .order('name')
-      if (error) throw error
-      return data as Factory[]
+      const { data, error } = await supabase.from('factories').select('id,name').order('name')
+      if (error) throw error; return data
     },
   })
 
   const createMutation = useMutation({
     mutationFn: async () => {
       setFormError('')
-      if (!form.email || !form.password || !form.full_name || !form.factory_id) {
-        throw new Error('กรุณากรอกข้อมูลให้ครบทุกช่อง')
-      }
-      if (form.password.length < 6) {
-        throw new Error('รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร')
-      }
-
-      // Sign up via temp client (won't affect current admin session)
-      const { data: signUpData, error: signUpError } = await tempClient.auth.signUp({
-        email: form.email,
-        password: form.password,
+      if (!form.email || !form.password || !form.full_name || !form.factory_id) throw new Error('กรุณากรอกข้อมูลให้ครบทุกช่อง')
+      if (form.password.length < 6) throw new Error('รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร')
+      // Use admin API — no confirmation email, no rate limit
+      const { data: createData, error: signUpError } = await adminClient.auth.admin.createUser({
+        email: form.email, password: form.password, email_confirm: true,
       })
       if (signUpError) throw signUpError
-      if (!signUpData.user) throw new Error('ไม่สามารถสร้างบัญชีได้')
-
-      // Upsert profile
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .upsert({
-          id: signUpData.user.id,
-          full_name: form.full_name,
-          role: 'normalUser',
-          factory_id: form.factory_id,
-        })
+      if (!createData.user) throw new Error('ไม่สามารถสร้างบัญชีได้')
+      // Admin client has service role → bypasses RLS
+      const { error: profileError } = await adminClient.from('profiles').upsert({
+        id: createData.user.id, full_name: form.full_name, role: 'normalUser', factory_id: form.factory_id,
+      })
       if (profileError) throw profileError
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['user-profiles'] })
+      queryClient.refetchQueries({ queryKey: ['user-profiles'] })
       toast.success('สร้างผู้ใช้เรียบร้อยแล้ว')
       setIsModalOpen(false)
       setForm({ email: '', password: '', full_name: '', factory_id: '' })
     },
-    onError: (e: Error) => {
-      setFormError(e.message)
-    },
+    onError: (e: Error) => setFormError(e.message),
   })
 
   const deleteMutation = useMutation({
-    mutationFn: async (profileId: string) => {
-      const { error } = await supabase
-        .from('profiles')
-        .delete()
-        .eq('id', profileId)
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from('profiles').delete().eq('id', id)
       if (error) throw error
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['user-profiles'] })
-      toast.success('ลบผู้ใช้เรียบร้อยแล้ว')
-    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['user-profiles'] }); toast.success('ลบผู้ใช้แล้ว') },
     onError: (e: Error) => toast.error('ลบไม่สำเร็จ', { description: e.message }),
   })
 
-  const handleDelete = (p: Profile) => {
-    if (!window.confirm(`ยืนยันการลบผู้ใช้ "${p.full_name || p.id}"?\n\nผู้ใช้จะไม่สามารถล็อกอินได้อีก`)) return
-    deleteMutation.mutate(p.id)
-  }
-
-  if (user?.role !== 'admin') {
-    return null
-  }
-
-  const roleLabel = (role: string | null) => {
-    if (role === 'superUser') return { label: 'SuperAdmin', cls: 'bg-purple-100 text-purple-700 border-purple-200' }
-    return { label: 'User', cls: 'bg-slate-100 text-slate-600 border-slate-200' }
-  }
+  if (user?.role !== 'admin') return null
 
   return (
     <>
-      <TopBar title="จัดการผู้ใช้งาน" />
+      <TopBar title="จัดการผู้ใช้งาน" onMenuClick={onMenuClick} />
 
-      <div className="p-4 md:p-8 max-w-3xl">
-        <div className="flex items-center justify-between mb-6">
-          <p className="text-sm text-slate-500">ผู้ใช้งานทั้งหมด {profiles.length} คน</p>
-          <Button
-            onClick={() => { setFormError(''); setIsModalOpen(true) }}
-            className="bg-[#1D9E75] hover:bg-[#157a5a] h-10 px-5"
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            เพิ่มผู้ใช้ใหม่
-          </Button>
+      <div className="vk-page" style={{ maxWidth: 760 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 28 }}>
+          <div>
+            <div className="vk-eyebrow" style={{ marginBottom: 4 }}>USER MANAGEMENT · จัดการผู้ใช้งาน</div>
+            <div style={{ fontFamily: 'var(--vk-sans)', fontWeight: 700, fontSize: 24, letterSpacing: '-0.02em' }}>
+              ผู้ใช้งานทั้งหมด <span style={{ fontFamily: 'var(--vk-mono)', fontWeight: 600, color: 'var(--vk-ink-3)', fontSize: 20 }}>{profiles.length} คน</span>
+            </div>
+          </div>
+          <button className="vk-btn vk-btn--primary" onClick={() => { setFormError(''); setIsModalOpen(true) }}>
+            <Plus style={{ width: 15, height: 15 }} /> เพิ่มผู้ใช้ใหม่
+          </button>
         </div>
 
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm divide-y divide-slate-100">
-          {isLoading ? (
-            <div className="py-12 text-center text-slate-400 text-sm">กำลังโหลด...</div>
-          ) : profiles.length === 0 ? (
-            <div className="py-12 text-center text-slate-400 text-sm">
-              <Users className="w-8 h-8 mx-auto mb-2 opacity-30" />
-              ยังไม่มีผู้ใช้งาน
-            </div>
-          ) : (
-            profiles.map(p => {
-              const { label, cls } = roleLabel(p.role)
-              return (
-                <div key={p.id} className="flex items-center justify-between px-5 py-4">
-                  <div className="flex items-center gap-4">
-                    <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0">
-                      <Users className="w-4 h-4 text-slate-400" />
-                    </div>
-                    <div>
-                      <p className="font-semibold text-slate-900 text-sm">{p.full_name || '—'}</p>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <Building2 className="w-3 h-3 text-slate-400" />
-                        <span className="text-xs text-slate-500">
-                          {(p.factory as any)?.name || 'ไม่ระบุโรงงาน'}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <Badge variant="outline" className={`text-xs ${cls}`}>{label}</Badge>
-                    {p.role !== 'superUser' && (
-                      <button
-                        onClick={() => handleDelete(p)}
-                        disabled={deleteMutation.isPending}
-                        className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    )}
+        <div style={{ border: '1px solid var(--vk-rule)', background: 'var(--vk-bone)' }}>
+          {profiles.length === 0 ? (
+            <div style={{ padding: '60px', textAlign: 'center' }} className="vk-eyebrow">ยังไม่มีผู้ใช้งาน</div>
+          ) : profiles.map((p, i) => (
+            <div key={p.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: i < profiles.length-1 ? '1px solid var(--vk-rule-soft)' : 'none' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'var(--vk-persimmon-tint)', color: 'var(--vk-persimmon-ink)', display: 'grid', placeItems: 'center', fontFamily: 'var(--vk-sans)', fontWeight: 700, fontSize: 14, flexShrink: 0 }}>
+                  {p.full_name?.charAt(0) || 'U'}
+                </div>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 14 }}>{p.full_name || '—'}</div>
+                  <div style={{ fontFamily: 'var(--vk-sans)', fontSize: 12, color: 'var(--vk-ink-3)', marginTop: 1 }}>
+                    {(p.factory as any)?.name || 'ไม่ระบุโรงงาน'}
                   </div>
                 </div>
-              )
-            })
-          )}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span className="vk-pill">User</span>
+                <button className="vk-btn vk-btn--ghost" style={{ width: 30, height: 30, padding: 0 }}
+                  onClick={() => { if (window.confirm(`ยืนยันการลบ "${p.full_name}"?`)) deleteMutation.mutate(p.id) }}
+                  disabled={deleteMutation.isPending}>
+                  <Trash2 style={{ width: 13, height: 13, color: 'var(--vk-crimson)' }} />
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 
-      {/* Create User Modal */}
       {isModalOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
-          onClick={() => setIsModalOpen(false)}
-        >
-          <div
-            className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4"
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="flex justify-between items-center">
-              <h2 className="text-lg font-bold text-slate-900">เพิ่มผู้ใช้งานใหม่</h2>
-              <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-600">
-                <X className="w-5 h-5" />
-              </button>
+        <div style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(22,19,17,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+          onClick={() => setIsModalOpen(false)}>
+          <div style={{ background: 'var(--vk-bone)', border: '1px solid var(--vk-rule)', padding: '32px', width: '100%', maxWidth: 400 }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+              <div style={{ fontFamily: 'var(--vk-sans)', fontWeight: 700, fontSize: 18, letterSpacing: '-0.01em' }}>เพิ่มผู้ใช้งานใหม่</div>
+              <button className="vk-btn vk-btn--ghost" style={{ width: 28, height: 28, padding: 0 }} onClick={() => setIsModalOpen(false)}><X style={{ width: 15, height: 15 }} /></button>
             </div>
-
-            <div className="space-y-3">
-              <div className="space-y-1.5">
-                <Label className="text-sm font-semibold text-slate-700">ชื่อ-นามสกุล <span className="text-red-500">*</span></Label>
-                <Input
-                  placeholder="เช่น สมชาย ใจดี"
-                  value={form.full_name}
-                  onChange={e => setForm(f => ({ ...f, full_name: e.target.value }))}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-sm font-semibold text-slate-700">อีเมล <span className="text-red-500">*</span></Label>
-                <Input
-                  type="email"
-                  placeholder="email@example.com"
-                  value={form.email}
-                  onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-sm font-semibold text-slate-700">รหัสผ่าน <span className="text-red-500">*</span></Label>
-                <Input
-                  type="password"
-                  placeholder="อย่างน้อย 6 ตัวอักษร"
-                  value={form.password}
-                  onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-sm font-semibold text-slate-700">โรงงาน <span className="text-red-500">*</span></Label>
-                <select
-                  value={form.factory_id}
-                  onChange={e => setForm(f => ({ ...f, factory_id: e.target.value }))}
-                  className="w-full h-9 border border-slate-200 rounded-md px-3 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1D9E75]/30"
-                >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {[
+                { label: 'ชื่อ-นามสกุล', key: 'full_name', placeholder: 'เช่น สมชาย ใจดี', type: 'text' },
+                { label: 'อีเมล', key: 'email', placeholder: 'email@example.com', type: 'email' },
+                { label: 'รหัสผ่าน', key: 'password', placeholder: 'อย่างน้อย 6 ตัวอักษร', type: 'password' },
+              ].map(f => (
+                <div key={f.key}>
+                  <label className="vk-eyebrow" style={{ display: 'block', marginBottom: 5 }}>{f.label} <span style={{ color: 'var(--vk-crimson)' }}>*</span></label>
+                  <input className="vk-input" type={f.type} placeholder={f.placeholder} value={(form as any)[f.key]} onChange={e => setForm(prev => ({ ...prev, [f.key]: e.target.value }))} />
+                </div>
+              ))}
+              <div>
+                <label className="vk-eyebrow" style={{ display: 'block', marginBottom: 5 }}>โรงงาน <span style={{ color: 'var(--vk-crimson)' }}>*</span></label>
+                <select className="vk-input" value={form.factory_id} onChange={e => setForm(f => ({ ...f, factory_id: e.target.value }))}>
                   <option value="">-- เลือกโรงงาน --</option>
-                  {factories.map(f => (
-                    <option key={f.id} value={f.id}>{f.name}</option>
-                  ))}
+                  {factories.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
                 </select>
               </div>
             </div>
-
-            {formError && (
-              <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{formError}</p>
-            )}
-
-            <Button
-              className="w-full bg-[#1D9E75] hover:bg-[#157a5a]"
-              disabled={createMutation.isPending}
-              onClick={() => createMutation.mutate()}
-            >
-              {createMutation.isPending ? 'กำลังสร้าง...' : 'สร้างผู้ใช้'}
-            </Button>
+            {formError && <div style={{ marginTop: 12, padding: '10px 14px', background: 'var(--vk-crimson-tint)', border: '1px solid var(--vk-crimson)', fontSize: 13, color: 'var(--vk-crimson)' }}>{formError}</div>}
+            <div style={{ display: 'flex', gap: 8, marginTop: 20 }}>
+              <button className="vk-btn vk-btn--primary" style={{ flex: 1 }} disabled={createMutation.isPending} onClick={() => createMutation.mutate()}>
+                {createMutation.isPending ? 'กำลังสร้าง...' : 'สร้างผู้ใช้'}
+              </button>
+              <button className="vk-btn" onClick={() => setIsModalOpen(false)}>ยกเลิก</button>
+            </div>
           </div>
         </div>
       )}

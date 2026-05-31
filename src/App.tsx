@@ -7,27 +7,14 @@ import Dashboard from './pages/Dashboard'
 import Employees from './pages/Employees'
 import ShiftEntry from './pages/ShiftEntry'
 import PayrollEntry from './pages/PayrollEntry'
-import AdvancePaymentsList from './pages/AdvancePayments'
-import PaySlipPage from './pages/PaySlip'
-import ExportPage from './pages/Export'
-import ShareLinksPage from './pages/ShareLinks'
+import Advances from './pages/Advances'
+import PaySlip from './pages/PaySlip'
+import Export from './pages/Export'
+import ShareLinks from './pages/ShareLinks'
 import EmployeeSlipPage from './pages/EmployeeSlip'
 import LiffSlip from './pages/LiffSlip'
-import SettingsPage from './pages/Settings'
-import AttendanceOverview from './pages/AttendanceOverview'
 import UserManagement from './pages/UserManagement'
 import { AppLayout, RequireAuth } from './components/layout/AppLayout'
-import { AppLayoutV2, RequireAuthV2 } from './components/v2/layout/AppLayoutV2'
-import LoginV2 from './pages/v2/LoginV2'
-import DashboardV2 from './pages/v2/DashboardV2'
-import EmployeesV2 from './pages/v2/EmployeesV2'
-import ShiftEntryV2 from './pages/v2/ShiftEntryV2'
-import PayrollEntryV2 from './pages/v2/PayrollEntryV2'
-import AdvancesV2 from './pages/v2/AdvancesV2'
-import PaySlipV2 from './pages/v2/PaySlipV2'
-import ShareLinksV2 from './pages/v2/ShareLinksV2'
-import ExportV2 from './pages/v2/ExportV2'
-import UserManagementV2 from './pages/v2/UserManagementV2'
 
 // Created once outside component to prevent re-instantiation on re-render
 const queryClient = new QueryClient({
@@ -59,52 +46,29 @@ function App() {
           ) : (
             <Routes>
               {/* ── Main App ─────────────────────────────────────── */}
-              <Route path="/login" element={<LoginV2 />} />
-              <Route element={<AppLayoutV2 />}>
-                <Route element={<RequireAuthV2 allowedRoles={['admin', 'superUser']} />}>
+              <Route path="/login" element={<Login />} />
+              <Route element={<AppLayout />}>
+                <Route element={<RequireAuth allowedRoles={['admin', 'superUser']} />}>
                   <Route path="/"           element={<Navigate to="/dashboard" replace />} />
-                  <Route path="/dashboard"  element={<DashboardV2 />} />
-                  <Route path="/employees"  element={<EmployeesV2 />} />
-                  <Route path="/shifts"     element={<ShiftEntryV2 />} />
-                  <Route path="/payroll"    element={<PayrollEntryV2 />} />
-                  <Route path="/advances"   element={<AdvancesV2 />} />
+                  <Route path="/dashboard"  element={<Dashboard />} />
+                  <Route path="/employees"  element={<Employees />} />
+                  <Route path="/shifts"     element={<ShiftEntry />} />
+                  <Route path="/payroll"    element={<PayrollEntry />} />
+                  <Route path="/advances"   element={<Advances />} />
                 </Route>
-                <Route element={<RequireAuthV2 allowedRoles={['admin', 'superUser', 'normalUser']} />}>
-                  <Route path="/payslip"    element={<PaySlipV2 />} />
-                  <Route path="/share-links" element={<ShareLinksV2 />} />
-                  <Route path="/export"     element={<ExportV2 />} />
+                <Route element={<RequireAuth allowedRoles={['admin', 'superUser', 'normalUser']} />}>
+                  <Route path="/payslip"    element={<PaySlip />} />
+                  <Route path="/share-links" element={<ShareLinks />} />
+                  <Route path="/export"     element={<Export />} />
                 </Route>
-                <Route element={<RequireAuthV2 allowedRoles={['admin']} />}>
-                  <Route path="/users"      element={<UserManagementV2 />} />
+                <Route element={<RequireAuth allowedRoles={['admin']} />}>
+                  <Route path="/users"      element={<UserManagement />} />
                 </Route>
               </Route>
 
-              {/* ── V1 Archive (reference only) ──────────────────────── */}
-              <Route path="/v1/login" element={<Login />} />
+              {/* ── Public pages ─────────────────────────────────── */}
               <Route path="/slip/:token" element={<EmployeeSlipPage />} />
               <Route path="/liff-slip"  element={<LiffSlip />} />
-              <Route element={<AppLayout />}>
-                <Route element={<RequireAuth allowedRoles={['admin', 'superUser']} />}>
-                  <Route path="/v1/dashboard"  element={<Dashboard />} />
-                  <Route path="/v1/employees"  element={<Employees />} />
-                  <Route path="/v1/shifts"     element={<ShiftEntry />} />
-                  <Route path="/v1/attendance" element={<AttendanceOverview />} />
-                  <Route path="/v1/payroll"    element={<PayrollEntry />} />
-                  <Route path="/v1/advances"   element={<AdvancePaymentsList />} />
-                  <Route path="/v1/settings"   element={<SettingsPage />} />
-                  <Route path="/v1"            element={<Navigate to="/v1/dashboard" replace />} />
-                </Route>
-                <Route element={<RequireAuth allowedRoles={['admin', 'superUser', 'normalUser']} />}>
-                  <Route path="/v1/payslip"    element={<PaySlipPage />} />
-                  <Route path="/v1/share-links" element={<ShareLinksPage />} />
-                </Route>
-                <Route element={<RequireAuth allowedRoles={['admin', 'superUser']} />}>
-                  <Route path="/v1/export"     element={<ExportPage />} />
-                </Route>
-                <Route element={<RequireAuth allowedRoles={['admin']} />}>
-                  <Route path="/v1/users"      element={<UserManagement />} />
-                </Route>
-              </Route>
 
               <Route path="*" element={<Navigate to="/login" replace />} />
             </Routes>

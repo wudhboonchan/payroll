@@ -1,87 +1,57 @@
 import { Link, useLocation } from 'react-router-dom'
-import { useState, useEffect } from 'react'
-import { useAppStore } from '../../store/useAppStore'
+import { useEffect, useState } from 'react'
+import { useAppStore } from '../../../store/useAppStore'
+import { supabase } from '../../../lib/supabase'
+import { toast } from 'sonner'
 import {
-  LayoutDashboard,
-  Users,
-  CalendarClock,
-  Calculator,
-  CreditCard,
-  FileText,
-  Download,
-  LogOut,
-  Building2,
-  KeyRound,
-  Link2,
-  ChevronDown,
-  X,
-  UserCog
+  LayoutDashboard, Users, CalendarClock, Calculator,
+  CreditCard, FileText, Download, LogOut,
+  Link2, UserCog, ChevronDown, X, Menu, KeyRound, Eye, EyeOff
 } from 'lucide-react'
-import { cn } from '../../lib/utils'
-import { supabase } from '../../lib/supabase'
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '../ui/dropdown-menu'
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuSeparator, DropdownMenuTrigger,
+} from '../../ui/dropdown-menu'
 
-interface SidebarProps {
-  isOpen: boolean
-  setIsOpen: (isOpen: boolean) => void
-}
+interface Factory { id: string; name: string; companies: any }
 
-interface Factory {
-  id: string
-  name: string
-  companies: {
-    id: string
-    name: string
-    short_name: string
-    company_type: string
-  } | {
-    id: string
-    name: string
-    short_name: string
-    company_type: string
-  }[]
-}
+const NAV = [
+  { href: '/dashboard',  label: 'Dashboard',         icon: LayoutDashboard, roles: ['admin','superUser'] },
+  { href: '/employees',  label: 'ฐานข้อมูลพนักงาน', icon: Users,           roles: ['admin','superUser'] },
+  { href: '/shifts',     label: 'กรอกกะรายวัน',      icon: CalendarClock,   roles: ['admin','superUser'] },
+  { href: '/advances',   label: 'เบิกล่วงหน้า',      icon: CreditCard,      roles: ['admin','superUser'] },
+  { href: '/payroll',    label: 'กรอกค่าจ้าง',       icon: Calculator,      roles: ['admin','superUser'] },
+  { href: '/payslip',    label: 'ดูสลิปเงินเดือน',   icon: FileText,        roles: ['admin','superUser','normalUser'] },
+  { href: '/share-links',label: 'ลิงก์สลิปพนักงาน',  icon: Link2,           roles: ['admin','superUser','normalUser'] },
+  { href: '/export',     label: 'ส่งออกข้อมูล',      icon: Download,        roles: ['admin','superUser','normalUser'] },
+  { href: '/users',      label: 'จัดการผู้ใช้งาน',   icon: UserCog,         roles: ['admin'] },
+]
+
+interface SidebarProps { isOpen: boolean; setIsOpen: (v: boolean) => void }
 
 export function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
   const { user, companyContext, setUser, setCompanyContext } = useAppStore()
   const location = useLocation()
   const [factories, setFactories] = useState<Factory[]>([])
+  const [showPwModal, setShowPwModal] = useState(false)
+  const [pwForm, setPwForm] = useState({ current: '', next: '', confirm: '' })
+  const [pwError, setPwError] = useState('')
+  const [pwLoading, setPwLoading] = useState(false)
+  const [showPw, setShowPw] = useState(false)
 
   useEffect(() => {
     if (user?.role === 'admin' || user?.role === 'superUser') {
-      const fetchFactories = async () => {
-        const { data } = await supabase
-          .from('factories')
-          .select('id, name, companies(id, name, short_name, company_type)')
-          .order('name')
-        if (data) setFactories(data)
-      }
-      fetchFactories()
+      supabase.from('factories').select('id, name, companies(id, name, short_name, company_type)').order('name')
+        .then(({ data }) => { if (data) setFactories(data) })
     }
   }, [user?.role])
 
   const handleFactoryChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const newFactoryId = e.target.value
-    const selectedFactory = factories.find(f => f.id === newFactoryId)
-    
-    if (selectedFactory && user) {
-      const company = Array.isArray(selectedFactory.companies) 
-        ? selectedFactory.companies[0] 
-        : selectedFactory.companies;
-
-      setUser({ ...user, factory_id: newFactoryId })
-      setCompanyContext({
-        id: company?.id || companyContext?.id,
-        name: company?.name || companyContext?.name,
-        type: company?.company_type || companyContext?.type,
-        factoryName: selectedFactory.name
-      })
+    const f = factories.find(f => f.id === e.target.value)
+    if (f && user) {
+      const company = Array.isArray(f.companies) ? f.companies[0] : f.companies
+      setUser({ ...user, factory_id: f.id })
+      setCompanyContext({ id: company?.id || companyContext?.id, name: company?.name || companyContext?.name, type: company?.company_type || companyContext?.type, factoryName: f.name })
     }
   }
 
@@ -91,198 +61,194 @@ export function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     setCompanyContext(null)
   }
 
-  const navItems = [
-    {
-      title: 'Dashboard',
-      href: '/dashboard',
-      icon: LayoutDashboard,
-      roles: ['admin', 'superUser']
-    },
-    {
-      title: 'ฐานข้อมูลพนักงาน',
-      href: '/employees',
-      icon: Users,
-      roles: ['admin', 'superUser']
-    },
-    {
-      title: 'กรอกกะ',
-      href: '/shifts',
-      icon: CalendarClock,
-      roles: ['admin', 'superUser']
-    },
-    {
-      title: 'ภาพรวมการเข้างาน',
-      href: '/attendance',
-      icon: LayoutDashboard,
-      roles: ['admin', 'superUser']
-    },
-    {
-      title: 'เบิกล่วงหน้า',
-      href: '/advances',
-      icon: CreditCard,
-      roles: ['admin', 'superUser']
-    },
-    {
-      title: 'กรอกค่าจ้าง',
-      href: '/payroll',
-      icon: Calculator,
-      roles: ['admin', 'superUser']
-    },
-    {
-      title: 'ดูสลิปเงินเดือน',
-      href: '/payslip',
-      icon: FileText,
-      roles: ['admin', 'superUser', 'normalUser']
-    },
-    {
-      title: 'สร้างลิงก์ดูสลิป',
-      href: '/share-links',
-      icon: Link2,
-      roles: ['admin', 'superUser', 'normalUser']
-    },
-    {
-      title: 'Export ข้อมูล',
-      href: '/export',
-      icon: Download,
-      roles: ['admin', 'superUser']
-    },
-    {
-      title: 'จัดการผู้ใช้งาน',
-      href: '/users',
-      icon: UserCog,
-      roles: ['admin']
+  const handleChangePassword = async () => {
+    setPwError('')
+    if (!pwForm.next || !pwForm.confirm) { setPwError('กรุณากรอกรหัสผ่านใหม่'); return }
+    if (pwForm.next.length < 6) { setPwError('รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร'); return }
+    if (pwForm.next !== pwForm.confirm) { setPwError('รหัสผ่านใหม่ไม่ตรงกัน'); return }
+    setPwLoading(true)
+    try {
+      // Re-authenticate first to verify current password
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.user?.email) throw new Error('ไม่พบข้อมูลผู้ใช้')
+      const { error: signInErr } = await supabase.auth.signInWithPassword({ email: session.user.email, password: pwForm.current })
+      if (signInErr) throw new Error('รหัสผ่านปัจจุบันไม่ถูกต้อง')
+      const { error } = await supabase.auth.updateUser({ password: pwForm.next })
+      if (error) throw error
+      toast.success('เปลี่ยนรหัสผ่านเรียบร้อยแล้ว')
+      setShowPwModal(false)
+      setPwForm({ current: '', next: '', confirm: '' })
+    } catch (e: any) {
+      setPwError(e.message)
+    } finally {
+      setPwLoading(false)
     }
-  ]
+  }
 
-  const filteredNav = navItems.filter(item =>
-    !user || item.roles.includes(user.role)
-  )
+  const filtered = NAV.filter(n => !user || n.roles.includes(user.role))
 
   return (
     <>
-      {/* Mobile Overlay */}
       {isOpen && (
-        <div 
-          className="fixed inset-0 bg-slate-900/50 z-40 md:hidden transition-opacity"
-          onClick={() => setIsOpen(false)}
-        />
+        <div className="fixed inset-0 z-40 md:hidden" style={{ background: 'rgba(22,19,17,0.5)' }}
+          onClick={() => setIsOpen(false)} />
       )}
 
-      {/* Sidebar Container */}
-      <div className={cn(
-        "fixed inset-y-0 left-0 z-50 w-64 bg-white border-r flex flex-col transform transition-transform duration-200 ease-in-out md:translate-x-0",
-        isOpen ? "translate-x-0" : "-translate-x-full"
-      )}>
-        <div className="px-5 py-6 border-b border-slate-100 flex justify-between items-start">
-          <div>
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 bg-[#1D9E75] rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm">
-                <Building2 className="text-white h-6 w-6" />
-              </div>
-              <div className="min-w-0">
-                <p className="font-black text-xl text-slate-900 leading-none tracking-tight">หจก. วิราญกร</p>
-                <p className="text-[10px] text-slate-400 mt-1 font-medium">ระบบจัดการค่าแรงพนักงาน</p>
-              </div>
-            </div>
-            <div className="mt-5 bg-slate-50 rounded-lg p-3 border border-slate-100">
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">โรงงาน / สาขา</p>
-              {(user?.role === 'admin' || user?.role === 'superUser') ? (
-                <select
-                  value={user?.factory_id || ''}
-                  onChange={handleFactoryChange}
-                  className="w-full text-sm font-bold text-[#1D9E75] bg-transparent border-none p-0 focus:ring-0 cursor-pointer"
-                >
-                  <option value="" disabled>เลือกโรงงาน</option>
-                  {factories.map(f => (
-                    <option key={f.id} value={f.id}>{f.name}</option>
-                  ))}
-                </select>
-              ) : (
-                <p className="text-sm font-bold text-[#1D9E75]">{companyContext?.factoryName || 'ไม่พบข้อมูลโรงงาน'}</p>
-              )}
-            </div>
+      <aside style={{
+        position: 'fixed', insetBlock: 0, left: 0, zIndex: 50, width: 'var(--vk-sidebar-w)',
+        background: 'var(--vk-bone)', borderRight: '1px solid var(--vk-rule)',
+      }} className={`vk-root flex-col hidden md:flex ${isOpen ? '!flex' : ''}`}>
+
+        {/* Brand */}
+        <div style={{ padding: '22px 20px 18px', borderBottom: '1px solid var(--vk-rule-soft)', position: 'relative', overflow: 'hidden' }}>
+          {/* Giant tilted logo — purely decorative, clipped by overflow:hidden */}
+          <img
+            src="/logo.png"
+            alt=""
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              right: -28,
+              top: '50%',
+              transform: 'translateY(-50%) rotate(35deg)',
+              width: 116,
+              height: 116,
+              objectFit: 'contain',
+              opacity: 0.18,
+              pointerEvents: 'none',
+              userSelect: 'none',
+            }}
+          />
+          <div style={{ position: 'relative', zIndex: 1 }}>
+            <div style={{ fontFamily: 'var(--vk-sans)', fontWeight: 800, fontSize: 22, letterSpacing: '-0.03em', color: 'var(--vk-ink)', lineHeight: 1.1 }}>วิราญกร</div>
+            <div style={{ fontFamily: 'var(--vk-sans)', fontSize: 11, fontWeight: 500, color: 'var(--vk-ink-3)', letterSpacing: '0.06em', textTransform: 'uppercase', marginTop: 4 }}>Payroll System</div>
           </div>
-          
-          <button 
-            className="md:hidden text-slate-400 hover:text-slate-600 bg-slate-100 p-1.5 rounded-md"
-            onClick={() => setIsOpen(false)}
-          >
-            <X className="h-5 w-5" />
-          </button>
         </div>
 
-      <nav className="flex-1 overflow-y-auto px-4 space-y-1">
-        {filteredNav.map((item) => {
-          const isActive = location.pathname.startsWith(item.href)
-          const Icon = item.icon
+        {/* Factory picker */}
+        <div style={{ margin: '10px 12px', padding: '10px 12px', background: 'var(--vk-paper)', border: '1px solid var(--vk-rule-soft)', borderRadius: 6 }}>
+          <div className="vk-eyebrow" style={{ marginBottom: 3 }}>โรงงาน · บริษัท</div>
+          {(user?.role === 'admin' || user?.role === 'superUser') ? (
+            <select value={user?.factory_id || ''} onChange={handleFactoryChange}
+              style={{ width: '100%', fontFamily: 'var(--vk-sans)', fontWeight: 600, fontSize: 13, color: 'var(--vk-persimmon-ink)', background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', outline: 'none' }}>
+              <option value="" disabled>เลือกโรงงาน</option>
+              {factories.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+            </select>
+          ) : (
+            <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--vk-persimmon-ink)' }}>{companyContext?.factoryName || '—'}</div>
+          )}
+        </div>
 
-          return (
-            <Link
-              key={item.href}
-              to={item.href}
-              onClick={() => setIsOpen(false)}
-              className={cn(
-                "flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors",
-                isActive
-                  ? "bg-[#1D9E75]/10 text-[#1D9E75]"
-                  : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-              )}
-            >
-              <Icon className={cn("h-5 w-5", isActive ? "text-[#1D9E75]" : "text-slate-400")} />
-              {item.title}
-            </Link>
-          )
-        })}
-      </nav>
-
-      {/* Back to main app */}
-      <div className="px-4 pb-2">
-        <a
-          href="/dashboard"
-          className="flex items-center gap-2 w-full px-3 py-2 rounded-md text-xs font-semibold border border-dashed border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors"
-        >
-          <span className="inline-flex items-center justify-center w-4 h-4 rounded bg-amber-400 text-white text-[9px] font-bold leading-none flex-shrink-0">2</span>
-          กลับแอปหลัก (V2)
-        </a>
-      </div>
-
-      <div className="p-4 border-t border-slate-100">
-        <DropdownMenu>
-          <DropdownMenuTrigger>
-            <div className="w-full flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-slate-100 transition-colors group cursor-pointer">
-              <div className="h-8 w-8 rounded-full bg-[#1D9E75]/10 flex items-center justify-center text-[#1D9E75] font-bold text-sm flex-shrink-0">
-                {user?.full_name?.charAt(0) || 'U'}
-              </div>
-              <div className="flex-1 min-w-0 text-left">
-                <p className="text-sm font-semibold text-slate-900 truncate">
-                  {user?.full_name || 'ผู้ใช้งาน'}
-                </p>
-                <p className="text-xs text-slate-500 truncate capitalize">
-                  {user?.role === 'superUser' ? 'SuperAdmin' : user?.role === 'normalUser' ? 'User' : user?.role}
-                </p>
-              </div>
-              <ChevronDown className="w-4 h-4 text-slate-400 group-hover:text-slate-600 flex-shrink-0" />
-            </div>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" side="top" className="w-52 mb-1">
-            <DropdownMenuItem>
-              <Link to="/settings" onClick={() => setIsOpen(false)} className="flex items-center gap-2 cursor-pointer">
-                <KeyRound className="w-4 h-4 text-slate-400" />
-                เปลี่ยนรหัสผ่าน
+        {/* Nav */}
+        <nav style={{ flex: 1, overflowY: 'auto', padding: '8px 10px' }}>
+          {filtered.map(item => {
+            const active = location.pathname === item.href || location.pathname.startsWith(item.href + '/')
+            const Icon = item.icon
+            return (
+              <Link key={item.href} to={item.href} onClick={() => setIsOpen(false)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
+                  borderRadius: 6, fontSize: 14, fontWeight: active ? 600 : 500,
+                  color: active ? 'var(--vk-persimmon-ink)' : 'var(--vk-ink-2)',
+                  background: active ? 'var(--vk-persimmon-tint)' : 'transparent',
+                  textDecoration: 'none', transition: 'background 160ms', marginBottom: 2,
+                }}>
+                <Icon style={{ width: 17, height: 17, flexShrink: 0, opacity: active ? 1 : 0.6 }} />
+                {item.label}
               </Link>
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              onClick={handleSignOut}
-              className="flex items-center gap-2 text-red-600 focus:text-red-600 focus:bg-red-50 cursor-pointer"
-            >
-              <LogOut className="w-4 h-4" />
-              ออกจากระบบ
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-    </div>
+            )
+          })}
+        </nav>
+
+        {/* User */}
+        <div style={{ padding: '10px 12px', borderTop: '1px solid var(--vk-rule-soft)' }}>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 8, background: 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left' }}
+                className="hover:bg-[--vk-paper-2]">
+                <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--vk-persimmon-tint)', color: 'var(--vk-persimmon-ink)', display: 'grid', placeItems: 'center', fontWeight: 700, fontSize: 13, flexShrink: 0, fontFamily: 'var(--vk-sans)' }}>
+                  {user?.full_name?.charAt(0) || 'U'}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--vk-ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{user?.full_name || 'ผู้ใช้งาน'}</div>
+                  <div style={{ fontSize: 11, color: 'var(--vk-ink-3)' }}>{user?.role === 'superUser' ? 'SuperAdmin' : user?.role === 'normalUser' ? 'User' : user?.role}</div>
+                </div>
+                <ChevronDown style={{ width: 14, height: 14, color: 'var(--vk-ink-3)', flexShrink: 0 }} />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" side="top" className="w-52 mb-1">
+              <DropdownMenuItem onClick={() => { setShowPwModal(true); setPwError(''); setPwForm({ current: '', next: '', confirm: '' }) }} className="flex items-center gap-2 cursor-pointer">
+                <KeyRound style={{ width: 15, height: 15, opacity: 0.5 }} /> เปลี่ยนรหัสผ่าน
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={handleSignOut} className="flex items-center gap-2 text-red-600 focus:text-red-600 focus:bg-red-50 cursor-pointer">
+                <LogOut style={{ width: 15, height: 15 }} /> ออกจากระบบ
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </aside>
+
+      {/* ── Change Password Modal ── */}
+      {showPwModal && (
+        <div className="vk-root" style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(22,19,17,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+          onClick={() => setShowPwModal(false)}>
+          <div style={{ background: 'var(--vk-paper)', border: '1px solid var(--vk-rule)', width: '100%', maxWidth: 380, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+            onClick={e => e.stopPropagation()}>
+
+            {/* Header */}
+            <div style={{ background: 'var(--vk-persimmon)', color: '#fff', padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 15 }}>เปลี่ยนรหัสผ่าน</div>
+                <div style={{ fontSize: 11, opacity: 0.55, marginTop: 1 }}>กรอกรหัสผ่านปัจจุบันและรหัสผ่านใหม่</div>
+              </div>
+              <button onClick={() => setShowPwModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#fff', opacity: 0.6, padding: 4 }}>
+                <X style={{ width: 16, height: 16 }} />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div style={{ padding: '20px', background: 'var(--vk-bone)', display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {[
+                { label: 'รหัสผ่านปัจจุบัน', key: 'current' },
+                { label: 'รหัสผ่านใหม่', key: 'next' },
+                { label: 'ยืนยันรหัสผ่านใหม่', key: 'confirm' },
+              ].map(f => (
+                <div key={f.key}>
+                  <label style={{ display: 'block', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--vk-ink-3)', marginBottom: 5 }}>{f.label}</label>
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      type={showPw ? 'text' : 'password'}
+                      value={(pwForm as any)[f.key]}
+                      onChange={e => setPwForm(p => ({ ...p, [f.key]: e.target.value }))}
+                      onKeyDown={e => e.key === 'Enter' && handleChangePassword()}
+                      style={{ width: '100%', height: 36, padding: '0 36px 0 10px', fontSize: 13, fontFamily: 'var(--vk-sans)', border: '1px solid var(--vk-rule)', background: 'var(--vk-paper)', color: 'var(--vk-ink)', outline: 'none', boxSizing: 'border-box' }}
+                    />
+                    {f.key === 'next' && (
+                      <button onClick={() => setShowPw(v => !v)} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--vk-ink-3)', padding: 0 }}>
+                        {showPw ? <EyeOff style={{ width: 14, height: 14 }} /> : <Eye style={{ width: 14, height: 14 }} />}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {pwError && (
+                <div style={{ padding: '8px 12px', background: 'var(--vk-crimson-tint)', border: '1px solid var(--vk-crimson)', fontSize: 12, color: 'var(--vk-crimson)' }}>
+                  {pwError}
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div style={{ padding: '12px 20px', borderTop: '1px solid var(--vk-rule)', background: 'var(--vk-paper)', display: 'flex', gap: 8 }}>
+              <button className="vk-btn vk-btn--primary" style={{ flex: 1 }} onClick={handleChangePassword} disabled={pwLoading}>
+                {pwLoading ? 'กำลังบันทึก...' : 'บันทึกรหัสผ่านใหม่'}
+              </button>
+              <button className="vk-btn" onClick={() => setShowPwModal(false)}>ยกเลิก</button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }

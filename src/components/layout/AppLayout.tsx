@@ -1,55 +1,53 @@
-import { useState, type ReactNode } from 'react'
-import { Navigate, Outlet, useLocation } from 'react-router-dom'
-import { Menu } from 'lucide-react'
+import { useState } from 'react'
+import { Navigate, Outlet, useLocation, useOutletContext } from 'react-router-dom'
+import { useAppStore } from '../../../store/useAppStore'
 import { Sidebar } from './Sidebar'
-import { useAppStore } from '../../store/useAppStore'
+import '../../../styles/v2-tokens.css'
 
-interface RequireAuthProps {
-  allowedRoles?: string[]
-}
+interface RequireAuthProps { allowedRoles?: string[] }
 
 export function RequireAuth({ allowedRoles }: RequireAuthProps) {
   const { user } = useAppStore()
   const location = useLocation()
-
-  if (!user) {
-    return <Navigate to="/login" state={{ from: location }} replace />
-  }
-
-  if (allowedRoles && !allowedRoles.includes(user.role)) {
-    // normalUser gets redirected to their allowed landing page
-    return <Navigate to={user.role === 'normalUser' ? '/payslip' : '/shifts'} replace />
-  }
-
-  return <Outlet />
+  const ctx = useOutletContext()
+  if (!user) return <Navigate to="/login" state={{ from: location }} replace />
+  if (allowedRoles && !allowedRoles.includes(user.role))
+    return <Navigate to={user.role === 'normalUser' ? '/payslip' : '/dashboard'} replace />
+  return <Outlet context={ctx} />
 }
 
-interface AppLayoutProps {
-  children?: ReactNode
+function VKFooter() {
+  return (
+    <footer style={{
+      borderTop: '1px solid var(--vk-rule-soft)',
+      backgroundColor: 'var(--vk-paper)',
+      padding: '12px 24px',
+      textAlign: 'center',
+      fontSize: 11,
+      color: 'var(--vk-ink-4)',
+      fontFamily: 'var(--vk-sans)',
+      letterSpacing: '0.02em',
+      flexShrink: 0,
+    }}>
+      {/* Mobile: short form */}
+      <span className="md:hidden">© 2026 Virankorn · Powered with ❤︎ by Wudh Boonchan</span>
+      {/* Desktop: full form */}
+      <span className="hidden md:inline">© 2026 Virankorn. All rights reserved.<span style={{ margin: '0 8px', color: 'var(--vk-rule-soft)' }}>|</span>Powered with ❤︎ by Wudh Boonchan</span>
+    </footer>
+  )
 }
 
-export function AppLayout({ children }: AppLayoutProps) {
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
+export function AppLayout() {
+  const [sidebarOpen, setSidebarOpen] = useState(false)
 
   return (
-    <div className="flex min-h-screen bg-slate-50">
-      <Sidebar isOpen={isSidebarOpen} setIsOpen={setIsSidebarOpen} />
-      
-      <div className="flex-1 md:ml-64 flex flex-col min-h-screen w-full min-w-0">
-        {/* Mobile Header */}
-        <header className="md:hidden bg-white border-b h-16 flex items-center px-4 sticky top-0 z-30">
-          <button 
-            onClick={() => setIsSidebarOpen(true)}
-            className="p-2 -ml-2 text-slate-600 hover:bg-slate-100 rounded-md shrink-0"
-          >
-            <Menu className="h-6 w-6" />
-          </button>
-          <div className="ml-4 font-bold text-slate-900 text-sm sm:text-base truncate">วิราญกร | ระบบจัดการค่าแรงพนักงาน</div>
-        </header>
-
-        <main className="flex-1 w-full overflow-x-hidden">
-          {children || <Outlet />}
-        </main>
+    <div className="vk-root" style={{ display: 'flex', height: '100vh' }}>
+      <Sidebar isOpen={sidebarOpen} setIsOpen={setSidebarOpen} />
+      <div className="vk-main" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', flex: 1, minWidth: 0 }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto', minHeight: 0 }}>
+          <Outlet context={{ onMenuClick: () => setSidebarOpen(true) }} />
+        </div>
+        <VKFooter />
       </div>
     </div>
   )

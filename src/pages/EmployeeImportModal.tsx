@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { supabase } from '../../lib/supabase'
-import { useAppStore } from '../../store/useAppStore'
+import { supabase } from '../lib/supabase'
+import { useAppStore } from '../store/useAppStore'
 import { toast } from 'sonner'
 import {
   FileDown, Upload, AlertCircle, CheckCircle2,
@@ -11,8 +11,8 @@ import {
   downloadEmployeeTemplate,
   parseEmployeeExcel,
   type ParsedRow,
-} from '../../lib/employeeExcel'
-import '../../styles/v2-tokens.css'
+} from '../lib/employeeExcel'
+import '../styles/v2-tokens.css'
 
 interface Props {
   isOpen: boolean
@@ -21,7 +21,7 @@ interface Props {
 
 type Step = 'upload' | 'preview' | 'done'
 
-export default function EmployeeImportModalV2({ isOpen, onClose }: Props) {
+export default function EmployeeImportModal({ isOpen, onClose }: Props) {
   const { user } = useAppStore()
   const queryClient = useQueryClient()
   const fileInputRef = useRef<HTMLInputElement>(null)

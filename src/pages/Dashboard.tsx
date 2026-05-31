@@ -1,976 +1,485 @@
-import React, { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useOutletContext } from 'react-router-dom'
+import { supabase } from '../lib/supabase'
 import { useAppStore } from '../store/useAppStore'
 import { TopBar } from '../components/layout/TopBar'
-import { Button } from '../components/ui/button'
-import { Badge } from '../components/ui/badge'
-import {
-  Users, Wallet, ShieldCheck, Banknote,
-  CheckCircle2, Clock, ChevronDown,
-  Loader2, Calendar, AlertCircle, Link2, RotateCcw, Plus
-} from 'lucide-react'
-import { formatThaiCurrency, formatPeriodLabel } from '@/lib/formatters'
-import { supabase } from '../lib/supabase'
 import { toast } from 'sonner'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger
-} from '../components/ui/dropdown-menu'
+import { Plus, CheckCircle, XCircle, Pencil, Check, X, Trash2 } from 'lucide-react'
+import '../styles/v2-tokens.css'
 
-interface PayrollEntryRow {
-  amount_normal: number
-  amount_shift: number
-  amount_ot: number
-  amount_wood_excess: number
-  amount_film: number
-  amount_special: number
-  amount_diligence: number
-  amount_position: number
-  deduct_social_security: number
-  deduct_advance: number
-  deduct_safety_equipment: number
-  deduct_uniform: number
-  period_id?: string
+interface PayrollPeriod { id: string; label: string; period_start: string; period_end: string; status: string; social_security_rate: number; approved_by: string | null; approver?: { full_name: string | null } | null }
+
+function fmt(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
 }
-
-interface PayrollPeriod {
-  id: string
-  period_start: string
-  period_end: string
-  status: string
-  approved_by?: string
-  approver?: {
-    full_name: string
-  }
+function parseLocal(s: string) { const [y,m,d]=s.split('-').map(Number); return new Date(y,m-1,d) }
+function formatPeriodLabel(start: string, end: string) {
+  const months = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.']
+  const s = parseLocal(start), e = parseLocal(end)
+  return `${s.getDate()} – ${e.getDate()} ${months[e.getMonth()]} ${e.getFullYear() + 543}`
 }
-
-
-// ─── helpers ────────────────────────────────────────────────────────────────
-
-function sumEntries(rows: PayrollEntryRow[]): { gross: number; ss: number; net: number } {
-  let gross = 0, ss = 0, totalDeduct = 0
-  rows?.forEach(e => {
-    const inc =
-      Number(e.amount_normal || 0) + Number(e.amount_shift || 0) + Number(e.amount_ot || 0) +
-      Number(e.amount_wood_excess || 0) + Number(e.amount_film || 0) + Number(e.amount_special || 0) +
-      Number(e.amount_diligence || 0) + Number(e.amount_position || 0)
-    const ded =
-      Number(e.deduct_social_security || 0) + Number(e.deduct_advance || 0) +
-      Number(e.deduct_safety_equipment || 0) + Number(e.deduct_uniform || 0)
-    gross += inc
-    ss += Number(e.deduct_social_security || 0)
-    totalDeduct += ded
-  })
-  return { gross, ss, net: gross - totalDeduct }
-}
-
-const PAYROLL_COLS = `
-  amount_normal, amount_shift, amount_ot,
-  amount_wood_excess, amount_film, amount_special,
-  amount_diligence, amount_position,
-  deduct_social_security, deduct_advance,
-  deduct_safety_equipment, deduct_uniform
-`
-
-// ─── Month label helpers ─────────────────────────────────────────────────────
-
-function periodShortLabel(period: PayrollPeriod): string {
-  try { return formatPeriodLabel(period.period_start, period.period_end) }
-  catch { return '' }
-}
-
-// ─── Status badge ─────────────────────────────────────────────────────────────
-
-function StepBadge({ status }: { status: 'done' | 'pending' | 'todo' }) {
-  if (status === 'done')
-    return <span className="text-xs font-semibold px-3 py-1 rounded-full bg-emerald-100 text-emerald-700">เสร็จแล้ว</span>
-  if (status === 'pending')
-    return <span className="text-xs font-semibold px-3 py-1 rounded-full bg-amber-100 text-amber-700">รอดำเนินการ</span>
-  return <span className="text-xs font-semibold px-3 py-1 rounded-full bg-rose-100 text-rose-600">ยังไม่ได้ทำ</span>
-}
-
-// ─── Bar chart ───────────────────────────────────────────────────────────────
-
-function BarChart({ bars, activePeriodId }: { bars: { id: string; label: string; value: number }[]; activePeriodId?: string }) {
-  if (bars.length === 0) {
-    return (
-      <div className="flex items-center justify-center h-80 mt-4 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-        <span className="text-xs text-slate-400 font-medium">ยังไม่มีข้อมูลการเงินในงวดที่เลือก</span>
-      </div>
-    )
-  }
-
-  // Calculate a nice max value for the Y-axis
-  const rawMax = Math.max(...bars.map(b => b.value), 1000)
-  const step = rawMax > 10000 ? 5000 : 1000
-  const yAxisMax = Math.ceil(rawMax / step) * step
-  const gridLines = [yAxisMax, yAxisMax * 0.75, yAxisMax * 0.5, yAxisMax * 0.25, 0]
-
-  return (
-    <div className="mt-4 flex flex-col flex-1">
-      <div className="flex h-80">
-        {/* Y-Axis labels */}
-        <div className="flex flex-col justify-between text-[10px] text-slate-400 w-12 pb-10 border-r border-slate-100">
-          {gridLines.map((val, i) => (
-            <span key={i} className="text-right pr-2">
-              {val >= 1000 ? `${(val / 1000).toFixed(val % 1000 === 0 ? 0 : 1)}k` : val}
-            </span>
-          ))}
-        </div>
-
-        {/* Chart area */}
-        <div className="flex-1 relative ml-2">
-          {/* Horizontal Grid Lines */}
-          <div className="absolute inset-0 flex flex-col justify-between pointer-events-none pb-10">
-            {gridLines.map((_, i) => (
-              <div 
-                key={i} 
-                className={`w-full border-t ${i === gridLines.length - 1 ? 'border-slate-300' : 'border-slate-100 border-dashed'}`} 
-              />
-            ))}
-          </div>
-
-          {/* Bars Container */}
-          <div className={`absolute inset-0 flex items-end gap-4 px-2 pb-10 ${bars.length === 1 ? 'justify-center' : 'justify-around'}`}>
-            {bars.map(bar => {
-              const heightPct = (bar.value / yAxisMax) * 100
-              const isActive = bar.id === activePeriodId
-              return (
-                <div 
-                  key={bar.id} 
-                  className="relative flex flex-col items-center group h-full justify-end"
-                  style={{ width: bars.length === 1 ? '100px' : '18%' }}
-                >
-                  {/* Data Label on Top */}
-                  <div className={`absolute mb-2 transition-all duration-700`} style={{ bottom: `${Math.max(heightPct, 5)}%` }}>
-                    <span className={`text-[10px] font-bold whitespace-nowrap px-1.5 py-0.5 rounded shadow-sm ${
-                      isActive ? 'bg-[#1D9E75] text-white' : 'bg-slate-100 text-slate-600'
-                    }`}>
-                      {formatThaiCurrency(bar.value)}
-                    </span>
-                  </div>
-                  
-                  {/* The Bar */}
-                  <div
-                    className={`w-full rounded-t-md transition-all duration-700 shadow-sm ${
-                      isActive ? 'bg-[#1D9E75] shadow-[0_-4px_12px_rgba(29,158,117,0.15)]' : 'bg-slate-200 opacity-60'
-                    }`}
-                    style={{ height: `${Math.max(heightPct, 1)}%` }}
-                  />
-                  
-                  {/* X-Axis Label */}
-                  <div className="absolute top-full mt-3 w-max text-center">
-                    <span className={`text-[10px] sm:text-[11px] block transition-colors ${
-                      isActive ? 'font-bold text-slate-900' : 'text-slate-500'
-                    }`}>
-                      {bar.label.split(' ')[0]}
-                    </span>
-                    <span className="text-[9px] text-slate-400 block">
-                      {bar.label.split(' ').slice(1).join(' ')}
-                    </span>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      </div>
-
-      {/* Footer Axis Description */}
-      <div className="flex justify-between items-center mt-6 px-2 text-[9px] font-bold text-slate-400 uppercase tracking-widest border-t border-slate-50 pt-3">
-        <span>← งวดการทำงาน (Payroll Period)</span>
-        <span>ยอดเงินสุทธิคงเหลือ (THB) ↑</span>
-      </div>
-    </div>
-  )
-}
-
-// ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function Dashboard() {
+  const { onMenuClick } = useOutletContext<{ onMenuClick: () => void }>()
   const { user } = useAppStore()
   const queryClient = useQueryClient()
   const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(null)
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false)
+  const [showDeletePeriodConfirm, setShowDeletePeriodConfirm] = useState(false)
+  const [editingSSRate, setEditingSSRate] = useState(false)
+  const [ssRateDraft, setSSRateDraft] = useState('')
 
-  // Fetch all periods
-  const { data: periods = [] } = useQuery({
+  const { data: periods = [] } = useQuery<PayrollPeriod[]>({
     queryKey: ['periods', user?.factory_id],
     queryFn: async () => {
-      if (!user?.factory_id) return []
-      const { data, error } = await supabase
-        .from('payroll_periods')
-        .select('id, period_start, period_end, status, approved_by, approver:profiles!payroll_periods_approved_by_fkey(full_name)')
-        .eq('factory_id', user.factory_id)
-        .order('period_start', { ascending: false })
+      const { data, error } = await supabase.from('payroll_periods')
+        .select('*, approver:profiles!payroll_periods_approved_by_fkey(full_name)')
+        .eq('factory_id', user?.factory_id ?? '').order('period_start', { ascending: false })
       if (error) throw error
-      return data as PayrollPeriod[]
+      return data
     },
-    enabled: !!user?.factory_id
+    enabled: !!user?.factory_id,
+    staleTime: 0,
   })
 
   const activePeriod = periods.find(p => p.id === selectedPeriodId) ?? periods[0]
+  const isApproved = activePeriod?.status === 'approved'
 
-  // ── Current-period stats ─────────────────────────────────────────────────
-  const { data: stats, isLoading } = useQuery({
-    queryKey: ['dashboard-stats', activePeriod?.id],
+  const { data: activeEmployeeCount = 0 } = useQuery<number>({
+    queryKey: ['active-employee-count', user?.factory_id],
     queryFn: async () => {
-      if (!activePeriod?.id) return null
-
-      const [
-        { count: empCount },
-        { count: pendingEmpCount },
-        { data: payrollData, error: peErr },
-        { data: shiftDays },
-        { data: advData }
-      ] = await Promise.all([
-        supabase.from('employees')
-          .select('*', { count: 'exact', head: true })
-          .eq('factory_id', user?.factory_id)
-          .eq('status', 'active'),
-        supabase.from('employees')
-          .select('*', { count: 'exact', head: true })
-          .eq('factory_id', user?.factory_id)
-          .eq('status', 'active')
-          .eq('data_complete', false),
-        supabase.from('payroll_entries')
-          .select(PAYROLL_COLS)
-          .eq('period_id', activePeriod.id),
-        supabase.from('shift_assignments')
-          .select('work_date')
-          .eq('period_id', activePeriod.id),
-        supabase.from('advance_payments')
-          .select('amount')
-          .eq('period_id', activePeriod.id)
-      ])
-
-      if (peErr) throw peErr
-
-      const { gross, ss, net } = sumEntries(payrollData ?? [])
-      const totalAdv = advData?.reduce((s, a) => s + Number(a.amount), 0) ?? 0
-
-      const startD = new Date(activePeriod.period_start)
-      const endD = new Date(activePeriod.period_end)
-      const totalDays = Math.ceil((endD.getTime() - startD.getTime()) / 86_400_000) + 1
-      const uniqueDays = new Set(shiftDays?.map(d => d.work_date)).size
-      const entryCount = payrollData?.length ?? 0
-
-      return {
-        totalEmployees: empCount ?? 0,
-        pendingEmpCount: pendingEmpCount ?? 0,
-        totalGrossPay: gross,
-        totalSocialSecurity: ss,
-        totalNetPay: net - totalAdv,
-        periodStatus: activePeriod.status as string,
-        periodLabel: formatPeriodLabel(activePeriod.period_start, activePeriod.period_end),
-        approverName: activePeriod.approver?.full_name,
-        daysFilled: uniqueDays,
-        totalDays,
-        entryCount,
-        isExported: false // placeholder — extend when export tracking is added
-      }
+      const { count, error } = await supabase.from('employees').select('id', { count: 'exact', head: true })
+        .eq('factory_id', user?.factory_id ?? '').eq('status', 'active')
+      if (error) throw error
+      return count ?? 0
     },
-    enabled: !!activePeriod?.id
+    enabled: !!user?.factory_id,
+    staleTime: 0,
   })
 
-  // ── Last-4-periods bar chart ──────────────────────────────────────────────
-  const last4 = periods.slice(0, 4).reverse() // chronological order
-
-  const { data: recentBars = [] } = useQuery({
-    queryKey: ['recent-bars', last4.map(p => p.id).join(',')],
+  const { data: pendingProfileCount = 0 } = useQuery<number>({
+    queryKey: ['pending-profile-count', user?.factory_id],
     queryFn: async () => {
-      if (!last4.length) return []
-      const [entriesRes, advancesRes] = await Promise.all([
-        supabase.from('payroll_entries').select('period_id, ' + PAYROLL_COLS).in('period_id', last4.map(p => p.id)),
-        supabase.from('advance_payments').select('period_id, amount').in('period_id', last4.map(p => p.id))
-      ])
-
-      const allEntries = entriesRes.data ?? []
-      const allAdvances = advancesRes.data ?? []
-
-      return last4.map(p => {
-        const periodEntries = (allEntries as any[]).filter((e) => e.period_id === p.id)
-        const periodAdvances = allAdvances.filter((a) => a.period_id === p.id)
-        const { net } = sumEntries(periodEntries)
-        const totalAdv = periodAdvances.reduce((s, a) => s + Number(a.amount), 0)
-        
-        return {
-          id: p.id,
-          label: periodShortLabel(p),
-          value: net - totalAdv
-        }
-      })
+      const { count, error } = await supabase.from('employees').select('id', { count: 'exact', head: true })
+        .eq('factory_id', user?.factory_id ?? '').eq('status', 'active').eq('data_complete', false)
+      if (error) throw error
+      return count ?? 0
     },
-    enabled: last4.length > 0
+    enabled: !!user?.factory_id,
+    staleTime: 0,
   })
 
-  // ── Approve mutation ─────────────────────────────────────────────────────
+  const { data: stats } = useQuery({
+    queryKey: ['v2-stats', activePeriod?.id],
+    queryFn: async () => {
+      if (!activePeriod) return null
+      const [payroll, shifts, advances] = await Promise.all([
+        supabase.from('payroll_entries').select('amount_normal,amount_shift,amount_ot,amount_wood_excess,amount_film,amount_special,amount_diligence,amount_position,deduct_social_security,deduct_advance,deduct_safety_equipment,deduct_uniform,override_special').eq('period_id', activePeriod.id),
+        supabase.from('shift_assignments').select('work_date').eq('period_id', activePeriod.id),
+        supabase.from('advance_payments').select('amount').eq('period_id', activePeriod.id),
+      ])
+      const entries = payroll.data ?? []
+      const gross = entries.reduce((s, e) => {
+        const income = Number(e.amount_normal||0) + Number(e.amount_shift||0) + Number(e.amount_ot||0)
+          + Number(e.amount_wood_excess||0) + Number(e.amount_film||0)
+          + Number(e.override_special ?? e.amount_special ?? 0)
+          + Number(e.amount_diligence||0) + Number(e.amount_position||0)
+        return s + income
+      }, 0)
+      const ss = entries.reduce((s, e) => s + Number(e.deduct_social_security||0), 0)
+      const ssCount = entries.filter(e => Number(e.deduct_social_security||0) > 0).length
+      const totalDeduct = entries.reduce((s, e) => s + Number(e.deduct_social_security||0) + Number(e.deduct_advance||0) + Number(e.deduct_safety_equipment||0) + Number(e.deduct_uniform||0), 0)
+      const net = gross - totalDeduct
+      const adv = advances.data?.reduce((s, a) => s + Number(a.amount), 0) ?? 0
+      const advCount = advances.data?.length ?? 0
+      const uniqueDays = new Set(shifts.data?.map(d => d.work_date)).size
+      const start = parseLocal(activePeriod.period_start), end = parseLocal(activePeriod.period_end)
+      const totalDays = Math.ceil((end.getTime()-start.getTime())/86400000)+1
+      return { gross, ss, ssCount, net, adv, advCount, uniqueDays, totalDays }
+    },
+    enabled: !!activePeriod,
+    staleTime: 0,
+    refetchInterval: 30_000,
+  })
+
   const approveMutation = useMutation({
     mutationFn: async () => {
-      if (!activePeriod?.id) throw new Error('ไม่พบงวดที่จะอนุมัติ')
-      const { error } = await supabase
-        .from('payroll_periods')
-        .update({ status: 'approved', approved_by: user?.id, approved_at: new Date().toISOString() })
-        .eq('id', activePeriod.id)
+      const { error } = await supabase.from('payroll_periods').update({ status: 'approved', approved_by: user?.id ?? null }).eq('id', activePeriod!.id)
+      if (error) throw error
+    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['periods'] }); toast.success('อนุมัติงวดเรียบร้อยแล้ว') },
+    onError: (e: Error) => toast.error('อนุมัติไม่สำเร็จ', { description: e.message }),
+  })
+
+  const cancelApproveMutation = useMutation({
+    mutationFn: async () => {
+      const periodId = activePeriod!.id
+
+      // 1. Revert period to draft
+      const { error: periodErr } = await supabase.from('payroll_periods')
+        .update({ status: 'draft' }).eq('id', periodId)
+      if (periodErr) throw periodErr
+
+      // 2. Expire all share-link tokens for this period immediately
+      //    Set expires_at to now so any in-flight link checks fail instantly
+      const { error: tokenErr } = await supabase.from('payslip_tokens')
+        .update({ expires_at: new Date().toISOString() })
+        .eq('period_id', periodId)
+      if (tokenErr) throw tokenErr
+
+      // 3. Delete all tokens so the share-link page resets to clean state
+      const { error: deleteErr } = await supabase.from('payslip_tokens')
+        .delete().eq('period_id', periodId)
+      if (deleteErr) throw deleteErr
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['periods'] })
+      queryClient.invalidateQueries({ queryKey: ['payslip_tokens'] })
+      toast.success('ยกเลิกการอนุมัติแล้ว — ลิงก์สลิปทั้งหมดถูกยกเลิกแล้ว', { duration: 5000 })
+    },
+    onError: (e: Error) => toast.error('ยกเลิกไม่สำเร็จ', { description: e.message }),
+  })
+
+  const updateSSRateMutation = useMutation({
+    mutationFn: async (rate: number) => {
+      const { error } = await supabase.from('payroll_periods').update({ social_security_rate: rate }).eq('id', activePeriod!.id)
+      if (error) throw error
+    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['periods'] }); toast.success('อัปเดตอัตราประกันสังคมแล้ว') },
+    onError: (e: Error) => toast.error('อัปเดตไม่สำเร็จ', { description: e.message }),
+  })
+
+  const deletePeriodMutation = useMutation({
+    mutationFn: async () => {
+      if (!activePeriod) throw new Error('ไม่พบงวด')
+      // Delete all related data first, then the period itself
+      await supabase.from('shift_assignments').delete().eq('period_id', activePeriod.id)
+      await supabase.from('payroll_entries').delete().eq('period_id', activePeriod.id)
+      await supabase.from('advance_payments').delete().eq('period_id', activePeriod.id)
+      await supabase.from('payslip_tokens').delete().eq('period_id', activePeriod.id)
+      const { error } = await supabase.from('payroll_periods').delete().eq('id', activePeriod.id)
       if (error) throw error
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['periods'] })
-      queryClient.invalidateQueries({ queryKey: ['dashboard-stats', activePeriod?.id] })
-      toast.success('อนุมัติงวดเรียบร้อยแล้ว')
+      setSelectedPeriodId(null)
+      setShowDeletePeriodConfirm(false)
+      toast.success('ลบงวดเรียบร้อยแล้ว')
     },
-    onError: (err: unknown) => {
-      const error = err as Error
-      toast.error('ไม่สามารถอนุมัติงวดได้', { description: error.message })
-    }
+    onError: (e: Error) => toast.error('ลบงวดไม่สำเร็จ', { description: e.message }),
   })
 
-  // ── Create next period mutation ──────────────────────────────────────────
   const createNextPeriodMutation = useMutation({
     mutationFn: async () => {
       if (!user?.factory_id) throw new Error('ไม่พบข้อมูลโรงงาน')
-
-      // Format using local time to avoid UTC timezone shift
-      const fmt = (d: Date) => {
-        const y = d.getFullYear()
-        const m = String(d.getMonth() + 1).padStart(2, '0')
-        const day = String(d.getDate()).padStart(2, '0')
-        return `${y}-${m}-${day}`
-      }
-      // Parse a YYYY-MM-DD string as local date (not UTC)
-      const parseLocal = (s: string) => {
-        const [y, m, d] = s.split('-').map(Number)
-        return new Date(y, m - 1, d)
-      }
-
-      let nextStart: Date
-      let nextEnd: Date
-
+      let nextStart: Date, nextEnd: Date
       if (periods.length === 0) {
         const now = new Date()
-        nextStart = new Date(now.getFullYear(), now.getMonth(), 1)
-        nextEnd = new Date(now.getFullYear(), now.getMonth(), 15)
-      } else {
-        const latest = periods[0]
-        const latestEnd = parseLocal(latest.period_end)
-        nextStart = new Date(latestEnd.getFullYear(), latestEnd.getMonth(), latestEnd.getDate() + 1)
-
-        const day = nextStart.getDate()
-        if (day === 1) {
-          nextEnd = new Date(nextStart.getFullYear(), nextStart.getMonth(), 15)
+        if (now.getDate() <= 15) {
+          nextStart = new Date(now.getFullYear(), now.getMonth(), 1)
+          nextEnd   = new Date(now.getFullYear(), now.getMonth(), 15)
         } else {
-          nextEnd = new Date(nextStart.getFullYear(), nextStart.getMonth() + 1, 0)
+          nextStart = new Date(now.getFullYear(), now.getMonth(), 16)
+          nextEnd   = new Date(now.getFullYear(), now.getMonth() + 1, 0) // last day of month
         }
+      } else {
+        const latestEnd = parseLocal(periods[0].period_end)
+        nextStart = new Date(latestEnd.getFullYear(), latestEnd.getMonth(), latestEnd.getDate()+1)
+        nextEnd = nextStart.getDate() === 1
+          ? new Date(nextStart.getFullYear(), nextStart.getMonth(), 15)
+          : new Date(nextStart.getFullYear(), nextStart.getMonth()+1, 0)
       }
-
-      const startStr = fmt(nextStart)
-      const endStr = fmt(nextEnd)
+      const startStr = fmt(nextStart), endStr = fmt(nextEnd)
       const { error } = await supabase.from('payroll_periods').insert({
-        factory_id: user.factory_id,
-        label: formatPeriodLabel(startStr, endStr),
-        period_start: startStr,
-        period_end: endStr,
-        status: 'draft',
-        social_security_rate: 0.05,
+        factory_id: user.factory_id, label: formatPeriodLabel(startStr, endStr),
+        period_start: startStr, period_end: endStr, status: 'draft', social_security_rate: 0.05,
       })
       if (error) throw error
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['periods'] })
-      toast.success('สร้างงวดใหม่เรียบร้อยแล้ว')
-    },
-    onError: (err: unknown) => {
-      toast.error('ไม่สามารถสร้างงวดได้', { description: (err as Error).message })
-    }
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['periods'] }); toast.success('สร้างงวดใหม่เรียบร้อยแล้ว') },
+    onError: (e: Error) => toast.error('สร้างงวดไม่สำเร็จ', { description: e.message }),
   })
 
-  // ── Unapprove mutation ───────────────────────────────────────────────────
-  const unapproveMutation = useMutation({
-    mutationFn: async () => {
-      if (!activePeriod?.id) throw new Error('ไม่พบงวดที่จะยกเลิก')
-      const { error } = await supabase
-        .from('payroll_periods')
-        .update({ status: 'draft', approved_by: null, approved_at: null })
-        .eq('id', activePeriod.id)
-      if (error) throw error
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['periods'] })
-      queryClient.invalidateQueries({ queryKey: ['dashboard-stats', activePeriod?.id] })
-      toast.success('ยกเลิกการอนุมัติงวดเรียบร้อยแล้ว')
-    },
-    onError: (err: unknown) => {
-      const error = err as Error
-      toast.error('ไม่สามารถยกเลิกการอนุมัติได้', { description: error.message })
-    }
-  })
-
-  // ── User Link Stats ──────────────────────────────────────────────────────
-  const { data: linkStats } = useQuery({
-    queryKey: ['dashboard-link-stats', activePeriod?.id],
-    queryFn: async () => {
-      if (!activePeriod?.id) return null
-      const { data } = await supabase.from('payslip_tokens')
-        .select('employee_status, created_at, expires_at')
-        .eq('period_id', activePeriod.id)
-      
-      const tokens = data || []
-      let pending = 0
-      let confirmed = 0
-      let disputed = 0
-
-      tokens.forEach(t => {
-        let status = t.employee_status
-        if (status === 'pending') {
-          const createdTime = t.created_at 
-            ? new Date(t.created_at).getTime()
-            : (t.expires_at ? new Date(t.expires_at).getTime() - (30 * 24 * 60 * 60 * 1000) : Date.now())
-          const hoursPassed = (Date.now() - createdTime) / (1000 * 60 * 60)
-          if (hoursPassed >= 24) {
-            status = 'auto_confirmed'
-          }
-        }
-        
-        if (status === 'pending') pending++
-        else if (status === 'confirmed' || status === 'auto_confirmed') confirmed++
-        else if (status === 'disputed') disputed++
-      })
-
-      return {
-        total: tokens.length,
-        pending,
-        confirmed,
-        disputed
-      }
-    },
-    enabled: !!activePeriod?.id
-  })
-
-  // Realtime subscription for link stats
-  React.useEffect(() => {
-    if (!activePeriod?.id) return
-
-    const channel = supabase
-      .channel(`dash-tokens-realtime-${activePeriod.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'payslip_tokens'
-        },
-        (payload) => {
-          console.log('Dashboard: Realtime token update received', payload)
-          // Refetch both the stats and the link-specific stats to be sure
-          queryClient.invalidateQueries({ queryKey: ['dashboard-link-stats'] })
-          queryClient.refetchQueries({ queryKey: ['dashboard-link-stats'], type: 'active' })
-        }
-      )
-      .subscribe()
-
-    return () => {
-      supabase.removeChannel(channel)
-    }
-  }, [activePeriod?.id, queryClient])
-
-  // Realtime subscription for general dashboard stats
-  React.useEffect(() => {
-    if (!activePeriod?.id) return
-
-    const channel = supabase
-      .channel(`dash-general-realtime-${activePeriod.id}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'payroll_entries', filter: `period_id=eq.${activePeriod.id}` },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ['dashboard-stats', activePeriod.id] })
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'payroll_periods', filter: `id=eq.${activePeriod.id}` },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ['periods'] })
-          queryClient.invalidateQueries({ queryKey: ['dashboard-stats', activePeriod.id] })
-        }
-      )
-      .subscribe()
-
-    return () => {
-      supabase.removeChannel(channel)
-    }
-  }, [activePeriod?.id, queryClient])
-
-  // ── Derived values ────────────────────────────────────────────────────────
-  const isApproved = activePeriod?.status === 'approved'
-  const dataFilled = !isLoading && (stats?.entryCount ?? 0) > 0
-  const hasPendingProfiles = !isLoading && (stats?.pendingEmpCount ?? 0) > 0
-
-  const profileStatus = isLoading ? 'pending' : hasPendingProfiles ? 'todo' : 'done'
-  const fillStatus = isLoading ? 'pending' : dataFilled ? 'done' : 'todo'
-  const approveStatus = isLoading ? 'pending' : isApproved ? 'done' : dataFilled ? 'pending' : 'todo'
-
-  const canApprove =
-    (user?.role === 'superUser' || user?.role === 'admin') &&
-    !isApproved && dataFilled && !hasPendingProfiles
-
-  // ── Period selector badge (shown in TopBar action slot) ────────────────
-  const PeriodBadge = (
-    <DropdownMenu>
-      <DropdownMenuTrigger>
-        <div className="flex items-center gap-2.5 rounded-full border border-slate-200 bg-white px-6 py-2 text-[15px] font-bold text-slate-700 shadow-sm hover:bg-slate-50 transition-colors min-h-[42px] cursor-pointer">
-          <Calendar className="w-4 h-4 text-[#1D9E75]" />
-          งวด: {activePeriod ? formatPeriodLabel(activePeriod.period_start, activePeriod.period_end) : 'เลือกงวด'}
-          <ChevronDown className="w-4 h-4 text-slate-400" />
-        </div>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-56">
-        {periods.map(p => (
-          <DropdownMenuItem
-            key={p.id}
-            onClick={() => setSelectedPeriodId(p.id)}
-            className={p.id === activePeriod?.id ? 'bg-slate-100 font-semibold' : ''}
-          >
-            <span className="flex-1">{formatPeriodLabel(p.period_start, p.period_end)}</span>
-            {p.status === 'approved' && (
-              <span className="text-xs text-emerald-600 ml-2">✅</span>
-            )}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  )
-
-  // Preview label for the next period
   const nextPeriodLabel = (() => {
-    const fmtLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
     if (periods.length === 0) {
       const now = new Date()
-      const s = new Date(now.getFullYear(), now.getMonth(), 1)
-      const e = new Date(now.getFullYear(), now.getMonth(), 15)
-      return formatPeriodLabel(fmtLocal(s), fmtLocal(e))
+      if (now.getDate() <= 15) {
+        return formatPeriodLabel(fmt(new Date(now.getFullYear(),now.getMonth(),1)), fmt(new Date(now.getFullYear(),now.getMonth(),15)))
+      } else {
+        return formatPeriodLabel(fmt(new Date(now.getFullYear(),now.getMonth(),16)), fmt(new Date(now.getFullYear(),now.getMonth()+1,0)))
+      }
     }
-    const latest = periods[0]
-    const [y, m, d] = latest.period_end.split('-').map(Number)
-    const latestEnd = new Date(y, m - 1, d)
-    const nextStart = new Date(y, m - 1, d + 1)
-    const day = nextStart.getDate()
-    const nextEnd = day === 1
-      ? new Date(nextStart.getFullYear(), nextStart.getMonth(), 15)
-      : new Date(nextStart.getFullYear(), nextStart.getMonth() + 1, 0)
-    return formatPeriodLabel(fmtLocal(nextStart), fmtLocal(nextEnd))
+    const latestEnd = parseLocal(periods[0].period_end)
+    const ns = new Date(latestEnd.getFullYear(), latestEnd.getMonth(), latestEnd.getDate()+1)
+    const ne = ns.getDate()===1 ? new Date(ns.getFullYear(),ns.getMonth(),15) : new Date(ns.getFullYear(),ns.getMonth()+1,0)
+    return formatPeriodLabel(fmt(ns), fmt(ne))
   })()
 
-  if (user?.role === 'normalUser') {
-    return (
-      <UserDashboardView 
-        stats={stats} 
-        linkStats={linkStats} 
-        isLoading={isLoading} 
-        PeriodBadge={PeriodBadge} 
-      />
-    )
-  }
+  const completionPct = stats && stats.totalDays > 0 ? Math.round((stats.uniqueDays / stats.totalDays) * 100) : 0
 
   return (
     <>
-      <TopBar title="Dashboard" action={PeriodBadge} />
+      <TopBar title="Dashboard" subtitle={activePeriod?.label} onMenuClick={onMenuClick} />
 
-      <div className="p-8 space-y-6 max-w-6xl">
+      <div className="vk-page">
 
-        {/* ── Row 1: 4 stat cards ─────────────────────────────────────────── */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
-
-          {/* Card 1: Total Employees */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-4 md:p-5 shadow-sm overflow-hidden">
-            <p className="text-xs md:text-sm text-slate-500 mb-1 truncate">พนักงานทั้งหมด</p>
-            <p className="text-3xl md:text-4xl font-bold text-slate-900 leading-none truncate">
-              {isLoading ? '—' : stats?.totalEmployees ?? 0}
-            </p>
-            <p className="text-[10px] md:text-xs text-slate-400 mt-2 flex items-center gap-1 truncate">
-              <Users className="w-3 h-3 flex-shrink-0" />
-              ที่มียอดงวดนี้
-            </p>
+        {/* Period selector + actions */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 32, flexWrap: 'wrap' }}>
+          <div>
+            <div className="vk-eyebrow" style={{ marginBottom: 6 }}>OVERVIEW · ภาพรวมงวดปัจจุบัน</div>
+            <div style={{ fontFamily: 'var(--vk-sans)', fontWeight: 700, fontSize: 28, letterSpacing: '-0.02em', color: 'var(--vk-ink)', marginBottom: 4 }}>
+              {activePeriod ? activePeriod.label : 'ยังไม่มีงวด'}
+              {activePeriod && <span style={{ fontWeight: 400, color: 'var(--vk-ink-3)', fontSize: 20 }}> — {isApproved ? 'อนุมัติแล้ว' : 'ฉบับร่าง'}</span>}
+            </div>
+            {periods.length > 1 && (
+              <select onChange={e => setSelectedPeriodId(e.target.value)} value={selectedPeriodId ?? periods[0]?.id ?? ''}
+                style={{ fontFamily: 'var(--vk-sans)', fontSize: 13, color: 'var(--vk-ink-3)', background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', outline: 'none' }}>
+                {periods.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+              </select>
+            )}
           </div>
-
-          {/* Card 2: Gross Pay */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-4 md:p-5 shadow-sm overflow-hidden">
-            <p className="text-xs md:text-sm text-slate-500 mb-1 truncate">ยอดจ่ายรวม (งวดนี้)</p>
-            <p className="text-xl sm:text-2xl md:text-3xl font-bold text-slate-900 leading-none truncate">
-              {isLoading ? '—' : formatThaiCurrency(stats?.totalGrossPay ?? 0)}
-            </p>
-            <p className="text-[10px] md:text-xs text-slate-400 mt-2 flex items-center gap-1 truncate">
-              <Wallet className="w-3 h-3 flex-shrink-0" />
-              บาท
-            </p>
-          </div>
-
-          {/* Card 3: Social Security */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-4 md:p-5 shadow-sm overflow-hidden">
-            <p className="text-xs md:text-sm text-slate-500 mb-1 truncate">รวมหักประกันสังคม</p>
-            <p className="text-xl sm:text-2xl md:text-3xl font-bold text-slate-900 leading-none truncate">
-              {isLoading ? '—' : formatThaiCurrency(stats?.totalSocialSecurity ?? 0)}
-            </p>
-            <p className="text-[10px] md:text-xs text-slate-400 mt-2 flex items-center gap-1 truncate">
-              <ShieldCheck className="w-3 h-3 flex-shrink-0" />
-              บาท (5%)
-            </p>
-          </div>
-
-          {/* Card 4: Net Pay */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-4 md:p-5 shadow-sm overflow-hidden">
-            <p className="text-xs md:text-sm text-slate-500 mb-1 truncate">ยอดจ่ายสุทธิ</p>
-            <p className="text-xl sm:text-2xl md:text-3xl font-bold text-[#1D9E75] leading-none truncate">
-              {isLoading ? '—' : formatThaiCurrency(stats?.totalNetPay ?? 0)}
-            </p>
-            <p className="text-[10px] md:text-xs text-slate-400 mt-2 flex items-center gap-1 truncate">
-              <Banknote className="w-3 h-3 flex-shrink-0" />
-              บาท
-            </p>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {activePeriod && !isApproved && (activeEmployeeCount > 0 || (stats?.gross ?? 0) > 0) && (
+              <button className="vk-btn vk-btn--primary" onClick={() => approveMutation.mutate()} disabled={approveMutation.isPending}>
+                <CheckCircle style={{ width: 15, height: 15 }} />
+                {approveMutation.isPending ? 'กำลังอนุมัติ...' : 'อนุมัติงวดนี้'}
+              </button>
+            )}
+            {activePeriod && isApproved && (
+              <button className="vk-btn" onClick={() => setShowCancelConfirm(true)} disabled={cancelApproveMutation.isPending}
+                style={{ borderColor: 'var(--vk-rule)', color: 'var(--vk-ink-2)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <XCircle style={{ width: 15, height: 15 }} />
+                {cancelApproveMutation.isPending ? 'กำลังยกเลิก...' : 'ยกเลิกอนุมัติ'}
+              </button>
+            )}
+            {(periods.length === 0 || isApproved) && (
+              <button className="vk-btn vk-btn--primary" onClick={() => createNextPeriodMutation.mutate()} disabled={createNextPeriodMutation.isPending}>
+                <Plus style={{ width: 15, height: 15 }} />
+                {createNextPeriodMutation.isPending ? 'กำลังสร้าง...' : periods.length === 0 ? `สร้างงวดแรก (${nextPeriodLabel})` : `สร้างงวดถัดไป (${nextPeriodLabel})`}
+              </button>
+            )}
+            {/* Delete button — only for draft periods with no data (wait for stats to load) */}
+            {activePeriod && !isApproved && stats !== undefined && stats.gross === 0 && stats.uniqueDays === 0 && (
+              <button className="vk-btn" onClick={() => setShowDeletePeriodConfirm(true)}
+                style={{ color: 'var(--vk-crimson)', borderColor: 'var(--vk-crimson)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <Trash2 style={{ width: 14, height: 14 }} />
+                ลบงวดนี้
+              </button>
+            )}
           </div>
         </div>
 
-        {/* ── Row 2: Monthly summary + Status ─────────────────────────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-
-          {/* Left: Historical summary card (3/5) */}
-          <div className="lg:col-span-3 bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-base font-bold text-slate-800">สรุปย้อนหลัง 4 งวด</h3>
-              <Badge className="bg-[#1D9E75]/10 text-[#1D9E75] border-none text-xs font-semibold px-3 py-1 rounded-full">
-                {activePeriod ? formatPeriodLabel(activePeriod.period_start, activePeriod.period_end) : ''}
-              </Badge>
-            </div>
-
-            {/* Breakdown rows for last 4 periods */}
-            <div className="space-y-2 mb-4">
-              {recentBars.map(bar => (
-                <div key={bar.id} className="flex justify-between items-center text-xs sm:text-sm">
-                  <span className={`${bar.id === activePeriod?.id ? 'font-semibold text-slate-800' : 'text-slate-500'} truncate mr-2`}>
-                    {bar.label}
-                    {bar.id === activePeriod?.id && (
-                      <span className="ml-2 text-[10px] font-bold uppercase tracking-wide text-[#1D9E75] bg-[#1D9E75]/10 px-1.5 py-0.5 rounded">งวดนี้</span>
-                    )}
-                  </span>
-                  <span className={`font-semibold shrink-0 ${bar.id === activePeriod?.id ? 'text-[#1D9E75]' : 'text-slate-700'}`}>
-                    {formatThaiCurrency(bar.value)} บาท
-                  </span>
+        {periods.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '80px 0', borderTop: '1px solid var(--vk-rule)' }}>
+            <div className="vk-eyebrow" style={{ marginBottom: 12 }}>ยังไม่มีงวดในระบบ</div>
+            <div style={{ fontFamily: 'var(--vk-sans)', fontSize: 15, color: 'var(--vk-ink-3)' }}>กดปุ่มสร้างงวดแรกเพื่อเริ่มต้นใช้งาน</div>
+          </div>
+        ) : (
+          <>
+            {/* Stats row */}
+            <div className="vk-grid-4" style={{ marginBottom: 36 }}>
+              {[
+                { eyebrow: 'พนักงานทั้งหมด', value: String(activeEmployeeCount), sub: 'คน (สถานะปกติ)', color: 'var(--vk-ink)' },
+                { eyebrow: 'ยอดจ่ายรวม',    value: (stats?.gross ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 }), sub: 'บาท', color: 'var(--vk-jade)' },
+                { eyebrow: 'ประกันสังคม',    value: (stats?.ss   ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 }), sub: 'บาท', color: 'var(--vk-ink-3)' },
+                { eyebrow: 'ยอดจ่ายสุทธิ',  value: (stats?.net  ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 }), sub: 'บาท', color: 'var(--vk-persimmon)' },
+              ].map((s, i) => (
+                <div key={i} style={{ padding: '18px 20px', background: 'var(--vk-bone)' }}>
+                  <div className="vk-eyebrow" style={{ marginBottom: 10 }}>{s.eyebrow}</div>
+                  <div style={{ fontFamily: 'var(--vk-mono)', fontWeight: 600, fontSize: 28, letterSpacing: '-0.025em', color: s.color, fontVariantNumeric: 'tabular-nums', lineHeight: 1.1, marginBottom: 4 }}>
+                    {s.value}
+                  </div>
+                  <div className="vk-small" style={{ color: 'var(--vk-ink-3)' }}>{s.sub}</div>
                 </div>
               ))}
             </div>
 
-            {/* Bar chart */}
-            <BarChart bars={recentBars} activePeriodId={activePeriod?.id} />
-          </div>
-
-          {/* Right: Period status checklist (2/5) */}
-          <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200 p-6 shadow-sm flex flex-col">
-            
-            {/* Admin Link Stats Summary */}
-            {(linkStats?.total ?? 0) > 0 && (
-              <div className="mb-6">
-                <h3 className="text-sm font-bold text-slate-800 mb-3 flex items-center gap-2">
-                  <Link2 className="w-4 h-4 text-purple-500" /> สถานะส่งสลิปให้พนักงาน
-                </h3>
-                <div className="grid grid-cols-3 gap-2 text-center text-sm">
-                  <div className="bg-emerald-50 rounded-lg p-2 border border-emerald-100">
-                    <p className="text-emerald-700 font-bold text-lg">{linkStats?.confirmed}</p>
-                    <p className="text-emerald-600 text-xs">ยืนยันแล้ว</p>
+            {/* Progress + Status */}
+            <div className="vk-grid-2">
+              <div>
+                <div className="vk-eyebrow" style={{ marginBottom: 8 }}>PROGRESS · ความคืบหน้าการบันทึกกะ</div>
+                <hr className="vk-rule" />
+                <div style={{ padding: '20px 0' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
+                    <span style={{ fontFamily: 'var(--vk-sans)', fontSize: 14, color: 'var(--vk-ink-2)' }}>วันที่บันทึกแล้ว</span>
+                    <span style={{ fontFamily: 'var(--vk-sans)', fontWeight: 600, fontSize: 16 }}>
+                      {stats?.uniqueDays ?? 0} <span style={{ color: 'var(--vk-ink-3)', fontWeight: 400 }}>/ {stats?.totalDays ?? 0} วัน</span>
+                    </span>
                   </div>
-                  <div className="bg-slate-50 rounded-lg p-2 border border-slate-200">
-                    <p className="text-slate-700 font-bold text-lg">{linkStats?.pending}</p>
-                    <p className="text-slate-500 text-xs">รอยืนยัน</p>
+                  <div style={{ height: 6, background: 'var(--vk-paper-2)', borderRadius: 999, overflow: 'hidden', marginBottom: 8 }}>
+                    <div style={{ width: `${completionPct}%`, height: '100%', background: completionPct === 100 ? 'var(--vk-jade)' : 'var(--vk-persimmon)', transition: 'width 400ms ease' }} />
                   </div>
-                  <div className="bg-red-50 rounded-lg p-2 border border-red-100">
-                    <p className="text-red-700 font-bold text-lg">{linkStats?.disputed}</p>
-                    <p className="text-red-600 text-xs">ทักท้วง</p>
+                  <div className="vk-small" style={{ color: 'var(--vk-ink-3)' }}>
+                    {completionPct === 100 ? 'บันทึกครบทุกวันแล้ว ✓' : `เหลืออีก ${(stats?.totalDays ?? 0) - (stats?.uniqueDays ?? 0)} วัน`}
                   </div>
                 </div>
-              </div>
-            )}
-
-            <h3 className="text-base font-bold text-slate-800 mb-5">สถานะงานงวดปัจจุบัน</h3>
-
-            <div className="flex flex-col gap-5 flex-1">
-
-              {/* Step 0: Profiles Complete */}
-              <Link to="/employees" className="flex items-start justify-between gap-3 hover:bg-slate-50 p-2 -mx-2 rounded-xl transition-colors">
-                <div className="flex items-start gap-3">
-                  <div className={`mt-0.5 w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
-                    profileStatus === 'done' ? 'bg-emerald-100' : 'bg-amber-100'
-                  }`}>
-                    {profileStatus === 'done'
-                      ? <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                      : <AlertCircle className="w-4 h-4 text-amber-600" />
-                    }
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-slate-800">ตรวจสอบฐานข้อมูลพนักงาน</p>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      {isLoading ? '...' : hasPendingProfiles 
-                        ? <span className="text-amber-600 font-medium">รออัปเดตข้อมูล {stats?.pendingEmpCount} คน</span>
-                        : 'ข้อมูลสมบูรณ์ 100%'
-                      }
-                    </p>
-                  </div>
-                </div>
-                {profileStatus === 'done' 
-                  ? <StepBadge status="done" />
-                  : <span className="text-xs font-semibold px-3 py-1 rounded-full bg-amber-100 text-amber-700">ต้องแก้ไข</span>
-                }
-              </Link>
-
-              {/* Step 1: Data entry */}
-              <Link to="/payroll" className="flex items-start justify-between gap-3 hover:bg-slate-50 p-2 -mx-2 rounded-xl transition-colors">
-                <div className="flex items-start gap-3">
-                  <div className={`mt-0.5 w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${fillStatus === 'done' ? 'bg-emerald-100' : 'bg-slate-100'}`}>
-                    {fillStatus === 'done'
-                      ? <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                      : <Clock className="w-4 h-4 text-slate-400" />
-                    }
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-slate-800">กรอกข้อมูล</p>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      {isLoading ? '...' : `${stats?.entryCount ?? 0} / ${stats?.totalEmployees ?? 0} คน`}
-                    </p>
-                  </div>
-                </div>
-                <StepBadge status={fillStatus} />
-              </Link>
-
-              {/* Step 2: Approval */}
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-start gap-3">
-                  <div className={`mt-0.5 w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${isApproved ? 'bg-emerald-100' : 'bg-slate-100'}`}>
-                    {isApproved
-                      ? <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                      : <Clock className="w-4 h-4 text-slate-400" />
-                    }
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-slate-800">อนุมัติโดย Admin</p>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      {isApproved ? (
-                        <span className="text-[#1D9E75] font-semibold">
-                          อนุมัติแล้ว โดย {activePeriod?.approver?.full_name || 'แอดมิน'}
-                        </span>
-                      ) : 'รอการอนุมัติ'}
-                    </p>
-                  </div>
-                </div>
-                <StepBadge status={approveStatus} />
+                <hr className="vk-rule" />
               </div>
 
-            </div>
+              <div>
+                <div className="vk-eyebrow" style={{ marginBottom: 8 }}>STATUS · สถานะงวด</div>
+                <hr className="vk-rule" />
+                <div style={{ padding: '20px 0', display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  {/* Status */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontFamily: 'var(--vk-sans)', fontSize: 14, color: 'var(--vk-ink-2)' }}>สถานะงวด</span>
+                    <span className="vk-pill" data-tone={isApproved ? 'approved' : 'draft'}>{isApproved ? '● อนุมัติแล้ว' : '● ฉบับร่าง'}</span>
+                  </div>
 
-            {/* Approve / Unapprove / Create next period buttons */}
-            {(user?.role === 'superUser' || user?.role === 'admin') && (
-              <div className="mt-6 pt-5 border-t border-slate-100 space-y-2">
-                <Button
-                  className="w-full bg-[#1D9E75] hover:bg-[#157a5a] rounded-xl h-10 font-semibold"
-                  disabled={!canApprove || approveMutation.isPending}
-                  onClick={() => approveMutation.mutate()}
-                >
-                  {approveMutation.isPending ? (
-                    <><Loader2 className="w-4 h-4 mr-2 animate-spin" />กำลังอนุมัติ...</>
-                  ) : isApproved ? (
-                    <><CheckCircle2 className="w-4 h-4 mr-2" />อนุมัติแล้ว</>
-                  ) : (
-                    <><CheckCircle2 className="w-4 h-4 mr-2" />อนุมัติงวดนี้</>
+                  {/* Approver */}
+                  {isApproved && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontFamily: 'var(--vk-sans)', fontSize: 14, color: 'var(--vk-ink-2)' }}>อนุมัติโดย</span>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--vk-jade)' }}>
+                        {(activePeriod as any)?.approver?.full_name || 'ไม่ระบุ'}
+                      </span>
+                    </div>
                   )}
-                </Button>
-                {/* Unapprove — only visible when period is already approved */}
-                {isApproved && (
-                  <Button
-                    variant="outline"
-                    className="w-full rounded-xl h-9 font-medium text-rose-600 border-rose-200 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-300"
-                    disabled={unapproveMutation.isPending}
-                    onClick={() => {
-                      if (window.confirm('ยืนยันการยกเลิกการอนุมัติงวดนี้?\n\nงวดจะกลับสู่สถานะ Draft และพนักงานจะสามารถดูสลิปได้ต่อไปตามลิงก์เดิม')) {
-                        unapproveMutation.mutate()
-                      }
-                    }}
-                  >
-                    {unapproveMutation.isPending ? (
-                      <><Loader2 className="w-4 h-4 mr-2 animate-spin" />กำลังยกเลิก...</>
+
+                  {/* SS Rate — editable */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontFamily: 'var(--vk-sans)', fontSize: 14, color: 'var(--vk-ink-2)' }}>อัตราประกันสังคม</span>
+                    {editingSSRate ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <input
+                          type="number" step="0.01" min="0" max="100"
+                          value={ssRateDraft}
+                          onChange={e => setSSRateDraft(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') {
+                              const v = parseFloat(ssRateDraft)
+                              if (!isNaN(v) && v >= 0 && v <= 100) { updateSSRateMutation.mutate(v / 100); setEditingSSRate(false) }
+                            }
+                            if (e.key === 'Escape') setEditingSSRate(false)
+                          }}
+                          autoFocus
+                          style={{ width: 64, fontFamily: 'var(--vk-mono)', fontSize: 13, border: '1px solid var(--vk-rule)', padding: '2px 6px', background: 'var(--vk-paper)', textAlign: 'right', outline: 'none' }}
+                        />
+                        <span style={{ fontFamily: 'var(--vk-mono)', fontSize: 13, color: 'var(--vk-ink-3)' }}>%</span>
+                        <button onClick={() => { const v = parseFloat(ssRateDraft); if (!isNaN(v) && v >= 0 && v <= 100) { updateSSRateMutation.mutate(v / 100); setEditingSSRate(false) } }}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--vk-jade)', padding: 2, display: 'flex' }}>
+                          <Check style={{ width: 14, height: 14 }} />
+                        </button>
+                        <button onClick={() => setEditingSSRate(false)}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--vk-ink-3)', padding: 2, display: 'flex' }}>
+                          <X style={{ width: 14, height: 14 }} />
+                        </button>
+                      </div>
                     ) : (
-                      <><RotateCcw className="w-4 h-4 mr-2" />ยกเลิกการอนุมัติ</>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontFamily: 'var(--vk-mono)', fontSize: 14, fontVariantNumeric: 'tabular-nums' }}>{((activePeriod?.social_security_rate ?? 0.05) * 100).toFixed(2)}%</span>
+                        <button onClick={() => { setSSRateDraft((((activePeriod?.social_security_rate ?? 0.05) * 100).toFixed(2))); setEditingSSRate(true) }}
+                          title="แก้ไขอัตราประกันสังคม"
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--vk-ink-3)', padding: 2, display: 'flex', opacity: 0.5 }}>
+                          <Pencil style={{ width: 12, height: 12 }} />
+                        </button>
+                      </div>
                     )}
-                  </Button>
-                )}
-                {isApproved && (
-                  <Button
-                    variant="outline"
-                    className="w-full rounded-xl h-9 font-medium text-[#1D9E75] border-[#1D9E75]/30 hover:bg-[#1D9E75]/5 hover:border-[#1D9E75]"
-                    disabled={createNextPeriodMutation.isPending}
-                    onClick={() => createNextPeriodMutation.mutate()}
-                  >
-                    {createNextPeriodMutation.isPending ? (
-                      <><Loader2 className="w-4 h-4 mr-2 animate-spin" />กำลังสร้าง...</>
-                    ) : (
-                      <><Plus className="w-4 h-4 mr-2" />สร้างงวดถัดไป ({nextPeriodLabel})</>
-                    )}
-                  </Button>
-                )}
-                {periods.length === 0 && (
-                  <Button
-                    variant="outline"
-                    className="w-full rounded-xl h-9 font-medium text-[#1D9E75] border-[#1D9E75]/30 hover:bg-[#1D9E75]/5 hover:border-[#1D9E75]"
-                    disabled={createNextPeriodMutation.isPending}
-                    onClick={() => createNextPeriodMutation.mutate()}
-                  >
-                    {createNextPeriodMutation.isPending ? (
-                      <><Loader2 className="w-4 h-4 mr-2 animate-spin" />กำลังสร้าง...</>
-                    ) : (
-                      <><Plus className="w-4 h-4 mr-2" />สร้างงวดแรก ({nextPeriodLabel})</>
-                    )}
-                  </Button>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </>
-  )
-}
+                  </div>
 
-// ─── User Dashboard View ──────────────────────────────────────────────────────
-interface LinkStats {
-  total: number
-  pending: number
-  confirmed: number
-  disputed: number
-}
+                  {/* SS deduction summary */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontFamily: 'var(--vk-sans)', fontSize: 14, color: 'var(--vk-ink-2)' }}>
+                      หักประกันสังคม{stats?.ssCount ? <span style={{ color: 'var(--vk-ink-3)', fontSize: 12 }}> ({stats.ssCount} คน)</span> : ''}
+                    </span>
+                    <span style={{ fontFamily: 'var(--vk-mono)', fontSize: 14, color: 'var(--vk-ink-3)', fontVariantNumeric: 'tabular-nums' }}>฿ {(stats?.ss ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+                  </div>
 
-interface DashboardStats {
-  totalEmployees: number
-  pendingEmpCount: number
-  totalGrossPay: number
-  totalSocialSecurity: number
-  totalNetPay: number
-  periodStatus: string
-  periodLabel: string
-  approverName?: string
-  daysFilled: number
-  totalDays: number
-  entryCount: number
-  isExported: boolean
-}
+                  {/* Advance */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontFamily: 'var(--vk-sans)', fontSize: 14, color: 'var(--vk-ink-2)' }}>
+                      เบิกล่วงหน้ารวม{(stats?.advCount ?? 0) > 0 ? <span style={{ color: 'var(--vk-ink-3)', fontSize: 12 }}> ({stats!.advCount} รายการ)</span> : ''}
+                    </span>
+                    <span style={{ fontFamily: 'var(--vk-mono)', fontSize: 14, color: 'var(--vk-crimson)', fontVariantNumeric: 'tabular-nums' }}>฿ {(stats?.adv ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+                  </div>
 
-function UserDashboardView({ stats, linkStats, isLoading, PeriodBadge }: {
-  stats: DashboardStats | null | undefined
-  linkStats: LinkStats | null | undefined
-  isLoading: boolean
-  PeriodBadge: React.ReactNode
-}) {
-  const totalDays = stats?.totalDays ?? 15
-  const daysFilled = stats?.daysFilled ?? 0
-  const pendingEmpCount = stats?.pendingEmpCount ?? 0
-  const isApproved = stats?.periodStatus === 'approved'
-  const isCompleteProfile = !isLoading && pendingEmpCount === 0
-
-  return (
-    <>
-      <TopBar title="ภาพรวม (ผู้ปฏิบัติงาน)" action={PeriodBadge} />
-      <div className="p-8 max-w-5xl mx-auto space-y-6">
-        <h2 className="text-xl font-bold text-slate-800">สถานะการทำงานงวดปัจจุบัน</h2>
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          
-          <Link to="/shifts" className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm hover:border-blue-400 hover:shadow-md transition-all block">
-            <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-              <Calendar className="w-5 h-5 text-blue-500" />
-              การกรอกกะทำงาน
-            </h3>
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-slate-600">ความคืบหน้า</span>
-              <span className="font-bold text-slate-800">{daysFilled} / {totalDays} วัน</span>
-            </div>
-            <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
-              <div className="bg-blue-500 h-full transition-all" style={{ width: `${Math.min(100, (daysFilled/totalDays)*100)}%` }} />
-            </div>
-          </Link>
-
-          <Link to="/employees" className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm hover:border-amber-400 hover:shadow-md transition-all block">
-            <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-              <Users className="w-5 h-5 text-amber-500" />
-              ฐานข้อมูลพนักงาน
-            </h3>
-            {isCompleteProfile ? (
-              <div className="flex items-center gap-3 text-emerald-600 bg-emerald-50 p-3 rounded-lg">
-                <CheckCircle2 className="w-5 h-5" />
-                <span className="font-medium">ข้อมูลสมบูรณ์ 100%</span>
-              </div>
-            ) : (
-              <div className="flex items-center justify-between bg-amber-50 p-3 rounded-lg border border-amber-100">
-                <div className="flex items-center gap-2 text-amber-700">
-                  <AlertCircle className="w-5 h-5" />
-                  <span className="font-medium">รออัปเดตข้อมูล</span>
-                </div>
-                <span className="font-bold text-amber-700 bg-white px-3 py-1 rounded-full text-sm">
-                  {pendingEmpCount} คน
-                </span>
-              </div>
-            )}
-          </Link>
-
-          <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-            <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-              <ShieldCheck className="w-5 h-5 text-emerald-500" />
-              การอนุมัติงวด
-            </h3>
-            {isApproved ? (
-              <div className="flex items-center gap-3 text-emerald-600 bg-emerald-50 p-3 rounded-lg border border-emerald-100">
-                <CheckCircle2 className="w-5 h-5" />
-                <div className="flex flex-col">
-                  <span className="font-medium">แอดมินอนุมัติงวดนี้แล้ว</span>
-                  {stats?.approverName && (
-                    <span className="text-[11px] opacity-70">โดย {stats.approverName}</span>
+                  {/* Pending profile alert */}
+                  {pendingProfileCount > 0 && (
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, background: 'var(--vk-marigold-tint)', border: '1px solid var(--vk-marigold)', padding: '10px 14px', marginTop: 4 }}>
+                      <span style={{ fontSize: 15, flexShrink: 0 }}>⚠️</span>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: 13, color: '#7a5c00' }}>ข้อมูลพนักงานไม่ครบ</div>
+                        <div style={{ fontSize: 12, color: '#9a7500', marginTop: 2 }}>มีพนักงาน <strong>{pendingProfileCount} คน</strong> ที่ยังกรอกข้อมูลไม่ครบถ้วน กรุณาตรวจสอบที่หน้าพนักงาน</div>
+                      </div>
+                    </div>
                   )}
                 </div>
+                <hr className="vk-rule" />
               </div>
-            ) : (
-              <div className="flex items-center gap-3 text-slate-500 bg-slate-50 p-3 rounded-lg border border-slate-200">
-                <Clock className="w-5 h-5" />
-                <span className="font-medium">รอแอดมินตรวจสอบและอนุมัติ</span>
-              </div>
-            )}
-          </div>
-
-          <Link to="/share-links" className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm hover:border-purple-400 hover:shadow-md transition-all block">
-            <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-              <Link2 className="w-5 h-5 text-purple-500" />
-              สถานะสลิปเงินเดือน
-            </h3>
-            {(linkStats?.total ?? 0) > 0 ? (
-              <div className="grid grid-cols-3 gap-2 text-center text-sm">
-                <div className="bg-emerald-50 rounded-lg p-2 border border-emerald-100">
-                  <p className="text-emerald-700 font-bold text-lg">{linkStats.confirmed}</p>
-                  <p className="text-emerald-600 text-xs">ยืนยันแล้ว</p>
-                </div>
-                <div className="bg-slate-50 rounded-lg p-2 border border-slate-200">
-                  <p className="text-slate-700 font-bold text-lg">{linkStats.pending}</p>
-                  <p className="text-slate-500 text-xs">รอยืนยัน</p>
-                </div>
-                <div className="bg-red-50 rounded-lg p-2 border border-red-100">
-                  <p className="text-red-700 font-bold text-lg">{linkStats.disputed}</p>
-                  <p className="text-red-600 text-xs">ทักท้วง</p>
-                </div>
-              </div>
-            ) : (
-              <div className="flex items-center gap-3 text-slate-500 bg-slate-50 p-3 rounded-lg border border-slate-200">
-                <AlertCircle className="w-5 h-5" />
-                <span className="font-medium">ยังไม่ได้สร้างลิงก์ในงวดนี้</span>
-              </div>
-            )}
-          </Link>
-
-        </div>
+            </div>
+          </>
+        )}
       </div>
+
+      {/* Custom cancel-approval confirm dialog */}
+      {showCancelConfirm && (
+        <div className="vk-root" style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(22,19,17,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+          onClick={() => setShowCancelConfirm(false)}>
+          <div style={{ background: 'var(--vk-paper)', border: '1px solid var(--vk-rule)', width: '100%', maxWidth: 380 }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ background: 'var(--vk-persimmon)', color: '#fff', padding: '16px 20px' }}>
+              <div style={{ fontWeight: 700, fontSize: 15 }}>ยืนยันการยกเลิกอนุมัติ</div>
+              <div style={{ fontSize: 11, opacity: 0.55, marginTop: 2 }}>งวด {activePeriod?.label}</div>
+            </div>
+            <div style={{ padding: '20px', fontSize: 14, color: 'var(--vk-ink-2)', lineHeight: 1.6, background: 'var(--vk-bone)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div>การยกเลิกอนุมัติจะเปลี่ยนสถานะงวดกลับเป็น <strong>ฉบับร่าง</strong> และจะสามารถแก้ไขข้อมูลได้อีกครั้ง</div>
+              <div style={{ padding: '10px 12px', background: 'var(--vk-crimson-tint)', border: '1px solid var(--vk-crimson)', fontSize: 13, color: 'var(--vk-crimson)', lineHeight: 1.5 }}>
+                ⚠️ <strong>ลิงก์สลิปพนักงานทั้งหมดของงวดนี้จะถูกยกเลิกและลบทันที</strong> พนักงานจะไม่สามารถเข้าถึงสลิปผ่านลิงก์เดิมได้อีก และต้องสร้างลิงก์ใหม่เมื่ออนุมัติอีกครั้ง
+              </div>
+              <div>คุณต้องการดำเนินการต่อหรือไม่?</div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, padding: '14px 20px', borderTop: '1px solid var(--vk-rule)', background: 'var(--vk-paper)' }}>
+              <button className="vk-btn vk-btn--primary" style={{ flex: 1 }}
+                disabled={cancelApproveMutation.isPending}
+                onClick={() => { cancelApproveMutation.mutate(); setShowCancelConfirm(false) }}>
+                {cancelApproveMutation.isPending ? 'กำลังยกเลิก...' : 'ยืนยัน ยกเลิกอนุมัติ'}
+              </button>
+              <button className="vk-btn" onClick={() => setShowCancelConfirm(false)}>ปิด</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete period confirm modal */}
+      {showDeletePeriodConfirm && (
+        <div className="vk-root" style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(22,19,17,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+          onClick={() => setShowDeletePeriodConfirm(false)}>
+          <div style={{ background: 'var(--vk-paper)', border: '1px solid var(--vk-rule)', width: '100%', maxWidth: 380 }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ background: 'var(--vk-crimson)', color: '#fff', padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 10 }}>
+              <Trash2 style={{ width: 16, height: 16, flexShrink: 0 }} />
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 15 }}>ลบงวดนี้ออกจากระบบ</div>
+                <div style={{ fontSize: 11, opacity: 0.65, marginTop: 2 }}>งวด {activePeriod?.label}</div>
+              </div>
+            </div>
+            <div style={{ padding: '20px', background: 'var(--vk-bone)', display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <p style={{ fontSize: 14, color: 'var(--vk-ink-2)', lineHeight: 1.6, margin: 0 }}>
+                งวดนี้จะถูก<strong>ลบออกจากระบบถาวร</strong> และระบบจะพร้อมให้คุณสร้างงวดใหม่ได้ทันที
+              </p>
+              <div style={{ padding: '10px 14px', background: 'var(--vk-crimson-tint)', border: '1px solid var(--vk-crimson)', fontSize: 12, color: 'var(--vk-crimson)', lineHeight: 1.5 }}>
+                ⚠️ การดำเนินการนี้<strong>ไม่สามารถเรียกคืนได้</strong>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, padding: '14px 20px', borderTop: '1px solid var(--vk-rule)', background: 'var(--vk-paper)' }}>
+              <button className="vk-btn" onClick={() => setShowDeletePeriodConfirm(false)} style={{ flex: 1 }}>ยกเลิก</button>
+              <button
+                onClick={() => deletePeriodMutation.mutate()}
+                disabled={deletePeriodMutation.isPending}
+                style={{
+                  flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  background: 'var(--vk-crimson)', color: '#fff', border: 'none', cursor: 'pointer',
+                  fontFamily: 'var(--vk-sans)', fontWeight: 700, fontSize: 13, padding: '0 16px', height: 36,
+                  opacity: deletePeriodMutation.isPending ? 0.6 : 1,
+                }}>
+                <Trash2 style={{ width: 14, height: 14 }} />
+                {deletePeriodMutation.isPending ? 'กำลังลบ...' : 'ยืนยัน ลบงวด'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }

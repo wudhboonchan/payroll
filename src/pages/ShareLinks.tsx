@@ -1,37 +1,15 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
+import { useOutletContext } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import { useAppStore } from '../store/useAppStore'
 import { TopBar } from '../components/layout/TopBar'
-import { Button } from '../components/ui/button'
-import { Badge } from '../components/ui/badge'
-import { Input } from '../components/ui/input'
 import { toast } from 'sonner'
-import {
-  Copy,
-  FileDown,
-  RefreshCw,
-  Search,
-  CheckCircle2,
-  Clock,
-  AlertCircle,
-  RotateCcw,
-  Users,
-  Link2,
-} from 'lucide-react'
-import { formatEmployeeName } from '../lib/formatters'
-import { formatPeriodLabel } from '../lib/formatters'
+import { Copy, Check, RefreshCw, Link2, Search, FileDown, RotateCcw, AlertCircle, Smartphone, Eye, EyeOff } from 'lucide-react'
+import '../styles/v2-tokens.css'
 
 type SlipStatus = 'pending' | 'confirmed' | 'disputed' | 'auto_confirmed'
 type FilterStatus = 'all' | SlipStatus
-
-interface PayrollPeriod {
-  id: string
-  period_start: string
-  period_end: string
-  status: 'draft' | 'approved'
-  factory_id: string
-}
 
 interface TokenRow {
   id: string
@@ -44,215 +22,188 @@ interface TokenRow {
     employee_code: string
     first_name: string
     last_name: string
-    prefix?: string
     nationality?: string
+    line_uid?: string | null
+    liff_viewed_at?: string | null
   }
 }
 
-function StatusBadge({ status }: { status: SlipStatus }) {
-  const map: Record<SlipStatus, { label: string; className: string }> = {
-    pending:        { label: '⏳ รอยืนยัน',        className: 'bg-slate-100 text-slate-600 border-slate-200' },
-    confirmed:      { label: '✅ ยืนยันแล้ว',       className: 'bg-green-100 text-green-700 border-green-200' },
-    disputed:       { label: '❌ ทักท้วง',           className: 'bg-red-100 text-red-700 border-red-200' },
-    auto_confirmed: { label: '🔄 ยืนยันอัตโนมัติ',  className: 'bg-blue-100 text-blue-700 border-blue-200' },
-  }
-  const { label, className } = map[status] || map.pending
-  return (
-    <Badge variant="outline" className={`text-xs font-medium ${className}`}>
-      {label}
-    </Badge>
-  )
+const STATUS_MAP: Record<SlipStatus, { tone: string; label: string }> = {
+  pending:        { tone: 'accent',   label: 'รอยืนยัน' },
+  confirmed:      { tone: 'approved', label: 'ยืนยันแล้ว' },
+  disputed:       { tone: 'danger',   label: 'ทักท้วง' },
+  auto_confirmed: { tone: 'info',     label: 'ยืนยันอัตโนมัติ' },
 }
 
-function CopyButton({ text, label = 'คัดลอก', icon }: { text: string; label?: string; icon?: React.ReactNode }) {
+function CopyButton({ text, label, icon }: { text: string; label: string; icon?: React.ReactNode }) {
   const [copied, setCopied] = useState(false)
-
-  const handleCopy = () => {
+  const handle = () => {
     navigator.clipboard.writeText(text)
     setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    setTimeout(() => setCopied(false), 1800)
   }
-
   return (
-    <button
-      onClick={handleCopy}
-      className={`text-xs px-2 py-1 rounded-md border transition-all duration-200 flex items-center gap-1 ${
-        copied
-          ? 'bg-green-50 border-green-200 text-green-700'
-          : 'bg-white border-slate-200 text-slate-500 hover:border-slate-400 hover:text-slate-800'
-      }`}
-      title={label}
-    >
-      {copied ? (
-        <><CheckCircle2 className="w-3 h-3" /> {label === 'ลิงก์' ? '✓' : 'คัดลอกแล้ว'}</>
-      ) : (
-        <>{icon || <Copy className="w-3 h-3" />} {label}</>
-      )}
+    <button onClick={handle} className="vk-btn vk-btn--ghost" style={{ height: 28, padding: '0 10px', fontSize: 11, gap: 4, display: 'inline-flex', alignItems: 'center' }}>
+      {copied
+        ? <><Check style={{ width: 11, height: 11, color: 'var(--vk-jade)' }} />คัดลอกแล้ว</>
+        : <>{icon ?? <Copy style={{ width: 11, height: 11 }} />}{label}</>
+      }
     </button>
   )
 }
 
 export default function ShareLinks() {
+  const { onMenuClick } = useOutletContext<{ onMenuClick: () => void }>()
   const { user } = useAppStore()
   const queryClient = useQueryClient()
 
-  const [filterStatus, setFilterStatus] = useState<FilterStatus>('all')
-  const [sortBy, setSortBy] = useState<'code' | 'name' | 'status'>('code')
-  const [search, setSearch] = useState('')
   const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(null)
+  const [filterStatus, setFilterStatus] = useState<FilterStatus>('all')
+  const [search, setSearch] = useState('')
+  const [sortBy, setSortBy] = useState<'code' | 'name' | 'status'>('code')
+  const [showResetConfirm, setShowResetConfirm] = useState<string | null>(null) // tokenId
 
-  const { data: periods = [] } = useQuery({
+  const { data: periods = [] } = useQuery<any[]>({
     queryKey: ['periods', user?.factory_id],
     queryFn: async () => {
-      if (!user?.factory_id) return []
-      const { data, error } = await supabase
-        .from('payroll_periods')
-        .select('*')
-        .eq('factory_id', user.factory_id)
-        .order('period_start', { ascending: false })
-      if (error) throw error
-      return data as PayrollPeriod[]
-    },
-    enabled: !!user?.factory_id,
+      const { data, error } = await supabase.from('payroll_periods').select('*')
+        .eq('factory_id', user?.factory_id ?? '').order('period_start', { ascending: false })
+      if (error) throw error; return data
+    }, enabled: !!user?.factory_id, staleTime: 0,
   })
 
-  // Initialize selectedPeriodId once when periods load
-  const hasInitializedPeriod = useRef(false)
+  // Auto-select most recent approved period, then latest
+  const hasInit = useRef(false)
   useEffect(() => {
-    if (!hasInitializedPeriod.current && periods.length > 0) {
+    if (!hasInit.current && periods.length > 0) {
       const approved = periods.find(p => p.status === 'approved')
-      setSelectedPeriodId(approved?.id || periods[0].id)
-      hasInitializedPeriod.current = true
+      setSelectedPeriodId(approved?.id ?? periods[0].id)
+      hasInit.current = true
     }
   }, [periods])
 
-  const selectedPeriod = periods.find(p => p.id === selectedPeriodId)
-  const periodLabel = selectedPeriod
-    ? formatPeriodLabel(selectedPeriod.period_start, selectedPeriod.period_end)
-    : '—'
+  // Force-refresh tokens when page mounts (picks up liff_viewed_at / line_uid changes)
+  useEffect(() => {
+    queryClient.invalidateQueries({ queryKey: ['payslip_tokens'] })
+  }, [queryClient])
 
-  const { data: tokens = [] } = useQuery({
-    queryKey: ['payslip_tokens', selectedPeriodId],
-    refetchInterval: 8000, // polling fallback in case realtime misses an event
+  // LINE stats — independent of tokens, query employees directly
+  const { data: lineStats = { linked: 0, viewed: 0, total: 0 } } = useQuery({
+    queryKey: ['line_stats', user?.factory_id],
     queryFn: async () => {
-      if (!selectedPeriodId) return []
-      const { data, error } = await supabase
-        .from('payslip_tokens')
-        .select(`
-          id, token, expires_at, employee_status, dispute_reason, created_at,
-          employees(employee_code, first_name, last_name, prefix, nationality)
-        `)
-        .eq('period_id', selectedPeriodId)
-        .order('created_at')
+      const { data, error } = await supabase.from('employees')
+        .select('id,line_uid,liff_viewed_at')
+        .eq('factory_id', user?.factory_id ?? '')
+        .eq('status', 'active')
       if (error) throw error
-      
-      const typedData = data as unknown as TokenRow[]
-      return typedData.map(t => {
+      return {
+        total:  data.length,
+        linked: data.filter(e => e.line_uid).length,
+        viewed: data.filter(e => e.liff_viewed_at).length,
+      }
+    },
+    enabled: !!user?.factory_id,
+    staleTime: 0,
+    refetchInterval: 8000,
+  })
+
+  const activePeriod = periods.find(p => p.id === selectedPeriodId) ?? periods[0]
+  const isApproved = activePeriod?.status === 'approved'
+
+  const { data: tokens = [] } = useQuery<TokenRow[]>({
+    queryKey: ['payslip_tokens', activePeriod?.id],
+    queryFn: async () => {
+      if (!activePeriod) return []
+      const { data, error } = await supabase.from('payslip_tokens')
+        .select('id,token,expires_at,employee_status,dispute_reason,created_at,employees(employee_code,first_name,last_name,nationality,line_uid,liff_viewed_at)')
+        .eq('period_id', activePeriod.id).order('created_at')
+      if (error) throw error
+      // Derive auto_confirmed client-side (same as V1)
+      return (data as unknown as TokenRow[]).map(t => {
         if (t.employee_status === 'pending' && t.expires_at) {
-          // Derive sent_at from expires_at (always set to now+30d on create/reset)
-          // so auto-confirm counts 24h from the last send/reset, not the original created_at
           const sentAt = new Date(t.expires_at).getTime() - 30 * 24 * 60 * 60 * 1000
-          const hoursPassed = (Date.now() - sentAt) / (1000 * 60 * 60)
-          if (hoursPassed >= 24) {
+          if ((Date.now() - sentAt) / (1000 * 60 * 60) >= 24) {
             return { ...t, employee_status: 'auto_confirmed' as SlipStatus }
           }
         }
         return t
       })
     },
-    enabled: !!selectedPeriodId,
+    enabled: !!activePeriod,
+    staleTime: 0,
+    refetchInterval: 8000,
   })
 
-  // Realtime subscription
+  // Realtime subscriptions — payslip_tokens + employees (for line_uid / liff_viewed_at)
   useEffect(() => {
-    if (!selectedPeriodId) return
-
-    const channel = supabase
-      .channel(`tokens-realtime-${selectedPeriodId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'payslip_tokens',
-          filter: `period_id=eq.${selectedPeriodId}`,
-        },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ['payslip_tokens', selectedPeriodId] })
-          queryClient.invalidateQueries({ queryKey: ['dashboard-link-stats'] })
-        }
-      )
+    if (!activePeriod?.id) return
+    const channel = supabase.channel(`tokens-v2-${activePeriod.id}`)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'payslip_tokens', filter: `period_id=eq.${activePeriod.id}` }, () => {
+        queryClient.invalidateQueries({ queryKey: ['payslip_tokens', activePeriod.id] })
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'employees' }, () => {
+        queryClient.invalidateQueries({ queryKey: ['payslip_tokens', activePeriod.id] })
+        queryClient.invalidateQueries({ queryKey: ['line_stats', user?.factory_id] })
+      })
       .subscribe()
-
-    return () => {
-      supabase.removeChannel(channel)
-    }
-  }, [selectedPeriodId, queryClient])
+    return () => { supabase.removeChannel(channel) }
+  }, [activePeriod?.id, queryClient, user?.factory_id])
 
   const generateMutation = useMutation({
     mutationFn: async () => {
-      if (!selectedPeriodId || !user?.factory_id) throw new Error('No period selected')
+      if (!activePeriod?.id || !user?.factory_id) throw new Error('ไม่พบงวด')
+      const { data: employees, error: empErr } = await supabase.from('employees')
+        .select('id').eq('factory_id', user.factory_id).eq('status', 'active')
+      if (empErr) throw empErr
 
-      const { data: employees, error: empError } = await supabase
-        .from('employees')
-        .select('id')
-        .eq('factory_id', user.factory_id)
-        .eq('status', 'active')
-      if (empError) throw empError
+      const { data: existing, error: exErr } = await supabase.from('payslip_tokens')
+        .select('employee_id').eq('period_id', activePeriod.id)
+      if (exErr) throw exErr
 
-      // Get existing tokens to avoid duplicates without relying on DB constraints
-      const { data: existingTokens, error: existingError } = await supabase
-        .from('payslip_tokens')
-        .select('employee_id')
-        .eq('period_id', selectedPeriodId)
-      if (existingError) throw existingError
+      const existingIds = new Set(existing?.map(t => t.employee_id) ?? [])
+      const newEmps = (employees ?? []).filter(e => !existingIds.has(e.id))
+      if (newEmps.length === 0) { toast.info('ทุกคนมีลิงก์แล้ว'); return }
 
-      const existingIds = new Set(existingTokens?.map(t => t.employee_id) || [])
-      const newEmployees = (employees || []).filter(emp => !existingIds.has(emp.id))
-
-      if (newEmployees.length === 0) return // Nothing to do
-
-      const rows = newEmployees.map(emp => ({
-        period_id: selectedPeriodId,
-        employee_id: emp.id,
+      const rows = newEmps.map(e => ({
+        period_id: activePeriod.id,
+        employee_id: e.id,
         token: crypto.randomUUID(),
         expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
         employee_status: 'pending',
       }))
-
-      const { error } = await supabase
-        .from('payslip_tokens')
-        .insert(rows)
+      const { error } = await supabase.from('payslip_tokens').insert(rows)
       if (error) throw error
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['payslip_tokens', selectedPeriodId] })
-      toast.success('สร้างลิงก์สำเร็จ พร้อมส่งผ่าน LINE แล้ว')
-    },
-    onError: (e: Error) => toast.error('เกิดข้อผิดพลาด', { description: e.message }),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['payslip_tokens', activePeriod?.id] }); toast.success('สร้างลิงก์เรียบร้อยแล้ว') },
+    onError: (e: Error) => toast.error('สร้างลิงก์ไม่สำเร็จ', { description: e.message }),
   })
 
   const regenMutation = useMutation({
     mutationFn: async (tokenId: string) => {
-      const { error } = await supabase
-        .from('payslip_tokens')
-        .update({
-          token: crypto.randomUUID(), // Generate a new token
-          expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-          employee_status: 'pending',
-          dispute_reason: null,
-        })
-        .eq('id', tokenId)
+      const { error } = await supabase.from('payslip_tokens').update({
+        token: crypto.randomUUID(),
+        expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        employee_status: 'pending',
+        dispute_reason: null,
+      }).eq('id', tokenId)
       if (error) throw error
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['payslip_tokens', selectedPeriodId] })
-      toast.success('สร้างลิงก์ใหม่เรียบร้อย')
-    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['payslip_tokens', activePeriod?.id] }); toast.success('รีเซ็ตลิงก์แล้ว') },
+    onError: (e: Error) => toast.error('รีเซ็ตไม่สำเร็จ', { description: e.message }),
   })
 
+  const counts = useMemo(() => ({
+    total:          tokens.length,
+    confirmed:      tokens.filter(t => t.employee_status === 'confirmed' || t.employee_status === 'auto_confirmed').length,
+    pending:        tokens.filter(t => t.employee_status === 'pending').length,
+    disputed:       tokens.filter(t => t.employee_status === 'disputed').length,
+    auto_confirmed: tokens.filter(t => t.employee_status === 'auto_confirmed').length,
+    liff_linked:    tokens.filter(t => t.employees?.line_uid).length,
+    liff_viewed:    tokens.filter(t => t.employees?.liff_viewed_at).length,
+  }), [tokens])
+
   const filtered = useMemo(() => {
-    let list = tokens as TokenRow[]
+    let list = [...tokens]
     if (filterStatus !== 'all') list = list.filter(t => t.employee_status === filterStatus)
     if (search.trim()) {
       const q = search.toLowerCase()
@@ -262,29 +213,22 @@ export default function ShareLinks() {
         t.employees?.last_name?.toLowerCase().includes(q)
       )
     }
-    return [...list].sort((a, b) => {
-      if (sortBy === 'code') return a.employees?.employee_code?.localeCompare(b.employees?.employee_code || '') || 0
-      if (sortBy === 'name') return a.employees?.first_name?.localeCompare(b.employees?.first_name || '') || 0
+    return list.sort((a, b) => {
+      if (sortBy === 'code') return (a.employees?.employee_code ?? '').localeCompare(b.employees?.employee_code ?? '')
+      if (sortBy === 'name') return (a.employees?.first_name ?? '').localeCompare(b.employees?.first_name ?? '')
       return a.employee_status.localeCompare(b.employee_status)
     })
   }, [tokens, filterStatus, search, sortBy])
 
-  const counts = useMemo(() => ({
-    total:          tokens.length,
-    confirmed:      tokens.filter(t => t.employee_status === 'confirmed' || t.employee_status === 'auto_confirmed').length,
-    pending:        tokens.filter(t => t.employee_status === 'pending').length,
-    disputed:       tokens.filter(t => t.employee_status === 'disputed').length,
-  }), [tokens])
-
   const buildLinksText = () => {
     const lines = filtered.map(t => {
       const emp = t.employees
-      const name = `${emp?.employee_code} ${formatEmployeeName(emp || { first_name: '' })}`
+      const name = `${emp?.employee_code} ${emp?.first_name} ${emp?.last_name}`.trim()
       const url = `${window.location.origin}/slip/${t.token}`
       return `${name}\n${url}`
     })
     return [
-      `ใบแจ้งค่าแรง ${periodLabel} — ห้างหุ้นส่วนจำกัด วิราญกร`,
+      `ใบแจ้งค่าแรง ${activePeriod?.label ?? ''} — ${user?.factory_id ?? ''}`,
       '',
       ...lines.flatMap(l => [l, '']),
       '*กรุณาตรวจสอบและยืนยันภายใน 24 ชม.*',
@@ -294,208 +238,243 @@ export default function ShareLinks() {
 
   const handleCopyAll = () => {
     navigator.clipboard.writeText(buildLinksText())
-    toast.success('คัดลอกลิงค์ทั้งหมดแล้ว — นำไปวางใน LINE ได้เลย')
+    toast.success('คัดลอกลิงก์ทั้งหมดแล้ว')
   }
 
   const handleExportTxt = () => {
-    const text = buildLinksText()
-    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
+    const blob = new Blob([buildLinksText()], { type: 'text/plain;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
-    a.href = url
-    a.download = `payslip_links_${periodLabel.replace(/\s+/g, '_')}.txt`
-    a.click()
-    URL.revokeObjectURL(url)
+    a.href = url; a.download = `payslip_links_${activePeriod?.label?.replace(/\s+/g, '_') ?? 'export'}.txt`
+    a.click(); URL.revokeObjectURL(url)
   }
 
-  const isApproved = selectedPeriod?.status === 'approved'
+  const isAdminOrSuper = user?.role === 'admin' || user?.role === 'superUser'
 
   return (
     <>
-      <TopBar 
-        title="สร้างลิงก์ดูสลิป" 
-        action={
-          <div className="bg-white border border-slate-200 px-5 py-2 rounded-full shadow-sm flex items-center min-h-[42px]">
-            <span className="text-[15px] font-bold text-slate-700">
-              งวด: {selectedPeriod ? periodLabel : 'เลือกงวด'}
-            </span>
-          </div>
-        }
-      />
+      <TopBar title="ลิงก์สลิปพนักงาน" subtitle={activePeriod?.label} onMenuClick={onMenuClick} />
 
-      <div className="p-4 md:p-8 space-y-4 md:space-y-6 max-w-6xl mx-auto">
-        <div className="bg-white rounded-xl border p-4 md:p-5 flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between shadow-sm">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 w-full sm:w-auto">
-            <label className="text-sm font-medium text-slate-600 shrink-0">งวด:</label>
-            <select
-              className="h-9 rounded-md border border-input px-3 text-sm w-full sm:w-auto"
-              value={selectedPeriodId || ''}
-              onChange={e => setSelectedPeriodId(e.target.value)}
-            >
-              {periods.map(p => (
-                <option key={p.id} value={p.id}>
-                  {formatPeriodLabel(p.period_start, p.period_end)}
-                  {p.status === 'approved' ? ' ✅' : ' (ร่าง)'}
-                </option>
-              ))}
-            </select>
-            {!isApproved && (
-              <span className="text-xs text-amber-600 bg-amber-50 border border-amber-200 px-2 py-1 rounded-md mt-2 sm:mt-0 w-full sm:w-auto text-center">
-                ⚠️ งวดนี้ยังไม่ได้อนุมัติ
-              </span>
+      <div className="vk-page vk-page--wide">
+
+        {/* Header row */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 28, flexWrap: 'wrap' }}>
+          <div>
+            <div className="vk-eyebrow" style={{ marginBottom: 6 }}>SHARE LINKS · ลิงก์สลิปสำหรับพนักงาน</div>
+            <div style={{ fontFamily: 'var(--vk-sans)', fontWeight: 700, fontSize: 26, letterSpacing: '-0.02em' }}>
+              {activePeriod?.label ?? 'ยังไม่มีงวด'}
+              {activePeriod && <span style={{ fontWeight: 400, color: 'var(--vk-ink-3)', fontSize: 18 }}> — {isApproved ? 'อนุมัติแล้ว' : 'ฉบับร่าง'}</span>}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            {periods.length > 1 && (
+              <select value={selectedPeriodId ?? ''} onChange={e => setSelectedPeriodId(e.target.value)}
+                style={{ fontFamily: 'var(--vk-sans)', fontSize: 13, height: 36, border: '1px solid var(--vk-rule)', padding: '0 10px', background: 'var(--vk-paper)', color: 'var(--vk-ink)', outline: 'none' }}>
+                {periods.map(p => <option key={p.id} value={p.id}>{p.label}{p.status === 'approved' ? ' ✓' : ' (ร่าง)'}</option>)}
+              </select>
             )}
-          </div>
-
-          <div className="flex w-full sm:w-auto">
-            <Button
-              variant="outline"
-              size="sm"
-              className="bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 hover:text-blue-800 w-full sm:w-auto"
-              onClick={() => generateMutation.mutate()}
-              disabled={!isApproved || generateMutation.isPending}
-            >
-              <RefreshCw className={`w-4 h-4 mr-2 ${generateMutation.isPending ? 'animate-spin' : ''}`} />
-              สร้าง / อัปเดตลิงก์
-            </Button>
+            {isAdminOrSuper && (
+              <button className="vk-btn vk-btn--primary" onClick={() => generateMutation.mutate()}
+                disabled={!isApproved || generateMutation.isPending}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <RefreshCw style={{ width: 13, height: 13 }} className={generateMutation.isPending ? 'animate-spin' : ''} />
+                {generateMutation.isPending ? 'กำลังสร้าง...' : 'สร้าง / อัปเดตลิงก์'}
+              </button>
+            )}
           </div>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {!isApproved && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fffbeb', border: '1px solid #fbbf24', padding: '10px 14px', marginBottom: 24, fontSize: 13, color: '#92400e' }}>
+            <AlertCircle style={{ width: 15, height: 15, flexShrink: 0 }} />
+            งวดนี้ยังไม่ได้อนุมัติ — ต้องอนุมัติงวดก่อนจึงจะสร้างลิงก์ได้
+          </div>
+        )}
+
+        {/* Stat cards */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 0, border: '1px solid var(--vk-rule)', marginBottom: 16 }}>
           {[
-            { label: 'ทั้งหมด',    value: counts.total,     icon: <Users className="w-4 h-4" />,         color: 'text-slate-600 bg-slate-50 border-slate-200' },
-            { label: 'ยืนยันแล้ว', value: counts.confirmed, icon: <CheckCircle2 className="w-4 h-4" />, color: 'text-green-700 bg-green-50 border-green-200' },
-            { label: 'รอยืนยัน',   value: counts.pending,   icon: <Clock className="w-4 h-4" />,         color: 'text-slate-600 bg-slate-50 border-slate-200' },
-            { label: 'ทักท้วง',    value: counts.disputed,  icon: <AlertCircle className="w-4 h-4" />,   color: 'text-red-700 bg-red-50 border-red-200' },
-          ].map(card => (
-            <div key={card.label} className={`rounded-xl border p-4 flex items-center gap-3 ${card.color}`}>
-              {card.icon}
+            { label: 'ทั้งหมด',    value: counts.total,     color: 'var(--vk-ink)' },
+            { label: 'ยืนยันแล้ว', value: counts.confirmed,  color: 'var(--vk-jade)' },
+            { label: 'รอยืนยัน',   value: counts.pending,   color: 'var(--vk-persimmon)' },
+            { label: 'ทักท้วง',    value: counts.disputed,  color: 'var(--vk-crimson)' },
+          ].map((s, i) => (
+            <div key={i} style={{ padding: '20px 24px', borderRight: i < 3 ? '1px solid var(--vk-rule)' : 'none', background: 'var(--vk-bone)' }}>
+              <div className="vk-eyebrow" style={{ marginBottom: 8 }}>{s.label}</div>
+              <div style={{ fontFamily: 'var(--vk-mono)', fontWeight: 600, fontSize: 32, color: s.color, fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>{s.value}</div>
+            </div>
+          ))}
+        </div>
+        {/* LINE stat cards — data from employees table, independent of tokens */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0, border: '1px solid var(--vk-rule)', borderTop: 'none', marginBottom: 32 }}>
+          {[
+            { label: 'ผูก LINE แล้ว', value: lineStats.linked, color: '#06b6d4', icon: <Smartphone style={{ width: 13, height: 13 }} /> },
+            { label: 'เปิดดูสลิปผ่าน LINE', value: lineStats.viewed, color: '#8b5cf6', icon: <Eye style={{ width: 13, height: 13 }} /> },
+          ].map((s, i) => (
+            <div key={i} style={{ padding: '14px 24px', borderRight: i === 0 ? '1px solid var(--vk-rule)' : 'none', background: 'var(--vk-paper)', display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ color: s.color, opacity: 0.7 }}>{s.icon}</div>
               <div>
-                <p className="text-2xl font-bold">{card.value}</p>
-                <p className="text-xs opacity-70">{card.label}</p>
+                <div className="vk-eyebrow" style={{ marginBottom: 4 }}>{s.label}</div>
+                <div style={{ fontFamily: 'var(--vk-mono)', fontWeight: 700, fontSize: 22, color: s.color, lineHeight: 1 }}>{s.value}<span style={{ fontSize: 12, fontWeight: 400, color: 'var(--vk-ink-3)', marginLeft: 4 }}>/ {lineStats.total} คน</span></div>
               </div>
             </div>
           ))}
         </div>
 
-        <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
-          <div className="p-4 border-b flex flex-col lg:flex-row gap-4 items-stretch lg:items-center justify-between bg-slate-50/60">
-            <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3">
-              <div className="flex rounded-lg border border-slate-200 overflow-hidden text-sm w-full md:w-auto">
-                {(['all', 'pending', 'confirmed', 'disputed'] as FilterStatus[]).map(s => (
-                  <button
-                    key={s}
-                    onClick={() => setFilterStatus(s)}
-                    className={`px-2 md:px-3 py-1.5 transition-colors flex-1 md:flex-none text-xs md:text-sm ${
-                      filterStatus === s ? 'bg-[#1D9E75] text-white' : 'text-slate-500 hover:bg-slate-100'
-                    }`}
-                  >
-                    { s === 'all' ? 'ทั้งหมด' : s === 'pending' ? 'รอยืนยัน' : s === 'confirmed' ? 'ยืนยันแล้ว' : 'ทักท้วง' }
-                  </button>
-                ))}
-              </div>
-              <div className="flex gap-2 w-full md:w-auto">
-                <select
-                  className="h-9 text-sm rounded-md border border-slate-200 px-2 flex-1 md:w-auto"
-                  value={sortBy}
-                  onChange={e => setSortBy(e.target.value as 'code' | 'name' | 'status')}
-                >
-                  <option value="code">เรียงตามรหัส</option>
-                  <option value="name">เรียงตามชื่อ</option>
-                  <option value="status">เรียงตามสถานะ</option>
-                </select>
-                <div className="relative flex-1 md:w-auto">
-                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 w-3.5 h-3.5" />
-                  <Input
-                    placeholder="ค้นหา..."
-                    className="h-9 pl-8 text-sm w-full md:w-48"
-                    value={search}
-                    onChange={e => setSearch(e.target.value)}
-                  />
-                </div>
-              </div>
+        {/* Toolbar */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            {/* Filter tabs */}
+            <div style={{ display: 'flex', border: '1px solid var(--vk-rule)', overflow: 'hidden' }}>
+              {(['all', 'pending', 'confirmed', 'disputed', 'auto_confirmed'] as FilterStatus[]).map((s, i, arr) => (
+                <button key={s} onClick={() => setFilterStatus(s)}
+                  style={{ padding: '5px 12px', fontSize: 12, fontFamily: 'var(--vk-sans)', fontWeight: filterStatus === s ? 700 : 400, border: 'none', borderRight: i < arr.length - 1 ? '1px solid var(--vk-rule)' : 'none', cursor: 'pointer', background: filterStatus === s ? 'var(--vk-ink)' : 'var(--vk-paper)', color: filterStatus === s ? 'var(--vk-bone)' : 'var(--vk-ink-3)', transition: 'all 0.15s' }}>
+                  {{ all: 'ทั้งหมด', pending: 'รอยืนยัน', confirmed: 'ยืนยันแล้ว', disputed: 'ทักท้วง', auto_confirmed: 'อัตโนมัติ' }[s]}
+                </button>
+              ))}
             </div>
-            <div className="flex gap-2 w-full lg:w-auto mt-2 lg:mt-0">
-              <Button variant="outline" size="sm" className="flex-1 lg:flex-none h-9" onClick={handleExportTxt} disabled={filtered.length === 0}>
-                <FileDown className="w-4 h-4 mr-1.5" />
-                Export .txt
-              </Button>
-              <Button size="sm" className="bg-[#00B900] hover:bg-[#009900] flex-1 lg:flex-none h-9" onClick={handleCopyAll} disabled={filtered.length === 0}>
-                <Copy className="w-4 h-4 mr-1.5" />
-                คัดลอกลิงก์ทั้งหมด
-              </Button>
+            {/* Sort */}
+            <select value={sortBy} onChange={e => setSortBy(e.target.value as any)}
+              style={{ fontFamily: 'var(--vk-sans)', fontSize: 12, height: 30, border: '1px solid var(--vk-rule)', padding: '0 8px', background: 'var(--vk-paper)', color: 'var(--vk-ink)', outline: 'none' }}>
+              <option value="code">เรียงตามรหัส</option>
+              <option value="name">เรียงตามชื่อ</option>
+              <option value="status">เรียงตามสถานะ</option>
+            </select>
+            {/* Search */}
+            <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+              <Search style={{ position: 'absolute', left: 8, width: 12, height: 12, color: 'var(--vk-ink-3)' }} />
+              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="ค้นหา..."
+                style={{ paddingLeft: 26, paddingRight: 8, height: 30, fontSize: 12, fontFamily: 'var(--vk-sans)', border: '1px solid var(--vk-rule)', background: 'var(--vk-paper)', color: 'var(--vk-ink)', outline: 'none', width: 160 }} />
             </div>
           </div>
-
-          {filtered.length === 0 ? (
-            <div className="py-16 text-center text-slate-400">
-              <Link2 className="w-10 h-10 mx-auto mb-3 opacity-30" />
-              <p>ยังไม่มีลิงก์ในงวดนี้</p>
-              <p className="text-sm mt-1">กดปุ่ม "สร้าง / อัปเดตลิงก์" ด้านบนเพื่อเริ่มต้น</p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[800px]">
-                <thead>
-                  <tr className="text-left text-slate-500 border-b bg-slate-50/30">
-                    <th className="px-4 py-3 font-medium w-24 whitespace-nowrap">รหัส</th>
-                    <th className="px-4 py-3 font-medium">ชื่อ - ลิงก์</th>
-                    <th className="px-4 py-3 font-medium w-36 whitespace-nowrap">สถานะ</th>
-                    <th className="px-4 py-3 font-medium w-52 text-right whitespace-nowrap">จัดการ</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {filtered.map(t => {
-                    const emp = t.employees
-                    const slipUrl = `${window.location.origin}/slip/${t.token}`
-                    const isExpired = new Date(t.expires_at) < new Date()
-
-                    const messageText = `ใบแจ้งค่าแรง: ${formatEmployeeName(emp || { first_name: '' })}\nคลิกเพื่อดูสลิป: ${slipUrl}\n\n*กรุณาตรวจสอบและยืนยันภายใน 24 ชม.*\n(หากพ้นกำหนด ระบบจะยืนยันความถูกต้องให้อัตโนมัติค่ะ)`
-
-                    return (
-                      <tr key={t.id} className="hover:bg-slate-50/50 transition-colors">
-                        <td className="px-4 py-3 font-mono text-slate-700 font-semibold align-top pt-4">{emp?.employee_code}</td>
-                        <td className="px-4 py-3 align-top">
-                          <p className="font-medium text-slate-800">{formatEmployeeName(emp || { first_name: '' })}</p>
-                          <p className="text-xs text-slate-400 font-mono mt-0.5 truncate max-w-[200px] md:max-w-md lg:max-w-lg" title={slipUrl}>{slipUrl}</p>
-                          {t.employee_status === 'disputed' && t.dispute_reason && (
-                            <div className="mt-1.5 inline-flex items-start bg-red-50 text-red-700 px-2.5 py-1.5 rounded-md text-xs border border-red-100 w-full max-w-sm">
-                              <AlertCircle className="w-3.5 h-3.5 mr-1.5 shrink-0 mt-0.5" />
-                              <span className="whitespace-pre-wrap leading-relaxed">{t.dispute_reason}</span>
-                            </div>
-                          )}
-                          {isExpired && <p className="text-xs text-amber-600 mt-1">⏰ ลิงก์หมดอายุแล้ว</p>}
-                        </td>
-                        <td className="px-4 py-3 align-top pt-4"><StatusBadge status={t.employee_status} /></td>
-                        <td className="px-4 py-3 text-right align-top pt-3">
-                          <div className="flex justify-end gap-2 whitespace-nowrap ml-auto">
-                            <CopyButton text={slipUrl} label="ลิงก์" icon={<Link2 className="w-3 h-3" />} />
-                            <CopyButton text={messageText} label="ข้อความ" />
-                            {/* Only admin/superUser can reset links — normalUser cannot */}
-                            {(user?.role === 'admin' || user?.role === 'superUser') && (
-                              <button
-                                onClick={() => {
-                                  if (window.confirm('ยืนยันการสร้างลิงก์ใหม่?\n(ลิงก์เก่าจะถูกยกเลิกและไม่สามารถเข้าดูได้อีก)')) {
-                                    regenMutation.mutate(t.id)
-                                  }
-                                }}
-                                className="text-xs px-2 py-1 rounded-md border border-slate-200 bg-white text-slate-500 hover:border-amber-300 hover:text-amber-700 hover:bg-amber-50 flex items-center gap-1 transition-colors"
-                                title="สร้างลิงก์ใหม่ (ลิงก์เก่าจะถูกยกเลิก)"
-                              >
-                                <RotateCcw className="w-3 h-3" />
-                                รีเซ็ต
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="vk-btn vk-btn--ghost" onClick={handleExportTxt} disabled={filtered.length === 0}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, height: 30, padding: '0 12px' }}>
+              <FileDown style={{ width: 12, height: 12 }} />Export .txt
+            </button>
+            <button className="vk-btn vk-btn--primary" onClick={handleCopyAll} disabled={filtered.length === 0}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, height: 30, padding: '0 12px' }}>
+              <Copy style={{ width: 12, height: 12 }} />คัดลอกลิงก์ทั้งหมด
+            </button>
+          </div>
         </div>
+
+        {/* Table */}
+        <div className="vk-eyebrow" style={{ marginBottom: 8 }}>LINKS · รายชื่อพนักงาน ({filtered.length} คน)</div>
+        <hr className="vk-rule" />
+
+        {filtered.length === 0 ? (
+          <div style={{ padding: '60px 0', textAlign: 'center' }}>
+            <Link2 style={{ width: 32, height: 32, margin: '0 auto 12px', opacity: 0.2 }} />
+            <div className="vk-eyebrow">ยังไม่มีลิงก์ในงวดนี้</div>
+            <div style={{ fontSize: 13, color: 'var(--vk-ink-3)', marginTop: 6 }}>
+              {isApproved ? 'กดปุ่ม "สร้าง / อัปเดตลิงก์" เพื่อเริ่มต้น' : 'ต้องอนุมัติงวดก่อน'}
+            </div>
+          </div>
+        ) : (
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                {['รหัส', 'ชื่อ – ลิงก์', 'LINE', 'สถานะ', ''].map((h, i) => (
+                  <th key={i} style={{ textAlign: i >= 2 ? 'right' : 'left', fontFamily: 'var(--vk-sans)', fontWeight: 600, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--vk-ink-3)', padding: '10px 14px', borderBottom: '1px solid var(--vk-rule)', background: 'var(--vk-paper)', whiteSpace: 'nowrap' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(t => {
+                const emp = t.employees
+                const slipUrl = `${window.location.origin}/slip/${t.token}`
+                const isExpired = new Date(t.expires_at) < new Date()
+                const s = STATUS_MAP[t.employee_status] ?? { tone: 'draft', label: t.employee_status }
+                const messageText = `ใบแจ้งค่าแรง: ${emp?.first_name} ${emp?.last_name}\nคลิกเพื่อดูสลิป: ${slipUrl}\n\n*กรุณาตรวจสอบและยืนยันภายใน 24 ชม.*\n(หากพ้นกำหนด ระบบจะยืนยันความถูกต้องให้อัตโนมัติค่ะ)`
+                return (
+                  <tr key={t.id} style={{ borderBottom: '1px solid var(--vk-rule-soft)' }}>
+                    <td style={{ padding: '12px 14px', fontFamily: 'var(--vk-mono)', fontSize: 12, color: 'var(--vk-ink-2)', verticalAlign: 'top', paddingTop: 16 }}>
+                      {emp?.employee_code}
+                    </td>
+                    <td style={{ padding: '12px 14px', verticalAlign: 'top' }}>
+                      <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--vk-ink)', marginBottom: 3 }}>
+                        {emp?.first_name} {emp?.last_name}
+                      </div>
+                      <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 11, color: 'var(--vk-ink-3)', maxWidth: 420, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={slipUrl}>
+                        {slipUrl}
+                      </div>
+                      {t.employee_status === 'disputed' && t.dispute_reason && (
+                        <div style={{ display: 'inline-flex', alignItems: 'flex-start', gap: 6, background: '#fef2f2', border: '1px solid #fecaca', padding: '6px 10px', marginTop: 6, fontSize: 12, color: '#b91c1c', maxWidth: 380 }}>
+                          <AlertCircle style={{ width: 12, height: 12, flexShrink: 0, marginTop: 1 }} />
+                          <span style={{ whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{t.dispute_reason}</span>
+                        </div>
+                      )}
+                      {isExpired && <div style={{ fontSize: 11, color: 'var(--vk-persimmon)', marginTop: 4 }}>⏰ ลิงก์หมดอายุแล้ว</div>}
+                    </td>
+                    <td style={{ padding: '12px 14px', textAlign: 'right', verticalAlign: 'top', paddingTop: 14 }}>
+                      {emp?.liff_viewed_at ? (
+                        <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, color: '#8b5cf6' }}>
+                            <Eye style={{ width: 11, height: 11 }} />เปิดดูแล้ว
+                          </span>
+                          <span style={{ fontSize: 10, color: 'var(--vk-ink-3)', fontFamily: 'var(--vk-mono)' }}>
+                            {new Date(emp.liff_viewed_at).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+                      ) : emp?.line_uid ? (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#06b6d4' }}>
+                          <Smartphone style={{ width: 11, height: 11 }} />ผูกแล้ว
+                        </span>
+                      ) : (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--vk-ink-3)' }}>
+                          <EyeOff style={{ width: 11, height: 11 }} />ยังไม่ผูก
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ padding: '12px 14px', textAlign: 'right', verticalAlign: 'top', paddingTop: 15 }}>
+                      <span className="vk-pill" data-tone={s.tone}>● {s.label}</span>
+                    </td>
+                    <td style={{ padding: '12px 14px', textAlign: 'right', verticalAlign: 'top', paddingTop: 13 }}>
+                      <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', flexWrap: 'nowrap' }}>
+                        <CopyButton text={slipUrl} label="ลิงก์" icon={<Link2 style={{ width: 11, height: 11 }} />} />
+                        <CopyButton text={messageText} label="ข้อความ" />
+                        {isAdminOrSuper && (
+                          <button className="vk-btn vk-btn--ghost" onClick={() => setShowResetConfirm(t.id)}
+                            style={{ height: 28, padding: '0 10px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                            title="สร้างลิงก์ใหม่ (ลิงก์เก่าจะถูกยกเลิก)">
+                            <RotateCcw style={{ width: 11, height: 11 }} />รีเซ็ต
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        )}
       </div>
+
+      {/* Reset confirm dialog */}
+      {showResetConfirm && (
+        <div className="vk-root" style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(22,19,17,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+          onClick={() => setShowResetConfirm(null)}>
+          <div style={{ background: 'var(--vk-paper)', border: '1px solid var(--vk-rule)', width: '100%', maxWidth: 360 }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ background: 'var(--vk-persimmon)', color: '#fff', padding: '16px 20px' }}>
+              <div style={{ fontWeight: 700, fontSize: 15 }}>ยืนยันการรีเซ็ตลิงก์</div>
+            </div>
+            <div style={{ padding: '20px', fontSize: 14, color: 'var(--vk-ink-2)', lineHeight: 1.6, background: 'var(--vk-bone)' }}>
+              ลิงก์เก่าจะถูกยกเลิกทันทีและพนักงานจะไม่สามารถเข้าดูสลิปจากลิงก์เดิมได้อีก
+              <br />คุณต้องการดำเนินการต่อหรือไม่?
+            </div>
+            <div style={{ display: 'flex', gap: 8, padding: '14px 20px', borderTop: '1px solid var(--vk-rule)', background: 'var(--vk-paper)' }}>
+              <button className="vk-btn vk-btn--primary" style={{ flex: 1 }}
+                disabled={regenMutation.isPending}
+                onClick={() => { regenMutation.mutate(showResetConfirm!); setShowResetConfirm(null) }}>
+                ยืนยัน รีเซ็ตลิงก์
+              </button>
+              <button className="vk-btn" onClick={() => setShowResetConfirm(null)}>ยกเลิก</button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }

@@ -3,7 +3,7 @@ import { isWeekend } from 'date-fns'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import { getLiffProfile } from '../lib/liff'
-import type { SlipIncomeRow, SlipDeductRow } from '../components/v2/VKSlipDocument'
+import type { SlipIncomeRow, SlipDeductRow } from '../components/VKSlipDocument'
 import { ShieldAlert, Eye, Loader2, AlertCircle, Link2, CheckCircle2 } from 'lucide-react'
 import '../styles/v2-tokens.css'
 

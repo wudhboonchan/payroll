@@ -1,367 +1,435 @@
-import { useState, useRef } from 'react'
-import { TopBar } from '../components/layout/TopBar'
-import { format, isWeekend } from 'date-fns'
-import { th } from 'date-fns/locale'
-import { PaySlipPreview } from '../components/payroll/PaySlipPreview'
-import type { PaySlipData } from '../components/payroll/PaySlipPreview'
-import { Button } from '../components/ui/button'
-import { Label } from '../components/ui/label'
-import { Input } from '../components/ui/input'
-import { Printer, Search, UserX } from 'lucide-react'
-import { useAppStore } from '../store/useAppStore'
+import { useOutletContext } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
-import { formatEmployeeName } from '../lib/formatters'
+import { useAppStore } from '../store/useAppStore'
+import { TopBar } from '../components/layout/TopBar'
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { Printer } from 'lucide-react'
+import { calculatePayroll } from '../lib/payrollCalc'
+import { VKSlipDocument } from '../components/VKSlipDocument'
+import '../styles/v2-tokens.css'
 
-interface Employee {
-  id: string
-  employee_code: string
-  first_name: string
-  last_name: string
-  prefix: string
-  nationality: string
-  status: string
-  payment_method: string
-  bank_name: string
-  bank_account: string
-  position: string
-  rate_per_12h: number
+// ── helpers ──────────────────────────────────────────────────────────────────
+function fmtNationality(n: string | null) {
+  if (!n || n === 'ไทย') return null
+  if (n === 'เมียนมา' || n.toLowerCase().includes('myanmar') || n.toLowerCase().includes('burma')) return 'เมียนมา/กะเหรี่ยง'
+  return n
+}
+function maskBank(account: string | null) {
+  if (!account) return '—'
+  const s = account.replace(/[-\s]/g, '')
+  if (s.length <= 6) return s
+  return `${s.slice(0, 3)}-${'X'.repeat(s.length - 6)}-${s.slice(-3)}`
+}
+function thaiDateTime() {
+  const now = new Date()
+  const MONTHS = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม']
+  const d = now.getDate()
+  const m = MONTHS[now.getMonth()]
+  const y = now.getFullYear() + 543
+  const hh = String(now.getHours()).padStart(2, '0')
+  const mm = String(now.getMinutes()).padStart(2, '0')
+  return `${d} ${m} ${y} เวลา ${hh}:${mm} น.`
+}
+function thaiPeriod(start: string, end: string) {
+  const MONTHS = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.']
+  const s = new Date(start), e = new Date(end)
+  return `${s.getDate()} ${MONTHS[s.getMonth()]} – ${e.getDate()} ${MONTHS[e.getMonth()]} ${e.getFullYear() + 543}`
+}
+const mono = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2 })
+
+// Map short factory/company names → full legal names for the slip header
+const COMPANY_FULL_NAME: Record<string, string> = {
+  'ผลิตภัณฑ์ตราเพชร': 'บริษัท ผลิตภัณฑ์ตราเพชร จำกัด (มหาชน)',
+  'ทีพีไอ โพลีน':     'บริษัท ทีพีไอ โพลีน จำกัด (มหาชน)',
 }
 
-interface Shift {
-  is_holiday_ot: boolean
-  is_half_shift: boolean
-  ot_hours: number
-  work_date: string
-}
-
-export default function PaySlipPage() {
-  const { user } = useAppStore()
-  const [search, setSearch] = useState('')
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const slipWrapRef = useRef<HTMLDivElement>(null)
-
-  // Fetch employees — active by default, show inactive only when searching
-  const { data: employees = [] } = useQuery({
-    queryKey: ['employees-for-slip', user?.factory_id],
-    queryFn: async () => {
-      if (!user?.factory_id) return []
-      const { data, error } = await supabase
-        .from('employees')
-        .select('id, employee_code, first_name, last_name, prefix, nationality, status, payment_method, bank_name, bank_account, position, rate_per_12h')
-        .eq('factory_id', user.factory_id)
-        .order('employee_code')
-      if (error) throw error
-      return data as Employee[]
-    },
-    enabled: !!user?.factory_id,
-  })
-
-  // Fetch the current payroll period
-  const { data: currentPeriod } = useQuery({
-    queryKey: ['current-period', user?.factory_id],
-    queryFn: async () => {
-      if (!user?.factory_id) return null
-      const { data, error } = await supabase
-        .from('payroll_periods')
-        .select('*')
-        .eq('factory_id', user.factory_id)
-        .order('period_start', { ascending: false })
-        .limit(1)
-        .single()
-      if (error && error.code !== 'PGRST116') throw error
-      return data
-    },
-    enabled: !!user?.factory_id
-  })
-
-  // Fetch actual payroll entry for selected employee
-  const { data: payrollEntry } = useQuery({
-    queryKey: ['payroll-entry', selectedId, currentPeriod?.id],
-    queryFn: async () => {
-      if (!selectedId || !currentPeriod?.id) return null
-      const { data, error } = await supabase
-        .from('payroll_entries' as any)
-        .select('*')
-        .eq('period_id', currentPeriod.id)
-        .eq('employee_id', selectedId)
-        .single()
-      if (error && error.code !== 'PGRST116') throw error
-      return data as any
-    },
-    enabled: !!selectedId && !!currentPeriod?.id
-  })
-
-  // Fetch advance payments for the period
-  const { data: advances = [] } = useQuery({
-    queryKey: ['advances-for-slip', selectedId, currentPeriod?.id],
-    queryFn: async () => {
-      if (!selectedId) return []
-      const { data, error } = await supabase
-        .from('advance_payments')
-        .select('amount')
-        .eq('employee_id', selectedId)
-      // .eq('period_id', currentPeriod.id)
-      if (error) throw error
-      return data
-    },
-    enabled: !!selectedId
-  })
-
-  const totalAdvance = advances.reduce((sum: number, adv) => sum + Number(adv.amount), 0)
-
-  // Fetch shifts for day count display on slip
-  const { data: slipShifts = [] } = useQuery({
-    queryKey: ['shifts-for-slip', selectedId, currentPeriod?.id],
-    queryFn: async () => {
-      if (!selectedId || !currentPeriod?.id) return []
-      const { data, error } = await supabase
-        .from('shift_assignments')
-        .select('is_holiday_ot, is_half_shift, ot_hours, work_date')
-        .eq('employee_id', selectedId)
-        .eq('period_id', currentPeriod.id)
-      if (error) throw error
-      return data as Shift[]
-    },
-    enabled: !!selectedId && !!currentPeriod?.id
-  })
-
-  const selectedEmpForSlip = employees.find((e) => e.id === selectedId)
-  const isClerkSlip = selectedEmpForSlip?.position === 'clerk'
-
-  const normalShiftsForSlip = slipShifts.filter((s) => !s.is_holiday_ot)
-  const days_normal = normalShiftsForSlip.length
-  const days_shift = normalShiftsForSlip.filter((s) => !s.is_half_shift).length
-  
-  // Workers: sum hours for holiday; Clerks: sum ot_hours
-  const autoClerkOt1_5x = slipShifts.filter((s) => !isWeekend(new Date(s.work_date))).reduce((sum: number, s) => sum + Number(s.ot_hours || 0), 0)
-  const autoClerkOt1x = slipShifts.filter((s) => isWeekend(new Date(s.work_date))).reduce((sum: number, s) => sum + Number(s.ot_hours || 0), 0)
-
-  const days_ot = isClerkSlip 
-    ? autoClerkOt1_5x
-    : slipShifts.filter(s => s.is_holiday_ot).reduce((sum, s) => {
-        const base = s.is_half_shift ? 8 : 12
-        return sum + base + Number(s.ot_hours || 0)
-      }, 0)
-
-  const days_ot_1x = isClerkSlip ? autoClerkOt1x : 0
-
-  const clerkMonthly = selectedEmpForSlip?.rate_per_12h || 0
-  const clerkHourly = (clerkMonthly / 30) / 8
-  const computed_ot_1x = isClerkSlip ? clerkHourly * 1.0 * autoClerkOt1x : 0
-
-  const isSearching = search.trim().length > 0
-
-  const visibleEmployees = employees.filter((emp) => {
-    if (isSearching) {
-      const q = search.toLowerCase()
-      return (
-        emp.employee_code.toLowerCase().includes(q) ||
-        emp.first_name.toLowerCase().includes(q) ||
-        emp.last_name.toLowerCase().includes(q)
-      )
-    }
-    // No search = show only active
-    return emp.status === 'active'
-  })
-
-  // Build PaySlip data for selected employee
-  const selectedEmp = employees.find((e) => e.id === selectedId)
-
-  const slipData: PaySlipData | null = selectedEmp && currentPeriod
-    ? {
-        employee_code: selectedEmp.employee_code,
-        first_name: selectedEmp.first_name,
-        last_name: selectedEmp.last_name,
-        factory_name: 'บริษัท ผลิตภัณฑ์ตราเพชร จำกัด (มหาชน)',
-        period_start: currentPeriod.period_start,
-        period_end: currentPeriod.period_end,
-        generated_at: new Date().toISOString(),
-        position: selectedEmp.position || 'worker',
-        amount_normal: Number(payrollEntry?.amount_normal || 0),
-        amount_shift: Number(payrollEntry?.amount_shift || 0),
-        amount_ot: isClerkSlip ? Math.max(0, Number(payrollEntry?.amount_ot || 0) - computed_ot_1x) : Number(payrollEntry?.amount_ot || 0),
-        amount_ot_1x: computed_ot_1x,
-        amount_wood_excess: Number(payrollEntry?.amount_wood_excess || 0),
-        amount_film: Number(payrollEntry?.amount_film || 0),
-        amount_special: Number(payrollEntry?.amount_special || 0),
-        special_note: payrollEntry?.special_note || undefined,
-        amount_diligence: Number(payrollEntry?.amount_diligence || 0),
-        amount_position: Number(payrollEntry?.amount_position || 0),
-        days_normal: slipShifts.length > 0 ? days_normal : undefined,
-        days_shift: slipShifts.length > 0 ? days_shift : undefined,
-        days_ot: slipShifts.length > 0 && days_ot > 0 ? days_ot : undefined,
-        days_ot_1x: slipShifts.length > 0 && days_ot_1x > 0 ? days_ot_1x : undefined,
-        deduct_social_security: Number(payrollEntry?.deduct_social_security || 0),
-        deduct_advance: totalAdvance,
-        deduct_safety_equipment: Number(payrollEntry?.deduct_safety_equipment || 0),
-        deduct_uniform: Number(payrollEntry?.deduct_uniform || 0),
-        total_income: 0,
-        total_deductions: 0,
-        net_pay: 0,
-        payment_method: (selectedEmp.payment_method as 'cash' | 'bank_transfer') || 'cash',
-        bank_name: selectedEmp.bank_name || undefined,
-        bank_account: selectedEmp.bank_account || undefined,
-      }
-    : null
-
-  // Calculate totals if we have data
-  if (slipData) {
-    slipData.total_income = 
-      slipData.amount_normal + slipData.amount_shift + slipData.amount_ot + (slipData.amount_ot_1x || 0) +
-      slipData.amount_wood_excess + slipData.amount_film + slipData.amount_special +
-      slipData.amount_diligence + slipData.amount_position
-    
-    slipData.total_deductions = 
-      slipData.deduct_social_security + slipData.deduct_advance +
-      slipData.deduct_safety_equipment + slipData.deduct_uniform
-    
-    slipData.net_pay = slipData.total_income - slipData.total_deductions
+function fullCompanyName(name: string): string {
+  if (!name) return name
+  for (const [key, full] of Object.entries(COMPANY_FULL_NAME)) {
+    if (name.includes(key)) return full
   }
+  return name
+}
+
+const POSITIONS: Record<string, string> = {
+  worker: 'พนักงานทั่วไป', clerk: 'เสมียน', foreman: 'โฟร์แมน',
+  office: 'พนักงานออฟฟิศ', manager: 'ผู้จัดการ',
+}
+
+export default function PaySlip() {
+  const { onMenuClick } = useOutletContext<{ onMenuClick: () => void }>()
+  const { user } = useAppStore()
+  const [selectedEmpId, setSelectedEmpId] = useState<string | null>(null)
+  const slipRef = useRef<HTMLDivElement>(null)
+  const scalerRef = useRef<HTMLDivElement>(null)
+  const innerRef = useRef<HTMLDivElement>(null)
+
+  const applyScale = useCallback(() => {
+    const scaler = scalerRef.current
+    const inner = innerRef.current
+    if (!scaler || !inner) return
+    const availW = scaler.offsetWidth
+    const slipW = 680
+    const scale = Math.min(1, availW / slipW)
+    if (scale < 1) {
+      inner.style.transform = `scale(${scale})`
+      inner.style.transformOrigin = 'top left'
+      scaler.style.height = `${inner.offsetHeight * scale}px`
+    } else {
+      inner.style.transform = ''
+      scaler.style.height = ''
+    }
+  }, [])
+
+  useEffect(() => {
+    const inner = innerRef.current
+    if (!inner) return
+    applyScale()
+    const ro = new ResizeObserver(applyScale)
+    ro.observe(inner)
+    window.addEventListener('resize', applyScale)
+    return () => { ro.disconnect(); window.removeEventListener('resize', applyScale) }
+  }, [applyScale, selectedEmpId])
 
   const handlePrint = () => {
-    if (!slipData || !slipWrapRef.current) return
-
-    // ตั้งชื่อไฟล์ PDF: รหัส_ชื่อ_นามสกุล_mmyyyy
-    const mm = String(new Date(currentPeriod!.period_start).getMonth() + 1).padStart(2, '0')
-    const yyyy = new Date(currentPeriod!.period_start).getFullYear()
-    const filename = `${slipData.employee_code}_${slipData.first_name}_${slipData.last_name}_${mm}${yyyy}`
-
-    // เปิด window ใหม่ที่มีแค่สลิป — ไม่มีปัญหา 2 หน้าหรือ CSS ขัดกันอีกต่อไป
-    const content = slipWrapRef.current.innerHTML
+    const el = slipRef.current
+    if (!el) return
     const win = window.open('', '_blank', 'width=900,height=700')
     if (!win) { alert('กรุณาอนุญาต popup สำหรับการพิมพ์'); return }
-
+    const periodStart = currentPeriod ? new Date(currentPeriod.period_start) : new Date()
+    const periodDay = currentPeriod ? new Date(currentPeriod.period_start).getDate() : 1
+    const half = periodDay <= 15 ? 'A' : 'B'
+    const mm = String(periodStart.getMonth() + 1).padStart(2, '0')
+    const yyyy = periodStart.getFullYear()
+    const empName = selectedEmp ? `${selectedEmp.first_name}_${selectedEmp.last_name}` : 'slip'
+    const filename = `Payslip_${empName}_${half}${mm}${yyyy}`
     win.document.write(`<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
   <title>${filename}</title>
   <style>
-    * { box-sizing: border-box; }
-    body { margin: 0; padding: 0; background: white; font-family: sans-serif; }
-    @page { size: A4 portrait; margin: 10mm 12mm; }
-    @media print { html, body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: white; font-family: sans-serif; }
+    body > div {
+      max-width: 100% !important;
+      width: 100% !important;
+      box-shadow: none !important;
+      border: none !important;
+      border-bottom: 1px solid #e2e2e2 !important;
+    }
+    @page { size: A4 portrait; margin: 8mm 8mm; }
+    @media print {
+      html, body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    }
   </style>
 </head>
-<body>${content}</body>
+<body>${el.outerHTML}</body>
 </html>`)
     win.document.close()
     win.focus()
-    // รอให้ render เสร็จก่อน print
-    setTimeout(() => {
-      win.print()
-      win.close()
-    }, 400)
+    setTimeout(() => { win.print(); win.close() }, 400)
   }
+
+  const { data: periods = [] } = useQuery<any[]>({
+    queryKey: ['periods', user?.factory_id],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('payroll_periods').select('*')
+        .eq('factory_id', user?.factory_id ?? '').order('period_start', { ascending: false })
+      if (error) throw error; return data
+    }, enabled: !!user?.factory_id, staleTime: 0,
+  })
+  const currentPeriod = periods[0]
+
+  const { data: employees = [] } = useQuery<any[]>({
+    queryKey: ['employees-payslip', user?.factory_id],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('employees')
+        .select('id,employee_code,first_name,last_name,nationality,position,job_title,wage_type,rate_per_12h,payment_method,bank_name,bank_account')
+        .eq('factory_id', user?.factory_id ?? '').eq('status', 'active').order('employee_code')
+      if (error) throw error; return data
+    }, enabled: !!user?.factory_id, staleTime: 0,
+  })
+
+  const { data: allEntries = [] } = useQuery<any[]>({
+    queryKey: ['all-payroll-entries', currentPeriod?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('payroll_entries' as any)
+        .select('employee_id').eq('period_id', currentPeriod.id)
+      if (error) throw error; return data
+    }, enabled: !!currentPeriod?.id, staleTime: 0,
+  })
+
+  const { data: factoryData } = useQuery<any>({
+    queryKey: ['factory-info', user?.factory_id],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('factories')
+        .select('id, name, company_id, companies(name)').eq('id', user?.factory_id ?? '').single()
+      if (error) throw error; return data
+    }, enabled: !!user?.factory_id,
+  })
+
+  // companies join may come back as object or array depending on relationship type
+  const companiesJoin = factoryData?.companies
+  const companyName = (Array.isArray(companiesJoin) ? companiesJoin[0]?.name : companiesJoin?.name) || ''
+  const branchName  = factoryData?.name || ''
+
+  const { data: entry } = useQuery<any>({
+    queryKey: ['payslip-entry', currentPeriod?.id, selectedEmpId],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('payroll_entries' as any)
+        .select('*').eq('period_id', currentPeriod.id).eq('employee_id', selectedEmpId!)
+      if (error) throw error
+      return data?.[0] ?? null   // use array fetch to avoid .single() error on no-row
+    }, enabled: !!currentPeriod?.id && !!selectedEmpId, staleTime: 0,
+  })
+
+  // Fetch ALL shifts for period (same as PayrollEntry), filter by employee in JS
+  const { data: allShifts = [] } = useQuery<any[]>({
+    queryKey: ['payslip-all-shifts', currentPeriod?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('shift_assignments' as any)
+        .select('employee_id,work_date,is_holiday_ot,is_holiday_ot_exempt,is_half_shift,actual_hours,ot_hours')
+        .eq('period_id', currentPeriod.id)
+      if (error) throw error; return data
+    }, enabled: !!currentPeriod?.id, staleTime: 0,
+  })
+  const empShifts = allShifts.filter((s: any) => s.employee_id === selectedEmpId)
+
+  const selectedEmp = employees.find(e => e.id === selectedEmpId) ?? null
+  const savedIds = new Set(allEntries.map((e: any) => e.employee_id))
+
+  // ── shift breakdown (mirrors PayrollEntry logic exactly) ──
+  const isWeekend = (d: string) => { const day = new Date(d).getDay(); return day === 0 || day === 6 }
+  const empIsClerk = selectedEmp?.position === 'clerk'
+  const normShifts = empShifts.filter((s: any) => !s.is_holiday_ot || s.is_holiday_ot_exempt)
+  const holShifts  = empShifts.filter((s: any) => s.is_holiday_ot && !s.is_holiday_ot_exempt)
+  const normDays   = normShifts.filter((s: any) => !s.is_half_shift && !s.actual_hours).length
+  const halfDays   = normShifts.filter((s: any) => s.is_half_shift && !s.actual_hours).length
+  const partialHrs = normShifts.reduce((a: number, s: any) => a + Number(s.actual_hours || 0), 0)
+  const holFull    = holShifts.filter((s: any) => !s.is_half_shift).length
+  const holHalf    = holShifts.filter((s: any) => s.is_half_shift).length
+  const clerkNorm  = normShifts.filter((s: any) => !isWeekend(s.work_date)).length
+  const clerkOt    = empShifts.filter((s: any) => !isWeekend(s.work_date)).reduce((a: number, s: any) => a + Number(s.ot_hours || 0), 0)
+  const clerkOt1x  = empShifts.filter((s: any) => isWeekend(s.work_date)).reduce((a: number, s: any) => a + Number(s.ot_hours || 0), 0)
+  const workerNormalDays = normDays
+  // For display labels
+  const daysShift = empIsClerk
+    ? normShifts.filter((s: any) => isWeekend(s.work_date)).length
+    : workerNormalDays
+
+  // ── rate breakdown ──
+  const empRate     = Number(selectedEmp?.rate_per_12h) || 0
+  const baseNormal  = empRate === 0 ? 0 : 357
+  const baseShift   = Math.max(0, empRate - baseNormal)
+  const clerkDaily  = empRate / 30
+  const clerkHourly = clerkDaily / 8
+  const isThai      = !selectedEmp?.nationality || selectedEmp.nationality === 'ไทย'
+
+  // ── outdated detection: same logic as PayrollEntry ──
+  // Recalculate from current rate+shifts and compare to saved amounts
+  let isOutdated = false
+  if (entry && selectedEmp && empShifts.length > 0) {
+    const c = calculatePayroll({
+      position: selectedEmp.position as 'worker' | 'clerk',
+      wage_type: selectedEmp.wage_type as 'daily' | 'monthly',
+      rate_per_12h: empRate,
+      normal_days: empIsClerk ? clerkNorm : normDays,
+      half_shift_days: empIsClerk ? 0 : halfDays,
+      holiday_ot_full_days: holFull, holiday_ot_half_days: holHalf,
+      partial_hours_total: empIsClerk ? 0 : partialHrs,
+      clerk_ot_hours: clerkOt, clerk_ot_1x_hours: clerkOt1x,
+      override_normal: null, override_special: null,
+      amount_wood_excess: 0, amount_film: 0, amount_special: 0,
+      amount_diligence: 0, amount_position: 0,
+      social_security_rate: isThai ? (currentPeriod?.social_security_rate ?? 0.05) : 0,
+      deduct_advance: 0, deduct_safety_equipment: 0, deduct_uniform: 0,
+    })
+    const eps = 0.5
+    const checks: [number, number][] = [
+      [c.amount_normal,              Number(entry.amount_normal)],
+      [c.amount_shift,               Number(entry.amount_shift)],
+      [c.amount_ot + c.amount_ot_1x, Number(entry.amount_ot)],
+      [c.deduct_social_security,     Number(entry.deduct_social_security)],
+    ]
+    isOutdated = checks.some(([a, b]) => Math.abs(a - b) > eps)
+  }
+
+  // ── computed fields ──
+  let workingDays = 0
+  const income = entry ? (() => {
+    const amtNormal  = Number(entry.amount_normal  || 0)
+    const amtShift   = Number(entry.amount_shift   || 0)
+    const amtOtRaw   = Number(entry.amount_ot      || 0)  // combined OT in DB for clerks
+    const amtOt1xRaw = Number(entry.amount_ot_1x   || 0)
+    const amtSpecial = Number(entry.amount_special  || 0) + Number(entry.override_special || 0)
+
+    // For clerks: DB stores combined OT (1.5x weekday + 1x weekend) in amount_ot.
+    // Split it back using shift hour counts when not outdated.
+    const clerkOtAmt   = empIsClerk && !isOutdated ? clerkHourly * 1.5 * clerkOt   : 0
+    const clerkOt1xAmt = empIsClerk && !isOutdated ? clerkHourly * 1.0 * clerkOt1x : 0
+    // For outdated or worker, use raw stored values
+    const amtOt   = empIsClerk && !isOutdated ? clerkOtAmt   : amtOtRaw
+    const amtOt1x = empIsClerk && !isOutdated ? clerkOt1xAmt : amtOt1xRaw
+
+    // Derive day/hour counts from amounts ÷ current rate for display
+    const dnDays  = baseNormal > 0 ? Math.round(amtNormal / (empIsClerk ? clerkDaily  : baseNormal)) : 0
+    const dsDays  = baseShift  > 0 ? Math.round(amtShift  / baseShift)  : 0
+    const otHrs   = clerkHourly > 0 && empIsClerk ? Math.round(amtOt   / (clerkHourly * 1.5)) : 0
+    const ot1Hrs  = clerkHourly > 0 && empIsClerk ? Math.round(amtOt1x / clerkHourly)         : 0
+    const otDays  = !empIsClerk && empRate > 0 ? Math.round(amtOtRaw / (empRate * 2)) : 0
+    workingDays = empIsClerk ? (dnDays + daysShift + holFull + holHalf) : (dnDays + holFull + holHalf)
+
+    // Only show formula detail when not outdated
+    const detailNormal = !isOutdated && dnDays > 0
+      ? (empIsClerk ? `฿${Math.round(clerkDaily)} × ${dnDays} วัน` : `฿${baseNormal} × ${dnDays} วัน`)
+      : null
+    const detailShift  = !isOutdated && dsDays > 0 && !empIsClerk ? `฿${Math.round(baseShift)} × ${dsDays} วัน` : null
+    const detailOt     = !isOutdated
+      ? (empIsClerk && otHrs  > 0 ? `฿${clerkHourly.toFixed(2)} × 1.5 × ${otHrs} ชม.`  : null)
+      || (!empIsClerk && otDays > 0 ? `฿${empRate} × 2 × ${otDays} วัน`                 : null)
+      : null
+    const detailOt1x   = !isOutdated && empIsClerk && ot1Hrs > 0
+      ? `฿${clerkHourly.toFixed(2)} × 1.0 × ${ot1Hrs} ชม. (${daysShift} วัน)` : null
+
+    // split special_note by comma into individual sub-lines
+    const specialSubs = entry.special_note
+      ? (entry.special_note as string).split(',').map((s: string) => s.trim()).filter(Boolean)
+      : []
+    return [
+      { label: empIsClerk ? 'ค่าจ้างปกติ (วันธรรมดา)' : 'ค่าจ้างปกติ (8 ชม.)',         value: Number(entry.amount_normal || 0), detail: detailNormal, subs: [] as string[] },
+      { label: 'ค่ากะ (4 ชม.)',                                                           value: !empIsClerk ? amtShift  : 0,      detail: detailShift,  subs: [] },
+      { label: empIsClerk ? 'OT ล่วงเวลา (×1.5)'  : 'OT วันหยุดนักขัตฤกษ์ (×2)',       value: amtOt,                            detail: detailOt,     subs: [] },
+      { label: empIsClerk ? 'OT วันหยุดสัปดาห์ (×1)' : '',                               value: empIsClerk ? amtOt1x : 0,         detail: detailOt1x,   subs: [] },
+      { label: 'ค่าไม้ส่วนเกิน',  value: Number(entry.amount_wood_excess || 0), detail: null, subs: [] },
+      { label: 'ค่าฟิล์ม',        value: Number(entry.amount_film || 0),        detail: null, subs: [] },
+      { label: 'เงินพิเศษ',       value: amtSpecial,                            detail: null, subs: specialSubs },
+      { label: 'เบี้ยขยัน',       value: Number(entry.amount_diligence || 0),   detail: null, subs: [] },
+      { label: 'ค่าตำแหน่ง',      value: Number(entry.amount_position || 0),    detail: null, subs: [] },
+    ].filter(r => r.value > 0 && r.label !== '')
+  })() : []
+
+  const deductions = entry ? [
+    { label: 'ประกันสังคม',            value: Number(entry.deduct_social_security || 0) },
+    { label: 'เบิกล่วงหน้า',           value: Number(entry.deduct_advance || 0) },
+    { label: 'ค่าอุปกรณ์ความปลอดภัย', value: Number(entry.deduct_safety_equipment || 0) },
+    { label: 'ค่าเสื้อพนักงาน',        value: Number(entry.deduct_uniform || 0) },
+  ].filter(r => r.value > 0) : []
+
+  const totalIncome = income.reduce((s, r) => s + r.value, 0)
+  const totalDeduct = deductions.reduce((s, r) => s + r.value, 0)
+  const netPay = totalIncome - totalDeduct
+
+  const posLabel = selectedEmp ? (POSITIONS[selectedEmp.position] || selectedEmp.position || '') : ''
 
   return (
     <>
-      <TopBar
-        title="ดูสลิปเงินเดือน"
-        action={
-          <div className="flex items-center gap-3">
-            <Button
-              className="bg-[#1D9E75] hover:bg-[#157a5a] h-10 px-5 font-bold shadow-sm"
-              onClick={handlePrint}
-              disabled={!slipData}
-            >
-              <Printer className="w-4 h-4 mr-2" />
-              พิมพ์สลิป
-            </Button>
-            <div className="bg-white border border-slate-200 px-5 py-2 rounded-full shadow-sm flex items-center min-h-[42px]">
-              <span className="text-[15px] font-bold text-slate-700">
-                งวด: {currentPeriod ? (
-                  (() => {
-                    const start = new Date(currentPeriod.period_start)
-                    const end = new Date(currentPeriod.period_end)
-                    const thaiYear = start.getFullYear() + 543
-                    return format(start, 'MMMM', { locale: th }) === format(end, 'MMMM', { locale: th })
-                      ? `${format(start, 'd', { locale: th })} - ${format(end, 'd MMMM', { locale: th })} ${thaiYear}`
-                      : `${format(start, 'd MMMM', { locale: th })} - ${format(end, 'd MMMM', { locale: th })} ${thaiYear}`
-                  })()
-                ) : (
-                  'ยังไม่ได้สร้างงวด'
-                )}
-              </span>
-            </div>
+      <TopBar title="สลิปเงินเดือน" subtitle={currentPeriod?.label} onMenuClick={onMenuClick} />
+
+      <div className="vk-split">
+
+        {/* ── Left panel — hidden on mobile when employee is selected ── */}
+        <div style={{ padding: '16px 12px' }}
+          className={`vk-sidebar-scrollable vk-sidebar-scrollable-payroll ${selectedEmpId ? 'hidden md:block' : ''}`}>
+          <div className="vk-eyebrow" style={{ marginBottom: 8 }}>พนักงาน ({employees.length})</div>
+          <div style={{ display: 'flex', gap: 8, fontSize: 10, color: 'var(--vk-ink-3)', marginBottom: 10, flexWrap: 'wrap' }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+              <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--vk-jade)', display: 'inline-block' }} />มีสลิป
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+              <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#d4cfc9', display: 'inline-block' }} />ยังไม่มี
+            </span>
           </div>
-        }
-      />
+          <hr className="vk-rule-soft" style={{ marginBottom: 10 }} />
+          {employees.map(emp => {
+            const hasSaved = savedIds.has(emp.id)
+            const active = emp.id === selectedEmpId
+            const n = fmtNationality(emp.nationality)
+            return (
+              <div key={emp.id} onClick={() => setSelectedEmpId(emp.id)}
+                className="vk-employee-card"
+                data-selected={active}>
 
-      <div className="flex flex-col md:flex-row min-h-[calc(100vh-64px)] md:h-[calc(100vh-64px)]">
-
-        {/* Left: Employee List */}
-        <div className="w-full md:w-80 border-b md:border-b-0 md:border-r bg-white flex flex-col h-[40vh] md:h-auto shrink-0">
-          <div className="p-4 border-b space-y-3 shrink-0">
-            <Label className="text-sm font-semibold text-slate-700">รายชื่อพนักงาน</Label>
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
-              <Input
-                placeholder="ค้นหา รหัส/ชื่อ..."
-                className="pl-9"
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-              />
-            </div>
-            {isSearching && (
-              <p className="text-xs text-slate-500">
-                แสดงผลการค้นหา (รวมพนักงานที่พ้นสภาพแล้ว)
-              </p>
-            )}
-          </div>
-
-          <div className="flex-1 overflow-y-auto">
-            {visibleEmployees.length === 0 && (
-              <div className="text-center py-10 text-slate-400 text-sm">
-                ไม่พบพนักงาน
-              </div>
-            )}
-            {visibleEmployees.map((emp) => {
-              const isInactive = emp.status !== 'active'
-              const isSelected = selectedId === emp.id
-              return (
-                <div
-                  key={emp.id}
-                  onClick={() => setSelectedId(emp.id)}
-                  className={`px-4 py-3 cursor-pointer border-b transition-colors flex items-center justify-between
-                    ${isSelected ? 'bg-[#1D9E75]/10 border-l-4 border-l-[#1D9E75]' : 'hover:bg-slate-50'}
-                    ${isInactive ? 'opacity-60' : ''}
-                  `}
-                >
-                  <div>
-                    <div className={`flex items-center gap-3 text-sm font-bold ${isInactive ? 'text-slate-400' : 'text-slate-800'}`}>
-                      <span className="w-12 shrink-0 tabular-nums">{emp.employee_code}</span>
-                      <span className="text-slate-300 font-normal">—</span>
-                      <span className="truncate">{formatEmployeeName(emp)}</span>
-                    </div>
-                    {isInactive && (
-                      <span className="text-xs text-slate-400 flex items-center gap-1 mt-0.5">
-                        <UserX className="w-3 h-3" /> พ้นสภาพพนักงาน
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, background: hasSaved ? 'var(--vk-jade)' : '#d4cfc9' }} />
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+                      <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--vk-ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {emp.first_name} {emp.last_name}{n ? ` (${n})` : ''}
                       </span>
-                    )}
+                      {emp.position === 'clerk' && (
+                        <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 999, background: 'rgba(177,71,41,0.12)', color: 'var(--vk-persimmon)', letterSpacing: '0.04em', flexShrink: 0 }}>เสมียน</span>
+                      )}
+                    </div>
+                    <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 10, color: 'var(--vk-ink-3)', marginTop: 1 }}>{emp.employee_code}</div>
                   </div>
-                  {isInactive && (
-                    <div className="w-2 h-2 rounded-full bg-slate-300 flex-shrink-0" />
-                  )}
                 </div>
-              )
-            })}
-          </div>
+              </div>
+            )
+          })}
         </div>
 
-        {/* Right: Preview */}
-        <div className="flex-1 bg-slate-100 overflow-y-auto p-4 md:p-8 print:p-0 print:bg-white flex justify-center items-start">
-          {slipData ? (
-            <div ref={slipWrapRef} className="w-full shadow-lg overflow-x-auto">
-              <PaySlipPreview data={slipData} />
+        {/* ── Right panel ── */}
+        <div style={{ overflowY: 'auto', padding: '16px', background: 'var(--vk-bone)' }} className="md:px-8 md:py-6">
+          {selectedEmp && (
+            <button className="vk-btn md:hidden" style={{ marginBottom: 12, fontSize: 12, padding: '5px 12px' }}
+              onClick={() => setSelectedEmpId(null)}>← กลับ</button>
+          )}
+          {!selectedEmp ? (
+            <div style={{ paddingTop: 60, textAlign: 'center' }}>
+              <div className="vk-eyebrow" style={{ marginBottom: 8 }}>เลือกพนักงานจากรายการทางซ้าย</div>
+              <div className="vk-small" style={{ color: 'var(--vk-ink-3)' }}>จุดสีเขียวหมายถึงมีสลิปพร้อมพิมพ์</div>
+            </div>
+          ) : !entry ? (
+            <div style={{ padding: 40, textAlign: 'center', border: '1px solid var(--vk-rule)', background: 'var(--vk-paper)' }}>
+              <div className="vk-eyebrow" style={{ marginBottom: 6 }}>ยังไม่มีข้อมูลค่าจ้าง</div>
+              <div className="vk-small" style={{ color: 'var(--vk-ink-3)' }}>กรุณาบันทึกค่าจ้างที่หน้า "กรอกค่าจ้าง" ก่อน</div>
             </div>
           ) : (
-            <div className="flex flex-col items-center justify-center h-full text-slate-400 gap-3">
-              <Printer className="w-12 h-12 opacity-20" />
-              <p className="text-lg font-medium">เลือกพนักงานเพื่อดูสลิป</p>
-              <p className="text-sm">คลิกชื่อพนักงานจากรายการด้านซ้าย (ระบบจะแสดงเฉพาะงวดที่มีข้อมูล)</p>
-            </div>
+            <>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
+                <button className="vk-btn vk-btn--primary" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={handlePrint}>
+                  <Printer style={{ width: 14, height: 14 }} />พิมพ์สลิป
+                </button>
+              </div>
+
+              {/* OUTDATED warning */}
+              {isOutdated && (
+                <div style={{ marginBottom: 12, background: '#fff3cd', border: '1px solid #f5c842', borderRadius: 6, padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ fontSize: 16 }}>⚠️</span>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 13, color: '#7a5c00' }}>ข้อมูลค่าจ้างไม่ตรงกับอัตราปัจจุบัน</div>
+                    <div style={{ fontSize: 11, color: '#9a7500', marginTop: 2 }}>อัตราค่าจ้างถูกแก้ไขหลังจากบันทึก กรุณาไปที่หน้า "กรอกค่าจ้าง" แล้วบันทึกใหม่อีกครั้งก่อนพิมพ์สลิป</div>
+                  </div>
+                </div>
+              )}
+
+              {/* ══ SLIP ══════════════════════════════════════════════════════ */}
+              {/* On mobile: scale the slip to fit viewport width */}
+              <div className="vk-slip-scaler" ref={scalerRef}>
+                <div id="slip-print" ref={(el) => { (slipRef as any).current = el; (innerRef as any).current = el }} style={{ width: 680, minWidth: 680 }}>
+                <VKSlipDocument
+                  branchName={branchName ? fullCompanyName(branchName) : undefined}
+                  employeeName={`${selectedEmp.first_name} ${selectedEmp.last_name}`}
+                  employeeCode={selectedEmp.employee_code}
+                  positionLabel={posLabel}
+                  jobTitle={selectedEmp.job_title}
+                  periodLabel={currentPeriod ? thaiPeriod(currentPeriod.period_start, currentPeriod.period_end) : '—'}
+                  paymentMethod={selectedEmp.payment_method === 'bank_transfer' ? 'bank_transfer' : 'cash'}
+                  bankName={selectedEmp.bank_name}
+                  bankAccount={maskBank(selectedEmp.bank_account)}
+                  income={income}
+                  deductions={deductions}
+                  totalIncome={totalIncome}
+                  totalDeduct={totalDeduct}
+                  netPay={netPay}
+                  workingDays={workingDays}
+                  isOutdated={isOutdated}
+                />
+                </div>
+              </div>
+            </>
           )}
         </div>
       </div>

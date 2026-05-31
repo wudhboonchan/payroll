@@ -1,1230 +1,579 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useOutletContext } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { format, isWeekend, parseISO } from 'date-fns'
-import { th } from 'date-fns/locale'
 import { supabase } from '../lib/supabase'
 import { useAppStore } from '../store/useAppStore'
 import { TopBar } from '../components/layout/TopBar'
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
-import { Input } from '../components/ui/input'
-import { Button } from '../components/ui/button'
-import { Label } from '../components/ui/label'
-import { Badge } from '../components/ui/badge'
-import { Search, Save, Lock, Edit2, AlertCircle, RotateCcw } from 'lucide-react'
+import { useState, useMemo, useEffect } from 'react'
 import { toast } from 'sonner'
-import { formatThaiCurrency } from '../lib/formatters'
+import { Save, CheckCircle2, AlertCircle } from 'lucide-react'
 import { calculatePayroll } from '../lib/payrollCalc'
 import type { PayrollCalculationInput } from '../lib/payrollCalc'
-import { formatEmployeeName } from '../lib/formatters'
+import '../styles/v2-tokens.css'
 
 interface Employee {
-  id: string
-  employee_code: string
-  first_name: string
-  last_name: string
-  prefix?: string
-  nationality?: string
-  position: string
-  wage_type: string
-  rate_per_12h: number
-  payment_method: string
-  status: string
-  job_title?: string
-  factory_id?: string
+  id: string; employee_code: string; first_name: string; last_name: string
+  prefix: string | null; nationality: string | null; position: string
+  job_title: string | null; wage_type: string; rate_per_12h: number
 }
 
-interface ShiftAssignment {
-  id?: string
-  employee_id?: string
-  work_date?: string
-  shift_type?: string
-  is_holiday_ot?: boolean
-  is_holiday_ot_exempt?: boolean
-  is_half_shift?: boolean
-  wood_excess?: number
-  film_amount?: number
-  ot_hours?: number
-  is_cross_position?: boolean
-  cross_position_title?: string | null
-  cross_position_extra_pay?: number
-  employee?: {
-    employee_code?: string
-    first_name?: string
-    last_name?: string
-    prefix?: string | null
-    nationality?: string | null
-  }
+interface Shift {
+  employee_id: string; shift_type: string; is_holiday_ot: boolean
+  is_holiday_ot_exempt: boolean; is_half_shift: boolean
+  wood_excess: number; film_amount: number; ot_hours: number
+  actual_hours: number; work_date: string
+  is_cross_position: boolean; cross_position_title: string | null; cross_position_extra_pay: number
 }
 
-interface AdvancePayment {
-  id?: string
-  employee_id?: string
-  amount?: number
-  period_id?: string
+interface PayrollRow {
+  employee_id: string; amount_normal: number; amount_shift: number; amount_ot: number
+  amount_wood_excess: number; amount_film: number; amount_special: number
+  override_special: number | null; special_note: string | null
+  amount_diligence: number; amount_position: number
+  deduct_social_security: number; deduct_safety_equipment: number
+  deduct_uniform: number; deduct_advance: number
+  override_normal: number | null; override_reason: string | null
 }
 
-interface PayrollEntryRow {
-  employee_id?: string
-  amount_normal?: number
-  amount_shift?: number
-  amount_ot?: number
-  amount_wood_excess?: number
-  amount_film?: number
-  amount_special?: number
-  override_special?: number | null
-  special_note?: string | null
-  amount_diligence?: number
-  amount_position?: number
-  deduct_social_security?: number
-  deduct_safety_equipment?: number
-  deduct_uniform?: number
-  deduct_advance?: number
-  override_normal?: number | null
-  override_reason?: string | null
+function isWeekendDate(s: string) { const d = new Date(s); return d.getDay() === 0 || d.getDay() === 6 }
+function fmtNationality(nationality: string | null) {
+  if (!nationality || nationality === 'ไทย') return null
+  if (nationality === 'เมียนมา' || nationality.toLowerCase().includes('myanmar') || nationality.toLowerCase().includes('burma')) return 'เมียนมา/กะเหรี่ยง'
+  return nationality
 }
 
 export default function PayrollEntry() {
+  const { onMenuClick } = useOutletContext<{ onMenuClick: () => void }>()
   const { user } = useAppStore()
-
   const queryClient = useQueryClient()
-  const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null)
-  const [searchTerm, setSearchTerm] = useState('')
-  const [socialSecurityRate, setSocialSecurityRate] = useState(0.05)
-  const [isApproved] = useState(false)
+  const [selectedEmpId, setSelectedEmpId] = useState<string | null>(null)
 
-  // Override states
-  const [overrideNormal, setOverrideNormal] = useState<number | null>(null)
-  const [isEditingNormal, setIsEditingNormal] = useState(false)
-  const [overrideReason, setOverrideReason] = useState('')
-  const [overrideWood, setOverrideWood] = useState<number | null>(null)
-  const [overrideFilm, setOverrideFilm] = useState<number | null>(null)
-  const [isEditingWood, setIsEditingWood] = useState(false)
-  const [isEditingFilm, setIsEditingFilm] = useState(false)
-  const [overrideSpecial, setOverrideSpecial] = useState<number | null>(null)
-  const [specialNote, setSpecialNote] = useState('')
-  const [isEditingSpecial, setIsEditingSpecial] = useState(false)
-
-  const [manualEntries, setManualEntries] = useState({
-    amount_wood_excess: 0,
-    amount_film: 0,
-    amount_special: 0,
-    amount_diligence: 0,
-    amount_position: 0,
-    deduct_safety_equipment: 0,
-    deduct_uniform: 0
-  })
-
-  const { data: employees = [] } = useQuery({
-    queryKey: ['employees', user?.factory_id],
-    queryFn: async () => {
-      if (!user?.factory_id) return []
-      const { data, error } = await supabase
-        .from('employees')
-        .select('id, employee_code, first_name, last_name, prefix, nationality, position, wage_type, rate_per_12h, payment_method, status, job_title, factory_id')
-        .eq('factory_id', user.factory_id)
-      if (error) throw error
-      return data as Employee[]
-    },
-    enabled: !!user?.factory_id
-  })
-
-  // Fetch the target period (default to global selection or latest)
-  const { data: periods = [] } = useQuery({
+  // ── data queries ──
+  const { data: periods = [] } = useQuery<any[]>({
     queryKey: ['periods', user?.factory_id],
     queryFn: async () => {
-      if (!user?.factory_id) return []
-      const { data, error } = await supabase
-        .from('payroll_periods')
-        .select('id, factory_id, label, period_start, period_end, status, social_security_rate')
-        .eq('factory_id', user.factory_id)
-        .order('period_start', { ascending: false })
-      if (error) throw error
-      return data
-    },
-    enabled: !!user?.factory_id
+      const { data, error } = await supabase.from('payroll_periods').select('*').eq('factory_id', user?.factory_id ?? '').order('period_start', { ascending: false })
+      if (error) throw error; return data
+    }, enabled: !!user?.factory_id,
   })
-
   const currentPeriod = periods[0]
 
-  // Fetch shift assignments for calculation
-  const { data: shifts = [] } = useQuery({
-    queryKey: ['shifts', selectedEmployeeId, currentPeriod?.id],
+  const { data: employees = [] } = useQuery<Employee[]>({
+    queryKey: ['employees-payroll', user?.factory_id],
     queryFn: async () => {
-      if (!selectedEmployeeId || !currentPeriod?.id) return []
-      const { data, error } = await supabase
-        .from('shift_assignments')
-        .select('id, employee_id, shift_type, is_holiday_ot, is_holiday_ot_exempt, is_half_shift, wood_excess, film_amount, ot_hours, work_date, is_cross_position, cross_position_title, cross_position_extra_pay')
-        .eq('employee_id', selectedEmployeeId)
-        .eq('period_id', currentPeriod?.id)
-      if (error) throw error
-      return (data as unknown) as ShiftAssignment[]
-    },
-    enabled: !!selectedEmployeeId && !!currentPeriod?.id
+      const { data, error } = await supabase.from('employees')
+        .select('id,employee_code,first_name,last_name,prefix,nationality,position,job_title,wage_type,rate_per_12h')
+        .eq('factory_id', user?.factory_id ?? '').eq('status','active').order('employee_code')
+      if (error) throw error; return data
+    }, enabled: !!user?.factory_id, staleTime: 0,
   })
 
-  // Fetch advance payments
-  const { data: advances = [] } = useQuery({
-    queryKey: ['advances', selectedEmployeeId, currentPeriod?.id],
-    queryFn: async () => {
-      if (!selectedEmployeeId || !currentPeriod?.id) return []
-      const { data, error } = await supabase
-        .from('advance_payments')
-        .select('id, amount, period_id')
-        .eq('employee_id', selectedEmployeeId)
-        .eq('period_id', currentPeriod?.id)
-      if (error) throw error
-      return (data as unknown) as AdvancePayment[]
-    },
-    enabled: !!selectedEmployeeId && !!currentPeriod?.id,
-    staleTime: 30_000,
-  })
-
-  // Fetch ALL payroll entries for this period to show status in sidebar
-  // Only select fields needed for status comparison (not all columns)
-  const { data: allPeriodEntries = [] } = useQuery({
-    queryKey: ['all-payroll-entries', currentPeriod?.id],
-    queryFn: async () => {
-      if (!currentPeriod?.id) return []
-      const { data, error } = await supabase
-        .from('payroll_entries')
-        .select('employee_id, amount_normal, amount_shift, amount_ot, amount_wood_excess, amount_film, amount_special, amount_diligence, amount_position, deduct_social_security, deduct_safety_equipment, deduct_uniform, deduct_advance, override_normal, override_reason, override_special, special_note')
-        .eq('period_id', currentPeriod?.id)
-      if (error) throw error
-      return (data as unknown) as PayrollEntryRow[]
-    },
-    enabled: !!currentPeriod?.id,
-    staleTime: 30_000,
-  })
-
-  // Fetch ALL advances for this period to show OUTDATED status in sidebar
-  const { data: allPeriodAdvances = [] } = useQuery({
-    queryKey: ['advances', 'all', currentPeriod?.id],
-    queryFn: async () => {
-      if (!currentPeriod?.id) return []
-      const { data, error } = await supabase
-        .from('advance_payments')
-        .select('id, employee_id, amount, period_id')
-        .eq('period_id', currentPeriod?.id)
-      if (error) throw error
-      return (data as unknown) as AdvancePayment[]
-    },
-    enabled: !!currentPeriod?.id,
-    staleTime: 30_000,
-  })
-
-  // Fetch ALL shift assignments for this period to detect "Outdated" status for everyone
-  const { data: allPeriodShifts = [] } = useQuery({
+  const { data: allShifts = [] } = useQuery<Shift[]>({
     queryKey: ['all-period-shifts', currentPeriod?.id],
     queryFn: async () => {
-      if (!currentPeriod?.id) return []
-      const { data, error } = await supabase
-        .from('shift_assignments' as any)
-        .select(`
-          id, employee_id, shift_type, is_holiday_ot, is_holiday_ot_exempt,
-          is_half_shift, wood_excess, film_amount, ot_hours, work_date,
-          is_cross_position, cross_position_title, cross_position_extra_pay,
-          employee:employees(employee_code, first_name, last_name, prefix, nationality)
-        `)
-        .eq('period_id', currentPeriod?.id)
-      if (error) throw error
-      return (data as unknown) as ShiftAssignment[]
-    },
-    enabled: !!currentPeriod?.id,
-    staleTime: 30_000,
+      const { data, error } = await supabase.from('shift_assignments' as any)
+        .select('employee_id,shift_type,is_holiday_ot,is_holiday_ot_exempt,is_half_shift,wood_excess,film_amount,ot_hours,actual_hours,work_date,is_cross_position,cross_position_title,cross_position_extra_pay')
+        .eq('period_id', currentPeriod.id)
+      if (error) throw error; return data as any
+    }, enabled: !!currentPeriod?.id, staleTime: 0,
   })
 
-  // Fetch existing payroll entry for the selected employee (full detail)
-  const { data: existingEntry } = useQuery({
-    queryKey: ['payroll-entry', selectedEmployeeId, currentPeriod?.id],
+  const { data: allEntries = [] } = useQuery<PayrollRow[]>({
+    queryKey: ['all-payroll-entries', currentPeriod?.id],
     queryFn: async () => {
-      if (!selectedEmployeeId || !currentPeriod?.id) return null
-      const { data, error } = await supabase
-        .from('payroll_entries' as any)
-        .select('employee_id, amount_normal, amount_shift, amount_ot, amount_wood_excess, amount_film, amount_special, override_special, special_note, amount_diligence, amount_position, deduct_social_security, deduct_safety_equipment, deduct_uniform, deduct_advance, override_normal, override_reason')
-        .eq('period_id', currentPeriod?.id)
-        .eq('employee_id', selectedEmployeeId)
-        .single()
-      if (error && error.code !== 'PGRST116') throw error
-      return (data as unknown) as PayrollEntryRow | null
-    },
-    enabled: !!selectedEmployeeId && !!currentPeriod?.id
+      const { data, error } = await supabase.from('payroll_entries' as any)
+        .select('employee_id,amount_normal,amount_shift,amount_ot,amount_wood_excess,amount_film,amount_special,override_special,special_note,amount_diligence,amount_position,deduct_social_security,deduct_safety_equipment,deduct_uniform,deduct_advance,override_normal,override_reason')
+        .eq('period_id', currentPeriod.id)
+      if (error) throw error; return data as any
+    }, enabled: !!currentPeriod?.id, staleTime: 0,
   })
 
-  // Update form when existing entry is loaded
+  const { data: allAdvances = [] } = useQuery<any[]>({
+    queryKey: ['advances', 'all', currentPeriod?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('advance_payments').select('employee_id,amount').eq('period_id', currentPeriod.id)
+      if (error) throw error; return data
+    }, enabled: !!currentPeriod?.id, staleTime: 30_000,
+  })
+
+  // ── selected employee data ──
+  const selectedEmp = employees.find(e => e.id === selectedEmpId) ?? null
+  const existingEntry = allEntries.find(e => e.employee_id === selectedEmpId) ?? null
+  const empShifts = allShifts.filter(s => s.employee_id === selectedEmpId)
+  const empAdvances = allAdvances.filter(a => a.employee_id === selectedEmpId)
+  const ssRate = currentPeriod?.social_security_rate ?? 0.05
+  const isThai = !selectedEmp?.nationality || selectedEmp.nationality === 'ไทย'
+
+  // ── local overrides ──
+  const [overrideNormal, setOverrideNormal] = useState<number | null>(null)
+  const [overrideSpecial, setOverrideSpecial] = useState<number | null>(null)
+  const [specialNote, setSpecialNote] = useState('')
+  const [extraEntries, setExtraEntries] = useState({ amount_diligence: 0, amount_position: 0, amount_special: 0, deduct_safety_equipment: 0, deduct_uniform: 0 })
+
   useEffect(() => {
-    const frame = requestAnimationFrame(() => {
-      if (existingEntry) {
-        setManualEntries({
-          amount_wood_excess: Number(existingEntry.amount_wood_excess || 0),
-          amount_film: Number(existingEntry.amount_film || 0),
-          amount_special: Number(existingEntry.amount_special || 0),
-          amount_diligence: Number(existingEntry.amount_diligence || 0),
-          amount_position: Number(existingEntry.amount_position || 0),
-          deduct_safety_equipment: Number(existingEntry.deduct_safety_equipment || 0),
-          deduct_uniform: Number(existingEntry.deduct_uniform || 0)
-        })
-        setOverrideNormal(existingEntry.override_normal != null ? Number(existingEntry.override_normal) : null)
-        setOverrideReason(existingEntry.override_reason || '')
-        setOverrideSpecial(existingEntry.override_special != null ? Number(existingEntry.override_special) : null)
-        setSpecialNote(existingEntry.special_note || '')
-      } else {
-        setManualEntries({
-          amount_wood_excess: 0,
-          amount_film: 0,
-          amount_special: 0,
-          amount_diligence: 0,
-          amount_position: 0,
-          deduct_safety_equipment: 0,
-          deduct_uniform: 0
-        })
-        setOverrideNormal(null)
-        setOverrideReason('')
-        setOverrideWood(null)
-        setOverrideFilm(null)
-      }
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [existingEntry, selectedEmployeeId])
+    if (existingEntry) {
+      setOverrideNormal(existingEntry.override_normal != null ? Number(existingEntry.override_normal) : null)
+      setOverrideSpecial(existingEntry.override_special != null ? Number(existingEntry.override_special) : null)
+      setSpecialNote(existingEntry.special_note || '')
+      setExtraEntries({
+        amount_diligence: Number(existingEntry.amount_diligence || 0),
+        amount_position: Number(existingEntry.amount_position || 0),
+        amount_special: Number(existingEntry.override_special || 0),
+        deduct_safety_equipment: Number(existingEntry.deduct_safety_equipment || 0),
+        deduct_uniform: Number(existingEntry.deduct_uniform || 0),
+      })
+    } else {
+      setOverrideNormal(null); setOverrideSpecial(null); setSpecialNote('')
+      setExtraEntries({ amount_diligence: 0, amount_position: 0, amount_special: 0, deduct_safety_equipment: 0, deduct_uniform: 0 })
+    }
+  }, [existingEntry, selectedEmpId])
 
-  const selectedEmployee = employees.find(e => e.id === selectedEmployeeId)
-  // Consolidated calculations for stability
-  const { 
-    calc, totalAdvance, effectiveWood, effectiveFilm, 
-    isClerk, normalDays, halfShiftDays, holidayOtFullDays, holidayOtHalfDays,
-    autoClerkOtHours, autoClerkOt1xHours, autoWood, autoFilm,
-    autoSpecial, autoSpecialNote, effectiveSpecial
-  } = useMemo(() => {
-    const isClerk = selectedEmployee?.position === 'clerk'
-    const advTotal = advances.reduce((sum: number, adv) => sum + Number(adv.amount), 0)
-    // Shifts treated as normal: non-holiday OR holiday but exempt (1x pay)
-    const normShifts = shifts.filter(s => !s.is_holiday_ot || s.is_holiday_ot_exempt)
-    const normDays = normShifts.filter(s => !s.is_half_shift && !((s as any).actual_hours > 0)).length
-    const halfDays = normShifts.filter(s => s.is_half_shift && !((s as any).actual_hours > 0)).length
-    const partialHoursTotal = normShifts.reduce((sum: number, s) => sum + Number((s as any).actual_hours || 0), 0)
-    // Shifts with true 2x holiday OT (not exempt)
-    const holShifts = shifts.filter(s => s.is_holiday_ot && !s.is_holiday_ot_exempt)
-    const holFullDays = holShifts.filter(s => !s.is_half_shift).length
-    const holHalfDays = holShifts.filter(s => s.is_half_shift).length
-    const clerkNormDays = normShifts.length
-    const isWeekendDay = (dateStr: string) => {
-      const d = parseISO(dateStr);
-      const day = d.getDay();
-      return day === 0 || day === 6; // 0=Sunday, 6=Saturday
-    };
-
-    const autoClerkOt = shifts.filter(s => !isWeekendDay(s.work_date)).reduce((sum: number, s) => sum + Number(s.ot_hours || 0), 0)
-    const autoClerkOt1x = shifts.filter(s => isWeekendDay(s.work_date)).reduce((sum: number, s) => sum + Number(s.ot_hours || 0), 0)
-    const autoW = shifts.reduce((sum: number, s) => sum + Number(s.wood_excess || 0), 0)
-    const autoF = shifts.reduce((sum: number, s) => sum + Number(s.film_amount || 0), 0)
-    
-    // Auto Special from Cross Position (Job Rotation)
-    const crossPosShifts = shifts.filter(s => s.is_cross_position)
-    const autoSpecial = crossPosShifts.reduce((sum: number, s) => sum + Number(s.cross_position_extra_pay || 0), 0)
-    
-    // Generate auto special note
-    const autoSpecialNote = crossPosShifts.length > 0 
-      ? crossPosShifts.map(s => `${s.cross_position_title || 'สลับตำแหน่ง'} (${s.cross_position_extra_pay}฿)`).join(', ')
-      : ''
-
-    const woodVal: number = overrideWood !== null ? overrideWood : autoW
-    const filmVal: number = overrideFilm !== null ? overrideFilm : autoF
-
-    const isThai = !selectedEmployee?.nationality || selectedEmployee.nationality === 'ไทย'
+  // ── calculation ──
+  const { calc, totalAdvance, autoWood, autoFilm, autoSpecial, autoSpecialNote, crossPositions, isClerk, clerkOtHours, clerkOt1xHours, clerkWeekdayDays, clerkWeekendDays, shiftPayDays, holidayOtFullDays, holidayOtHalfDays, baseNormal, baseShift, clerkDaily, clerkHourly } = useMemo(() => {
+    const empty = { calc: null, totalAdvance: 0, autoWood: 0, autoFilm: 0, autoSpecial: 0, autoSpecialNote: '', crossPositions: [] as { title: string; amount: number }[], isClerk: false, clerkOtHours: 0, clerkOt1xHours: 0, clerkWeekdayDays: 0, clerkWeekendDays: 0, shiftPayDays: 0, holidayOtFullDays: 0, holidayOtHalfDays: 0, baseNormal: 357, baseShift: 0, clerkDaily: 0, clerkHourly: 0 }
+    if (!selectedEmp) return empty
+    const isClerk = selectedEmp.position === 'clerk'
+    const advTotal = empAdvances.reduce((s, a) => s + Number(a.amount), 0)
+    const normShifts = empShifts.filter(s => !s.is_holiday_ot || s.is_holiday_ot_exempt)
+    const holShifts  = empShifts.filter(s => s.is_holiday_ot && !s.is_holiday_ot_exempt)
+    const normDays = normShifts.filter(s => !s.is_half_shift && !s.actual_hours).length
+    const halfDays = normShifts.filter(s => s.is_half_shift && !s.actual_hours).length
+    const partialHrs = normShifts.reduce((s, sh) => s + Number(sh.actual_hours || 0), 0)
+    const holFull = holShifts.filter(s => !s.is_half_shift).length
+    const holHalf = holShifts.filter(s => s.is_half_shift).length
+    // Clerk: weekday shifts = ค่าจ้างปกติ; weekend shifts = OT (tracked via ot_hours)
+    const clerkWeekdayShifts = normShifts.filter(s => !isWeekendDate(s.work_date))
+    const clerkWeekendShifts = normShifts.filter(s => isWeekendDate(s.work_date))
+    const clerkNormDays = clerkWeekdayShifts.length  // only weekday shifts count as normal pay
+    const clerkOt  = empShifts.filter(s => !isWeekendDate(s.work_date)).reduce((s, sh) => s + Number(sh.ot_hours || 0), 0)
+    const clerkOt1x = empShifts.filter(s => isWeekendDate(s.work_date)).reduce((s, sh) => s + Number(sh.ot_hours || 0), 0)
+    const autoW = empShifts.reduce((s, sh) => s + Number(sh.wood_excess || 0), 0)
+    const autoF = empShifts.reduce((s, sh) => s + Number(sh.film_amount || 0), 0)
+    const crossPos = empShifts.filter(s => s.is_cross_position)
+    const autoSp = crossPos.reduce((s, sh) => s + Number(sh.cross_position_extra_pay || 0), 0)
+    // Group cross-positions by title, sum amounts
+    const posMap = new Map<string, number>()
+    crossPos.forEach(s => {
+      const title = s.cross_position_title || 'สลับตำแหน่ง'
+      posMap.set(title, (posMap.get(title) || 0) + Number(s.cross_position_extra_pay || 0))
+    })
+    const crossPositions = Array.from(posMap.entries()).map(([title, amount]) => ({ title, amount }))
+    const autoSpNote = crossPositions.map(p => `${p.title} (${p.amount}฿)`).join(', ')
     const input: PayrollCalculationInput = {
-      position: (selectedEmployee?.position as 'worker' | 'clerk') || 'worker',
-      wage_type: (selectedEmployee?.wage_type as 'daily' | 'monthly') || 'daily',
-      rate_per_12h: selectedEmployee?.rate_per_12h || 0,
+      position: selectedEmp.position as 'worker' | 'clerk',
+      wage_type: selectedEmp.wage_type as 'daily' | 'monthly',
+      rate_per_12h: Number(selectedEmp.rate_per_12h) || 0,
       normal_days: isClerk ? clerkNormDays : normDays,
       half_shift_days: isClerk ? 0 : halfDays,
-      holiday_ot_full_days: holFullDays,
-      holiday_ot_half_days: holHalfDays,
-      partial_hours_total: isClerk ? 0 : partialHoursTotal,
-      clerk_ot_hours: autoClerkOt,
-      clerk_ot_1x_hours: autoClerkOt1x,
+      holiday_ot_full_days: holFull,
+      holiday_ot_half_days: holHalf,
+      partial_hours_total: isClerk ? 0 : partialHrs,
+      clerk_ot_hours: clerkOt,
+      clerk_ot_1x_hours: clerkOt1x,
       override_normal: overrideNormal,
-      social_security_rate: isThai ? socialSecurityRate : 0,
+      override_special: null,
+      amount_wood_excess: isClerk ? 0 : autoW,
+      amount_film: isClerk ? 0 : autoF,
+      amount_special: autoSp + extraEntries.amount_special,
+      amount_diligence: extraEntries.amount_diligence,
+      amount_position: extraEntries.amount_position,
+      social_security_rate: isThai ? ssRate : 0,
       deduct_advance: advTotal,
-      amount_wood_excess: isClerk ? 0 : woodVal,
-      amount_film: isClerk ? 0 : filmVal,
-      amount_special: autoSpecial,
-      override_special: overrideSpecial,
-      amount_diligence: manualEntries.amount_diligence,
-      amount_position: manualEntries.amount_position,
-      deduct_safety_equipment: manualEntries.deduct_safety_equipment,
-      deduct_uniform: manualEntries.deduct_uniform,
+      deduct_safety_equipment: extraEntries.deduct_safety_equipment,
+      deduct_uniform: extraEntries.deduct_uniform,
     }
+    // Rate breakdown values for display
+    const rate = Number(selectedEmp.rate_per_12h) || 0
+    const baseNormal = rate === 0 ? 0 : 357
+    const baseShift  = Math.max(0, rate - baseNormal)
+    const clerkDaily = rate / 30
+    const clerkHourly = clerkDaily / 8
+    return { calc: calculatePayroll(input), totalAdvance: advTotal, autoWood: autoW, autoFilm: autoF, autoSpecial: autoSp, autoSpecialNote: autoSpNote, crossPositions, isClerk, clerkOtHours: clerkOt, clerkOt1xHours: clerkOt1x, clerkWeekdayDays: clerkNormDays, clerkWeekendDays: clerkWeekendShifts.length, shiftPayDays: normDays, holidayOtFullDays: holFull, holidayOtHalfDays: holHalf, baseNormal, baseShift, clerkDaily, clerkHourly, holFull, holHalf }
+  }, [selectedEmp, empShifts, empAdvances, overrideNormal, overrideSpecial, extraEntries, ssRate, isThai])
 
-    return {
-      calc: calculatePayroll(input),
-      totalAdvance: advTotal,
-      effectiveWood: woodVal,
-      effectiveFilm: filmVal,
-      isClerk,
-      normalDays: normDays,
-      halfShiftDays: halfDays,
-      holidayOtFullDays: holFullDays,
-      holidayOtHalfDays: holHalfDays,
-      autoClerkOtHours: autoClerkOt,
-      autoClerkOt1xHours: autoClerkOt1x,
-      autoWood: autoW,
-      autoFilm: autoF,
-      autoSpecial,
-      autoSpecialNote,
-      effectiveSpecial: overrideSpecial !== null ? overrideSpecial : autoSpecial,
+  // ── outdated detection — computed for ALL employees upfront ──
+  // So dots update immediately without requiring the user to click each employee.
+  const outdatedSet = useMemo(() => {
+    const set = new Set<string>()
+    const eps = 0.5
+    for (const entry of allEntries) {
+      const emp = employees.find(e => e.id === entry.employee_id)
+      if (!emp) continue
+      const shifts   = allShifts.filter(s => s.employee_id === emp.id)
+      const advances = allAdvances.filter(a => a.employee_id === emp.id)
+      const isEmpClerk = emp.position === 'clerk'
+      const empIsThai  = !emp.nationality || emp.nationality === 'ไทย'
+      const normShifts  = shifts.filter(s => !s.is_holiday_ot || s.is_holiday_ot_exempt)
+      const holShifts   = shifts.filter(s => s.is_holiday_ot && !s.is_holiday_ot_exempt)
+      const normDays    = normShifts.filter(s => !s.is_half_shift && !s.actual_hours).length
+      const halfDays    = normShifts.filter(s => s.is_half_shift  && !s.actual_hours).length
+      const partialHrs  = normShifts.reduce((s, sh) => s + Number(sh.actual_hours || 0), 0)
+      const holFull     = holShifts.filter(s => !s.is_half_shift).length
+      const holHalf     = holShifts.filter(s =>  s.is_half_shift).length
+      const clerkNorm   = normShifts.filter(s => !isWeekendDate(s.work_date)).length
+      const clerkOt     = shifts.filter(s => !isWeekendDate(s.work_date)).reduce((s, sh) => s + Number(sh.ot_hours || 0), 0)
+      const clerkOt1x   = shifts.filter(s =>  isWeekendDate(s.work_date)).reduce((s, sh) => s + Number(sh.ot_hours || 0), 0)
+      const autoW  = shifts.reduce((s, sh) => s + Number(sh.wood_excess           || 0), 0)
+      const autoF  = shifts.reduce((s, sh) => s + Number(sh.film_amount           || 0), 0)
+      const autoSp = shifts.filter(s => s.is_cross_position).reduce((s, sh) => s + Number(sh.cross_position_extra_pay || 0), 0)
+      const advTotal = advances.reduce((s, a) => s + Number(a.amount), 0)
+      const c = calculatePayroll({
+        position: emp.position as 'worker' | 'clerk',
+        wage_type: emp.wage_type as 'daily' | 'monthly',
+        rate_per_12h: Number(emp.rate_per_12h) || 0,
+        normal_days: isEmpClerk ? clerkNorm : normDays,
+        half_shift_days: isEmpClerk ? 0 : halfDays,
+        holiday_ot_full_days: holFull, holiday_ot_half_days: holHalf,
+        partial_hours_total: isEmpClerk ? 0 : partialHrs,
+        clerk_ot_hours: clerkOt, clerk_ot_1x_hours: clerkOt1x,
+        override_normal: null, override_special: null,
+        amount_wood_excess: isEmpClerk ? 0 : autoW,
+        amount_film: isEmpClerk ? 0 : autoF,
+        amount_special: autoSp,
+        amount_diligence: 0, amount_position: 0,
+        social_security_rate: empIsThai ? (currentPeriod?.social_security_rate ?? 0.05) : 0,
+        deduct_advance: advTotal, deduct_safety_equipment: 0, deduct_uniform: 0,
+      })
+      const checks: [number, number][] = [
+        [c.amount_normal,              Number(entry.amount_normal)],
+        [c.amount_shift,               Number(entry.amount_shift)],
+        [c.amount_ot + c.amount_ot_1x, Number(entry.amount_ot)],
+        [autoW,                        Number(entry.amount_wood_excess)],
+        [autoF,                        Number(entry.amount_film)],
+        [autoSp,                       Number(entry.amount_special)],
+        [advTotal,                     Number(entry.deduct_advance)],
+        [c.deduct_social_security,     Number(entry.deduct_social_security)],
+      ]
+      if (checks.some(([a, b]) => Math.abs(a - b) > eps)) set.add(emp.id)
     }
-  }, [
-    selectedEmployee?.position,
-    selectedEmployee?.wage_type,
-    selectedEmployee?.rate_per_12h,
-    advances,
-    shifts,
-    overrideWood,
-    overrideFilm,
-    overrideNormal,
-    overrideSpecial,
-    specialNote,
-    socialSecurityRate,
-    manualEntries.amount_diligence,
-    manualEntries.amount_position,
-    manualEntries.deduct_safety_equipment,
-    manualEntries.deduct_uniform
-  ])
+    return set
+  }, [allEntries, allShifts, allAdvances, employees, currentPeriod])
 
-  // Check if underlying data changed since last save — compare calc output vs DB entry directly
-  const isOutdated = useMemo(() => {
-    if (!existingEntry) return false;
+  const isOutdated = outdatedSet.has(selectedEmpId ?? '')
 
-    const r = (v: number) => Math.round(v * 100) / 100  // round to 2dp to avoid float drift
+  // ── status indicator per employee ──
+  function empStatus(empId: string): 'saved' | 'unsaved' | 'outdated' | 'none' {
+    const hasShifts = allShifts.some(s => s.employee_id === empId)
+    if (!hasShifts) return 'none'
+    const hasEntry = allEntries.some(e => e.employee_id === empId)
+    if (!hasEntry) return 'unsaved'
+    return outdatedSet.has(empId) ? 'outdated' : 'saved'
+  }
 
-    const checks = [
-      Math.abs(r(calc.amount_normal) - r(Number(existingEntry.amount_normal || 0))) > 0.01,
-      Math.abs(r(calc.amount_shift)  - r(Number(existingEntry.amount_shift  || 0))) > 0.01,
-      Math.abs(r(calc.amount_ot + calc.amount_ot_1x) - r(Number(existingEntry.amount_ot || 0))) > 0.01,
-      Math.abs(r(calc.amount_wood_excess) - r(Number(existingEntry.amount_wood_excess || 0))) > 0.01,
-      Math.abs(r(calc.amount_film)        - r(Number(existingEntry.amount_film        || 0))) > 0.01,
-      Math.abs(r(calc.amount_special)     - r(Number(existingEntry.amount_special || 0))) > 0.01,
-      Math.abs(manualEntries.amount_diligence - Number(existingEntry.amount_diligence || 0)) > 0.01,
-      Math.abs(manualEntries.amount_position  - Number(existingEntry.amount_position  || 0)) > 0.01,
-      Math.abs(r(calc.deduct_social_security) - r(Number(existingEntry.deduct_social_security || 0))) > 0.01,
-      Math.abs(manualEntries.deduct_safety_equipment - Number(existingEntry.deduct_safety_equipment || 0)) > 0.01,
-      Math.abs(manualEntries.deduct_uniform          - Number(existingEntry.deduct_uniform          || 0)) > 0.01,
-      Math.abs(totalAdvance - Number(existingEntry.deduct_advance || 0)) > 0.01,
-      (overrideNormal ?? null) !== (existingEntry.override_normal != null ? Number(existingEntry.override_normal) : null),
-      (overrideSpecial ?? null) !== (existingEntry.override_special != null ? Number(existingEntry.override_special) : null),
-      (specialNote || autoSpecialNote) !== (existingEntry.special_note || ''),
-    ];
-
-    return checks.some(Boolean);
-  }, [calc, existingEntry, totalAdvance, overrideNormal, overrideSpecial, specialNote, autoSpecialNote, manualEntries])
-
+  // ── save mutation ──
   const saveMutation = useMutation({
     mutationFn: async () => {
-      if (!selectedEmployeeId || !currentPeriod?.id) return
-
+      if (!selectedEmpId || !currentPeriod?.id || !calc) return
       const payload = {
-        period_id: currentPeriod.id,
-        employee_id: selectedEmployeeId,
+        period_id: currentPeriod.id, employee_id: selectedEmpId,
         amount_normal: Math.round(calc.amount_normal * 100) / 100,
         amount_shift: Math.round(calc.amount_shift * 100) / 100,
         amount_ot: Math.round((calc.amount_ot + calc.amount_ot_1x) * 100) / 100,
-        amount_wood_excess: isClerk ? 0 : Math.round(effectiveWood * 100) / 100,
-        amount_film: isClerk ? 0 : Math.round(effectiveFilm * 100) / 100,
+        amount_wood_excess: Math.round(autoWood * 100) / 100,
+        amount_film: Math.round(autoFilm * 100) / 100,
         amount_special: Math.round(autoSpecial * 100) / 100,
-        override_special: overrideSpecial,
+        override_special: extraEntries.amount_special || null,
         special_note: (specialNote || autoSpecialNote || '').trim(),
-        amount_diligence: Math.round(manualEntries.amount_diligence * 100) / 100,
-        amount_position: Math.round(manualEntries.amount_position * 100) / 100,
-        deduct_safety_equipment: Math.round(manualEntries.deduct_safety_equipment * 100) / 100,
-        deduct_uniform: Math.round(manualEntries.deduct_uniform * 100) / 100,
-        override_normal: overrideNormal,
-        override_reason: overrideReason,
+        amount_diligence: extraEntries.amount_diligence,
+        amount_position: extraEntries.amount_position,
         deduct_social_security: Math.round(calc.deduct_social_security * 100) / 100,
+        deduct_safety_equipment: extraEntries.deduct_safety_equipment,
+        deduct_uniform: extraEntries.deduct_uniform,
         deduct_advance: Math.round(totalAdvance * 100) / 100,
-        entered_by: user?.id
+        override_normal: overrideNormal,
+        override_reason: '',
       }
-
-      // Mandatory note validation
-      if (calc.effective_special > 0 && !(specialNote || autoSpecialNote)) {
-        throw new Error("กรุณากรอกหมายเหตุสำหรับเงินพิเศษ")
-      }
-
-      const { error } = await supabase
-        .from('payroll_entries' as any)
-        .upsert([payload], { onConflict: 'period_id,employee_id' })
-
+      const { error } = await supabase.from('payroll_entries' as any).upsert([payload], { onConflict: 'period_id,employee_id' })
       if (error) throw error
     },
     onSuccess: () => {
-      // Invalidate only payroll-specific data, not shifts (which haven't changed)
-      queryClient.invalidateQueries({ queryKey: ['payroll-entry', selectedEmployeeId, currentPeriod?.id] })
       queryClient.invalidateQueries({ queryKey: ['all-payroll-entries', currentPeriod?.id] })
       toast.success('บันทึกข้อมูลค่าจ้างสำเร็จ')
     },
-    onError: (error: Error) => {
-      toast.error('เกิดข้อผิดพลาดในการบันทึก', { description: error.message })
-    }
+    onError: (e: Error) => toast.error('บันทึกไม่สำเร็จ', { description: e.message }),
   })
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target
-    setManualEntries(prev => ({
-      ...prev,
-      [name]: Number(value) || 0
-    }))
-  }
+  const monoNum = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2 })
 
   return (
     <>
-      <TopBar
-        title="บันทึกข้อมูลค่าจ้าง"
-        action={
-          <div className="flex items-center gap-4">
-            <div className="bg-white border border-slate-200 px-5 py-2 rounded-full shadow-sm flex items-center min-h-[42px]">
-              <span className="text-[15px] font-bold text-slate-700">
-                งวด: {currentPeriod ? (
-                  (() => {
-                    const start = new Date(currentPeriod.period_start)
-                    const end = new Date(currentPeriod.period_end)
-                    const thaiYear = start.getFullYear() + 543
-                    return format(start, 'MMMM', { locale: th }) === format(end, 'MMMM', { locale: th })
-                      ? `${format(start, 'd', { locale: th })} - ${format(end, 'd MMMM', { locale: th })} ${thaiYear}`
-                      : `${format(start, 'd MMMM', { locale: th })} - ${format(end, 'd MMMM', { locale: th })} ${thaiYear}`
-                  })()
-                ) : (
-                  'ยังไม่ได้สร้างงวด'
-                )}
-              </span>
-            </div>
-            {user?.role === 'superUser' && (
-              <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border shadow-sm">
-                <span className="text-[10px] font-bold text-slate-500 uppercase">ประกันสังคม:</span>
-                <div className="flex items-center gap-1">
-                  <Input
-                    type="number"
-                    className="w-14 h-7 text-right text-sm font-bold"
-                    value={socialSecurityRate * 100}
-                    onChange={(e) => setSocialSecurityRate(Number(e.target.value) / 100)}
-                    disabled={isApproved}
-                  />
-                  <span className="text-sm font-medium text-slate-400">%</span>
+      <TopBar title="กรอกค่าจ้าง" subtitle={currentPeriod?.label} onMenuClick={onMenuClick} />
+
+      <div className="vk-split">
+        {/* Left panel — hidden on mobile when employee is selected */}
+        <div style={{ padding: '16px 12px' }}
+          className={`vk-sidebar-scrollable vk-sidebar-scrollable-payroll ${selectedEmpId ? 'hidden md:block' : ''}`}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <div className="vk-eyebrow">พนักงาน ({employees.length})</div>
+          </div>
+          <div style={{ display: 'flex', gap: 10, fontSize: 10, color: 'var(--vk-ink-3)', marginBottom: 10, flexWrap: 'wrap' }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}><span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--vk-jade)', display: 'inline-block', flexShrink: 0 }} />บันทึกแล้ว</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}><span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--vk-persimmon)', display: 'inline-block', flexShrink: 0 }} />มีการเปลี่ยนแปลง</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}><span style={{ width: 7, height: 7, borderRadius: '50%', background: '#d4cfc9', display: 'inline-block', flexShrink: 0 }} />ยังไม่บันทึก</span>
+          </div>
+          <hr className="vk-rule-soft" style={{ marginBottom: 10 }} />
+          {employees.map(emp => {
+            const status = empStatus(emp.id)
+            const active = emp.id === selectedEmpId
+            return (
+              <div key={emp.id} onClick={() => setSelectedEmpId(emp.id)}
+                className="vk-employee-card"
+                data-selected={active}>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{
+                    width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+                    background: status === 'saved' ? 'var(--vk-jade)' : status === 'outdated' ? 'var(--vk-persimmon)' : '#d4cfc9',
+                  }} />
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+                      <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--vk-ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {emp.first_name} {emp.last_name}{fmtNationality(emp.nationality) ? ` (${fmtNationality(emp.nationality)})` : ''}
+                      </span>
+                      {emp.position === 'clerk' && (
+                        <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 999, background: 'rgba(177,71,41,0.12)', color: 'var(--vk-persimmon)', letterSpacing: '0.04em', flexShrink: 0 }}>เสมียน</span>
+                      )}
+                    </div>
+                    <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 10, color: 'var(--vk-ink-3)', marginTop: 1 }}>{emp.employee_code}</div>
+                  </div>
                 </div>
               </div>
-            )}
-          </div>
-        }
-      />
-
-      <div className="flex flex-col md:flex-row min-h-[calc(100vh-64px)] md:h-[calc(100vh-64px)]">
-        {/* Left Sidebar: Employee List */}
-        <div className="w-full md:w-80 border-b md:border-b-0 md:border-r bg-white flex flex-col h-[40vh] md:h-auto shrink-0">
-          <div className="p-4 border-b space-y-3 shrink-0">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
-              <Input
-                placeholder="ค้นหาพนักงาน..."
-                className="pl-9"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-            </div>
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-2 space-y-1">
-            {employees
-              .filter(emp => {
-                const matchesSearch = emp.employee_code.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                  emp.first_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                  emp.last_name.toLowerCase().includes(searchTerm.toLowerCase())
-
-                if (searchTerm.trim().length > 0) return matchesSearch
-                return emp.status === 'active' && matchesSearch
-              })
-              .map(emp => {
-                const isInactive = emp.status !== 'active'
-                const isSelected = selectedEmployeeId === emp.id
-                const entry = allPeriodEntries.find(e => e.employee_id === emp.id)
-
-                // ── Status Logic (Using central calculatePayroll) ──
-                const empShifts = allPeriodShifts.filter(s => s.employee_id === emp.id)
-                const normalShifts = empShifts.filter(s => !s.is_holiday_ot || s.is_holiday_ot_exempt)
-                const isEmpClerk = emp.position === 'clerk'
-
-                const sidebarWood = empShifts.reduce((sum: number, s) => sum + Number(s.wood_excess || 0), 0)
-                const sidebarFilm = empShifts.reduce((sum: number, s) => sum + Number(s.film_amount || 0), 0)
-                let status: 'grey' | 'green' | 'orange' = 'grey'
-                try {
-                  if (entry) {
-                    const isWeekendDay = (dateStr: string) => {
-                      if (!dateStr) return false
-                      const d = parseISO(dateStr);
-                      const day = d.getDay();
-                      return day === 0 || day === 6;
-                    };
-
-                    const sidebarClerkOt = empShifts.filter(s => !isWeekendDay(s.work_date)).reduce((sum: number, s) => sum + Number(s.ot_hours || 0), 0)
-                    const sidebarClerkOt1x = empShifts.filter(s => isWeekendDay(s.work_date)).reduce((sum: number, s) => sum + Number(s.ot_hours || 0), 0)
-
-                    const sidebarHolShifts = empShifts.filter(s => s.is_holiday_ot && !s.is_holiday_ot_exempt)
-                    const sidebarHolFullDays = sidebarHolShifts.filter(s => !s.is_half_shift).length
-                    const sidebarHolHalfDays = sidebarHolShifts.filter(s => s.is_half_shift).length
-                    const sidebarNormShifts = empShifts.filter(s => !s.is_holiday_ot || s.is_holiday_ot_exempt)
-                    const sidebarPartialHours = sidebarNormShifts.reduce((sum: number, s) => sum + Number((s as any).actual_hours || 0), 0)
-
-                    const sidebarWood = empShifts.reduce((sum: number, s) => sum + Number(s.wood_excess || 0), 0)
-                    const sidebarFilm = empShifts.reduce((sum: number, s) => sum + Number(s.film_amount || 0), 0)
-                    const sidebarAutoSpecial = empShifts
-                      .filter(s => s.is_cross_position)
-                      .reduce((sum: number, s) => sum + Number(s.cross_position_extra_pay || 0), 0)
-
-                    const crossPosShifts = empShifts.filter(s => s.is_cross_position)
-                    const sidebarAutoSpecialNote = crossPosShifts.length > 0
-                      ? crossPosShifts.map(s => `${s.cross_position_title || 'สลับตำแหน่ง'} (${s.cross_position_extra_pay}฿)`).join(', ')
-                      : ''
-
-                    const isEmpThai = !emp.nationality || emp.nationality === 'ไทย'
-                    const calcInput: PayrollCalculationInput = {
-                      position: (emp.position as 'worker' | 'clerk') || 'worker',
-                      wage_type: (emp.wage_type as 'daily' | 'monthly') || 'daily',
-                      rate_per_12h: Number(emp.rate_per_12h || 0),
-                      normal_days: isEmpClerk ? sidebarNormShifts.length : sidebarNormShifts.filter(s => !s.is_half_shift && !((s as any).actual_hours > 0)).length,
-                      half_shift_days: isEmpClerk ? 0 : sidebarNormShifts.filter(s => s.is_half_shift && !((s as any).actual_hours > 0)).length,
-                      holiday_ot_full_days: sidebarHolFullDays,
-                      holiday_ot_half_days: sidebarHolHalfDays,
-                      partial_hours_total: isEmpClerk ? 0 : sidebarPartialHours,
-                      clerk_ot_hours: sidebarClerkOt,
-                      clerk_ot_1x_hours: sidebarClerkOt1x,
-                      social_security_rate: isEmpThai ? socialSecurityRate : 0,
-                      override_normal: entry.override_normal != null ? Number(entry.override_normal) : null,
-                      amount_wood_excess: isEmpClerk ? 0 : sidebarWood,
-                      amount_film: isEmpClerk ? 0 : sidebarFilm,
-                      amount_special: sidebarAutoSpecial,
-                      override_special: entry.override_special != null ? Number(entry.override_special) : null,
-                      deduct_advance: allPeriodAdvances
-                        .filter(a => a.employee_id === emp.id)
-                        .reduce((sum: number, a) => sum + Number(a.amount), 0),
-                    }
-
-                    const currentCalc = calculatePayroll(calcInput)
-                    const r = (v: number) => Math.round(v * 100) / 100
-
-                    const diffs = [
-                      Math.abs(r(currentCalc.amount_normal) - r(Number(entry.amount_normal || 0))) > 0.01,
-                      Math.abs(r(currentCalc.amount_shift) - r(Number(entry.amount_shift || 0))) > 0.01,
-                      Math.abs(r(currentCalc.amount_ot + (currentCalc.amount_ot_1x || 0)) - r(Number(entry.amount_ot || 0))) > 0.01,
-                      Math.abs(r(currentCalc.amount_wood_excess) - r(Number(entry.amount_wood_excess || 0))) > 0.01,
-                      Math.abs(r(currentCalc.amount_film) - r(Number(entry.amount_film || 0))) > 0.01,
-                      Math.abs(r(currentCalc.amount_special) - r(Number(entry.amount_special || 0))) > 0.01,
-                      Math.abs(r(currentCalc.deduct_advance) - r(Number(entry.deduct_advance || 0))) > 0.01,
-                      (entry.special_note || '').trim() !== (sidebarAutoSpecialNote || '').trim() && !(entry.special_note || '').includes(sidebarAutoSpecialNote)
-                    ]
-
-                    status = diffs.some(Boolean) ? 'orange' : 'green'
-                  }
-                } catch (err) {
-                  console.error('Sidebar status error for', emp.employee_code, err)
-                  status = 'orange' // Show as outdated if calculation fails
-                }
-
-                return (
-                  <div
-                    key={emp.id}
-                    onClick={() => !isInactive && setSelectedEmployeeId(emp.id)}
-                    className={`
-                      relative p-3 pl-4 rounded-xl cursor-pointer transition-all flex justify-between items-center border
-                      ${isSelected
-                        ? 'bg-[#1D9E75]/10 border-[#1D9E75] text-[#1D9E75] font-bold shadow-sm'
-                        : 'bg-white border-slate-100 hover:border-slate-200 text-slate-700'
-                      }
-                      ${isInactive ? 'opacity-50 grayscale' : ''}
-                    `}
-                  >
-                    <div className="flex flex-col gap-0.5">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold opacity-60">{emp.employee_code}</span>
-                        {emp.position === 'clerk' && (
-                          <span className="text-[9px] font-bold bg-red-100 text-red-600 px-1.5 py-0.5 rounded leading-none">
-                            👩🏻‍🏫 เสมียน
-                          </span>
-                        )}
-                      </div>
-                      <span className="text-sm font-medium truncate max-w-[140px]">
-                        {formatEmployeeName(emp)}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-3">
-                      {status === 'orange' && (
-                        <span className="text-[9px] font-black text-orange-600 uppercase animate-pulse">Outdated</span>
-                      )}
-                      {/* Status Dot */}
-                      <div className={`w-3.5 h-3.5 rounded-full shadow-inner border ${status === 'grey' ? 'bg-slate-200 border-slate-300' :
-                        status === 'green' ? 'bg-[#1D9E75] border-[#157a5a]' :
-                          'bg-orange-500 border-orange-600'
-                        }`} />
-                    </div>
-                  </div>
-                )
-              })}
-          </div>
+            )
+          })}
+          {employees.length === 0 && <div className="vk-small" style={{ color: 'var(--vk-ink-3)' }}>ไม่พบพนักงาน</div>}
         </div>
 
-        {/* Right Area: Form */}
-        <div className="flex-1 bg-slate-50/50 p-4 md:p-8 overflow-y-auto">
-          {!selectedEmployeeId ? (
-            <div className="h-full flex flex-col items-center justify-center text-slate-400">
-              <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4">
-                <Edit2 className="w-8 h-8 text-slate-300" />
+        {/* Right panel */}
+        <div style={{ overflowY: 'auto', padding: '16px' }} className="md:px-8 md:py-6">
+          {selectedEmp && (
+            <button className="vk-btn md:hidden" style={{ marginBottom: 12, fontSize: 12, padding: '5px 12px' }}
+              onClick={() => setSelectedEmpId(null)}>← กลับ</button>
+          )}
+          {!selectedEmp ? (
+            <div style={{ paddingTop: 60, textAlign: 'center' }}>
+              <div className="vk-eyebrow" style={{ marginBottom: 10 }}>เลือกพนักงานจากรายการทางซ้าย</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 32, justifyContent: 'center' }}>
+                {([
+                  { color: 'var(--vk-jade)',      label: 'บันทึกแล้ว' },
+                  { color: 'var(--vk-persimmon)', label: 'มีการเปลี่ยนแปลง' },
+                  { color: '#d4cfc9',             label: 'ยังไม่บันทึก' },
+                ] as { color: string; label: string }[]).map(({ color, label }) => (
+                  <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, background: color }} />
+                    <span className="vk-small" style={{ color: 'var(--vk-ink-3)', whiteSpace: 'nowrap' }}>{label}</span>
+                  </div>
+                ))}
               </div>
-              <p>เลือกพนักงานจากรายชื่อด้านซ้ายเพื่อกรอกตัวเลข</p>
             </div>
           ) : (
-            <div className="max-w-5xl mx-auto space-y-6">
-
-              {/* Header Info */}
-              <div className="flex flex-col md:flex-row md:justify-between md:items-end gap-3">
-                <div>
-                  <h2 className="text-xl md:text-2xl font-bold text-slate-800">
-                    {formatEmployeeName(selectedEmployee || { first_name: '', prefix: undefined, last_name: undefined, nationality: undefined })}
-                  </h2>
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-2 text-sm text-slate-500">
-                    <span>รหัสพนักงาน: <strong className="text-slate-700">{selectedEmployee?.employee_code}</strong></span>
-                    <span>อัตราค่าจ้าง: <strong className="text-slate-700">{formatThaiCurrency(selectedEmployee?.rate_per_12h)} บาท/{selectedEmployee?.wage_type === 'monthly' ? 'เดือน' : 'วัน'}</strong></span>
-                    <span>กลุ่มงาน: <strong className={isClerk ? 'text-red-600' : 'text-slate-700'}>{isClerk ? 'เสมียน' : 'พนักงานทั่วไป'}</strong></span>
-                    {selectedEmployee?.job_title && (
-                      <span>ตำแหน่ง: <strong className="text-slate-700">{selectedEmployee.job_title}</strong></span>
-                    )}
-                    <span>การรับเงิน: <strong className="text-slate-700">{selectedEmployee?.payment_method === 'bank_transfer' ? 'โอนบัญชี' : 'เงินสด'}</strong></span>
-                  </div>
+            <>
+              {/* Header */}
+              <div style={{ marginBottom: 20 }}>
+                <div className="vk-eyebrow" style={{ marginBottom: 2 }}>PAYROLL ENTRY · {currentPeriod?.label}</div>
+                <div style={{ fontFamily: 'var(--vk-sans)', fontWeight: 700, fontSize: 18, letterSpacing: '-0.02em', wordBreak: 'break-word' }}>
+                  {selectedEmp.first_name} <span style={{ fontWeight: 400, color: 'var(--vk-ink-3)' }}>{selectedEmp.last_name}</span>
+                  {fmtNationality(selectedEmp.nationality) && (
+                    <span style={{ fontWeight: 400, fontSize: 13, color: 'var(--vk-ink-3)', marginLeft: 6 }}>({fmtNationality(selectedEmp.nationality)})</span>
+                  )}
                 </div>
-
-                {isApproved && (
-                  <Badge className="bg-amber-100 text-amber-800 border-none px-4 py-1.5 flex items-center w-fit">
-                    <Lock className="w-4 h-4 mr-2" />
-                    งวดถูกอนุมัติแล้ว ไม่สามารถแก้ไขได้
-                  </Badge>
-                )}
+                <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 11, color: 'var(--vk-ink-3)', marginTop: 2 }}>
+                  {selectedEmp.employee_code}
+                  {' · '}
+                  {selectedEmp.position === 'clerk' ? 'เสมียน' : selectedEmp.position === 'foreman' ? 'โฟร์แมน' : selectedEmp.position === 'office' ? 'พนักงานออฟฟิศ' : selectedEmp.position === 'manager' ? 'ผู้จัดการ' : 'พนักงานทั่วไป'}
+                  {selectedEmp.job_title ? ` – ${selectedEmp.job_title}` : ''}
+                  {' · '}฿{(Number(selectedEmp.rate_per_12h) || 0).toLocaleString()}/{selectedEmp.wage_type === 'monthly' ? 'เดือน' : 'วัน'}
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12, alignItems: 'center' }}>
+                  {existingEntry && !isOutdated && <span className="vk-pill" data-tone="approved"><CheckCircle2 style={{ width: 11, height: 11, display: 'inline', marginRight: 4 }} />บันทึกแล้ว</span>}
+                  {existingEntry && isOutdated && (
+                    <span className="vk-pill" style={{ background: 'rgba(177,71,41,0.10)', color: 'var(--vk-persimmon)', border: '1px solid var(--vk-persimmon)', display: 'inline-flex', alignItems: 'center', gap: 4, fontWeight: 700, letterSpacing: '0.04em', whiteSpace: 'normal' }}>
+                      <AlertCircle style={{ width: 11, height: 11, flexShrink: 0 }} />
+                      OUTDATED · ข้อมูลเปลี่ยนแปลง กรุณาบันทึกใหม่
+                    </span>
+                  )}
+                  <button className="vk-btn vk-btn--primary" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                    onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || !calc}>
+                    <Save style={{ width: 14, height: 14 }} />
+                    {saveMutation.isPending ? 'กำลังบันทึก...' : 'บันทึกค่าจ้าง'}
+                  </button>
+                </div>
               </div>
 
-              {/* Sync Warning */}
-              {isOutdated && !isApproved && (
-                <div className="bg-amber-50 border-l-4 border-amber-500 p-4 rounded-r-lg shadow-sm animate-in fade-in slide-in-from-top-2">
-                  <div className="flex">
-                    <div className="flex-shrink-0">
-                      <AlertCircle className="h-5 w-5 text-amber-600" />
-                    </div>
-                    <div className="ml-3">
-                      <h3 className="text-sm font-bold text-amber-800">
-                        แจ้งเตือน: ข้อมูลกะทำงานมีการเปลี่ยนแปลง!
-                      </h3>
-                      <div className="mt-1 text-sm text-amber-700">
-                        <p>
-                          พบว่าหลังจากที่คุณบันทึกค่าจ้างล่าสุด มีการเข้าไปแก้ไขกะทำงาน (หรือยอดเบิกล่วงหน้า) ของพนักงานคนนี้
-                          ระบบได้ดึงข้อมูลใหม่มาแสดงแล้ว <strong>กรุณากด "บันทึกข้อมูลค่าจ้าง" อีกครั้ง</strong> เพื่อให้ยอดเงินอัปเดตเป็นปัจจุบัน
-                        </p>
-                      </div>
-                      <div className="mt-3">
-                        <Button 
-                          size="sm" 
-                          variant="outline"
-                          className="bg-amber-100 hover:bg-amber-200 border-amber-300 text-amber-800 h-8 text-xs font-bold"
-                          onClick={() => {
-                            setOverrideNormal(null);
-                            setOverrideWood(null);
-                            setOverrideFilm(null);
-                            setOverrideSpecial(null);
-                            setSpecialNote('');
-                            toast.success('รีเซ็ตยอดเป็นค่าเริ่มต้นตามกะทำงานแล้ว');
-                          }}
-                        >
-                          <RotateCcw className="w-3.5 h-3.5 mr-2" />
-                          รีเซ็ตและปรับยอดตามกะปัจจุบัน
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
+              {empShifts.length === 0 ? (
+                <div style={{ border: '1px solid var(--vk-rule)', padding: '40px', textAlign: 'center', background: 'var(--vk-bone)' }}>
+                  <div className="vk-eyebrow" style={{ marginBottom: 6 }}>ยังไม่มีข้อมูลกะ</div>
+                  <div className="vk-small" style={{ color: 'var(--vk-ink-3)' }}>กรุณากรอกกะที่หน้า "กรอกกะรายวัน" ก่อน</div>
                 </div>
-              )}
+              ) : calc ? (
+                <>
+                  {/* Income + Deduct */}
+                  <div className="vk-income-grid" style={{ border: '1px solid var(--vk-rule)', marginBottom: 0 }}>
+                    {/* ── Income column ── */}
+                    <div className="vk-income-col" style={{ padding: '20px 24px', background: 'var(--vk-bone)', display: 'flex', flexDirection: 'column' }}>
+                      <div className="vk-eyebrow" style={{ color: 'var(--vk-jade)', marginBottom: 14 }}>INCOME · รายได้</div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* INCOMES COLUMN */}
-                <Card className="border-t-4 border-t-emerald-500 shadow-sm">
-                  <CardHeader className="bg-emerald-50/50 pb-4">
-                    <CardTitle className="text-emerald-800 flex justify-between items-center">
-                      รายได้ (Income)
-                      <span className="text-sm font-normal text-emerald-600">หน่วย: บาท</span>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-5 pt-6">
-
-                    {/* Auto Calculated normal pay */}
-                    <div className="space-y-2">
-                      <div className="flex justify-between items-center">
-                        <Label className="text-slate-700 font-semibold">
-                          {isClerk ? 'ค่าจ้าง (เสมียน 8 ชม./วัน)' : 'ค่าจ้างปกติ (เรท 8 ชม.)'}
-                        </Label>
-                        <span className="text-xs text-slate-500">
-                          คำนวณอัตโนมัติ: {normalDays + halfShiftDays} วัน
-                          {!isClerk && halfShiftDays > 0 && <span className="text-amber-600 ml-1">(ทำงาน 8 ชม.: {halfShiftDays} วัน)</span>}
-                        </span>
-                      </div>
-
-                      {isEditingNormal ? (
-                        <div className="space-y-3 bg-amber-50 p-3 rounded-lg border border-amber-200">
-                          <div className="flex items-center gap-2">
-                            <Input
-                              type="number"
-                              className="bg-white border-amber-300"
-                              value={overrideNormal || ''}
-                              onChange={(e) => setOverrideNormal(Number(e.target.value))}
-                              placeholder={calc.amount_normal.toString()}
-                            />
-                            <Button size="sm" variant="outline" onClick={() => setIsEditingNormal(false)}>ยกเลิก</Button>
-                          </div>
-                          <div>
-                            <Label className="text-xs text-amber-800">เหตุผลที่แก้ไข *</Label>
-                            <Input
-                              className="mt-1 bg-white h-8 text-sm"
-                              value={overrideReason}
-                              onChange={(e) => setOverrideReason(e.target.value)}
-                              placeholder="ระบุเหตุผล..."
-                            />
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="flex relative">
-                          <Input
-                            className="bg-emerald-50 border-emerald-200 text-emerald-900 font-medium pr-10"
-                            readOnly
-                            value={formatThaiCurrency(calc.effective_normal)}
-                          />
-                          {!isApproved && (
-                            <div className="absolute inset-y-0 right-0 flex items-center pr-3">
-                              <button
-                                onClick={() => setIsEditingNormal(true)}
-                                className="text-slate-400 hover:text-emerald-600 transition-colors"
-                              >
-                                <Edit2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                      {overrideNormal !== null && !isEditingNormal && (
-                        <p className="text-xs text-amber-600 flex items-center mt-1">
-                          <AlertCircle className="w-3 h-3 mr-1" />
-                          แก้ไขจากยอดคำนวณเดิม {formatThaiCurrency(calc.amount_normal)} ฿
-                        </p>
-                      )}
-                    </div>
-
-                    {/* Shift pay - hidden for clerk */}
-                    {!isClerk && (
-                      <div className="space-y-2">
-                        <div className="flex justify-between items-center">
-                          <Label className="text-slate-700 font-semibold">ค่ากะ (เรท 4 ชม.)</Label>
-                          <span className="text-xs text-slate-500">คำนวณอัตโนมัติ: {normalDays} วัน</span>
-                        </div>
-                        <Input className="bg-slate-50" readOnly value={formatThaiCurrency(calc.amount_shift)} />
-                      </div>
-                    )}
-
-                    {/* Clerk OT — read-only, pulled from shift entries (item 4) */}
-                    {isClerk && (
-                      <div className="space-y-4">
-                        {/* 1.5x OT (Weekday) */}
-                        <div className="space-y-2">
-                          <div className="flex justify-between items-center">
-                            <Label className="text-slate-700 font-semibold">ค่าล่วงเวลา OT ปกติ (1.5เท่า)</Label>
-                            <span className="text-xs text-slate-500">
-                              อัตรา: {formatThaiCurrency(((selectedEmployee?.rate_per_12h || 0) / 30 / 8 * 1.5))} บาท/ชม.
-                            </span>
-                          </div>
-                          <div className="flex gap-2 items-center">
-                            <div className="w-28 h-8 bg-slate-50 border border-slate-200 rounded-md flex items-center justify-center text-slate-700 font-semibold text-sm shrink-0">
-                              {autoClerkOtHours} ชม.
-                            </div>
-                            <span className="text-xs text-slate-400 whitespace-nowrap">(จากหน้ากะ)</span>
-                            <Input className="bg-slate-50 flex-1 h-8" readOnly value={formatThaiCurrency(calc.amount_ot)} />
-                          </div>
-                        </div>
-
-                        {/* 1.0x OT (Weekend) */}
-                        <div className="space-y-2 pt-2 border-t border-slate-100">
-                          <div className="flex justify-between items-center">
-                            <Label className="text-purple-700 font-semibold">ค่าล่วงเวลา OT วันหยุด (1เท่า)</Label>
-                            <span className="text-xs text-slate-500">
-                              อัตรา: {formatThaiCurrency(((selectedEmployee?.rate_per_12h || 0) / 30 / 8 * 1.0))} บาท/ชม.
-                            </span>
-                          </div>
-                          <div className="flex gap-2 items-center">
-                            <div className="w-28 h-8 bg-purple-50 border border-purple-200 rounded-md flex items-center justify-center text-purple-700 font-semibold text-sm shrink-0">
-                              {autoClerkOt1xHours} ชม.
-                            </div>
-                            <span className="text-xs text-slate-400 whitespace-nowrap">(จากหน้ากะเสาร์-อาทิตย์)</span>
-                            <Input className="bg-purple-50 text-purple-900 border-purple-200 flex-1 h-8" readOnly value={formatThaiCurrency(calc.amount_ot_1x || 0)} />
-                          </div>
-                        </div>
-                        
-                        {(autoClerkOtHours === 0 && autoClerkOt1xHours === 0) && (
-                          <p className="text-xs text-slate-400">ยังไม่มีการกรอก OT ในหน้ากะ</p>
-                        )}
-                      </div>
-                    )}
-
-                    {/* OT holiday for workers */}
-                    {!isClerk && (
-                      <div className="space-y-2">
-                        <div className="flex justify-between items-center">
-                          <Label className="text-slate-700 font-semibold">OT วันหยุด</Label>
-                          <span className="text-xs text-slate-500">คำนวณอัตโนมัติ: {holidayOtFullDays} วัน (12ชม.) + {holidayOtHalfDays} วัน (8ชม.)</span>
-                        </div>
-                        <Input className="bg-slate-50" readOnly value={formatThaiCurrency(calc.amount_ot)} />
-                      </div>
-                    )}
-
-                    <hr className="my-4" />
-
-                    {/* Wood/Film — hidden for clerk, pencil override for worker (item 8) */}
-                    {!isClerk ? (
-                      <div className="grid grid-cols-1 gap-3">
-                        {/* Wood excess — pencil+reason override (item 8) */}
-                        <div className="space-y-1.5">
-                          <div className="flex justify-between items-center">
-                            <Label>ค่าไม้ส่วนเกิน</Label>
-                            <span className="text-xs text-slate-400">รวมจากกะ: {formatThaiCurrency(autoWood)}</span>
-                          </div>
-                          {isEditingWood ? (
-                            <div className="space-y-2">
-                              <Input
-                                type="number"
-                                value={overrideWood ?? autoWood}
-                                onChange={e => setOverrideWood(Number(e.target.value) || 0)}
-                                className="border-amber-300 bg-amber-50"
-                                autoFocus
-                                disabled={isApproved}
-                              />
-                              <Input
-                                placeholder="เหตุผลที่แก้ไข..."
-                                value={overrideReason}
-                                onChange={e => setOverrideReason(e.target.value)}
-                                className="text-sm"
-                                disabled={isApproved}
-                              />
-                              <div className="flex gap-2">
-                                <Button size="sm" className="bg-[#1D9E75] hover:bg-[#157a5a]" onClick={() => setIsEditingWood(false)}>ยืนยัน</Button>
-                                <Button size="sm" variant="ghost" onClick={() => { setOverrideWood(null); setIsEditingWood(false) }}>รีเซ็ต</Button>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="relative">
-                              <Input
-                                className={`pr-10 ${overrideWood !== null ? 'border-amber-300 bg-amber-50 text-amber-800' : 'bg-emerald-50 border-emerald-200'}`}
-                                readOnly
-                                value={formatThaiCurrency(effectiveWood)}
-                              />
-                              {!isApproved && (
-                                <div className="absolute inset-y-0 right-0 flex items-center pr-3">
-                                  <button
-                                    onClick={() => { setOverrideWood(overrideWood ?? autoWood); setIsEditingWood(true) }}
-                                    className="text-slate-400 hover:text-[#1D9E75]"
-                                  >
-                                    <Edit2 className="w-4 h-4" />
-                                  </button>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                        {/* Film — pencil+reason override */}
-                        <div className="space-y-1.5">
-                          <div className="flex justify-between items-center">
-                            <Label>ค่าฟิล์ม</Label>
-                            <span className="text-xs text-slate-400">รวมจากกะ: {formatThaiCurrency(autoFilm)}</span>
-                          </div>
-                          {isEditingFilm ? (
-                            <div className="space-y-2">
-                              <Input
-                                type="number"
-                                value={overrideFilm ?? autoFilm}
-                                onChange={e => setOverrideFilm(Number(e.target.value) || 0)}
-                                className="border-amber-300 bg-amber-50"
-                                autoFocus
-                                disabled={isApproved}
-                              />
-                              <div className="flex gap-2">
-                                <Button size="sm" className="bg-[#1D9E75] hover:bg-[#157a5a]" onClick={() => setIsEditingFilm(false)}>ยืนยัน</Button>
-                                <Button size="sm" variant="ghost" onClick={() => { setOverrideFilm(null); setIsEditingFilm(false) }}>รีเซ็ต</Button>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="relative">
-                              <Input
-                                className={`pr-10 ${overrideFilm !== null ? 'border-amber-300 bg-amber-50 text-amber-800' : 'bg-emerald-50 border-emerald-200'}`}
-                                readOnly
-                                value={formatThaiCurrency(effectiveFilm)}
-                              />
-                              {!isApproved && (
-                                <div className="absolute inset-y-0 right-0 flex items-center pr-3">
-                                  <button
-                                    onClick={() => { setOverrideFilm(overrideFilm ?? autoFilm); setIsEditingFilm(true) }}
-                                    className="text-slate-400 hover:text-[#1D9E75]"
-                                  >
-                                    <Edit2 className="w-4 h-4" />
-                                  </button>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                        <div className="space-y-1.5">
-                          <div className="flex justify-between items-center">
-                            <Label>เงินพิเศษ</Label>
-                            {autoSpecial > 0 && (
-                              <span className="text-[10px] text-slate-400">จากสลับตำแหน่ง: {formatThaiCurrency(autoSpecial)}</span>
+                      {/* Calculated rows */}
+                      {[
+                        {
+                          label: 'ค่าจ้างปกติ (8 ชม.)',
+                          sub: isClerk ? `${clerkWeekdayDays} วัน (วันธรรมดา)` : `${calc.normal_days} วัน`,
+                          detail: isClerk
+                            ? `฿${Math.round(clerkDaily)} × ${clerkWeekdayDays} วัน`
+                            : `฿${baseNormal} × ${calc.normal_days} วัน`,
+                          value: calc.effective_normal, isOverridden: overrideNormal !== null,
+                        },
+                        ...(!isClerk ? [{
+                          label: 'ค่ากะ (4 ชม.)',
+                          sub: `${shiftPayDays} วัน` as string|null,
+                          detail: `฿${Math.round(baseShift)} × ${shiftPayDays} วัน`,
+                          value: Number(calc.effective_shift) || 0, isOverridden: false,
+                        }] : []),
+                        ...(!isClerk && calc.effective_ot > 0 ? [{
+                          label: 'OT วันหยุดนักขัตฤกษ์ (×2)',
+                          sub: `${holidayOtFullDays + holidayOtHalfDays} วัน` as string|null,
+                          detail: `฿${Math.round(baseNormal + baseShift)} × 2 × ${holidayOtFullDays + holidayOtHalfDays} วัน`,
+                          value: Number(calc.effective_ot) || 0, isOverridden: false,
+                        }] : []),
+                        ...(isClerk && clerkOtHours > 0 ? [{
+                          label: 'OT ล่วงเวลา (×1.5)',
+                          sub: `${clerkOtHours} ชั่วโมง`,
+                          detail: `฿${monoNum(clerkHourly)} × 1.5 × ${clerkOtHours} ชม.`,
+                          value: Number(calc.effective_ot) || 0, isOverridden: false,
+                        }] : []),
+                        ...(isClerk && clerkOt1xHours > 0 ? [{
+                          label: 'OT วันหยุดสัปดาห์ (×1)',
+                          sub: `${clerkOt1xHours} ชั่วโมง · ${clerkWeekendDays} วัน`,
+                          detail: `฿${monoNum(clerkHourly)} × 1.0 × ${clerkOt1xHours} ชม. (${clerkWeekendDays} วัน)`,
+                          value: Number(calc.effective_ot_1x) || 0, isOverridden: false,
+                        }] : []),
+                        ...(!isClerk && autoWood > 0 ? [{
+                          label: 'ค่าไม้ส่วนเกิน', sub: null as string|null, detail: null as string|null,
+                          value: autoWood, isOverridden: false,
+                        }] : []),
+                        ...(!isClerk && autoFilm > 0 ? [{
+                          label: 'ค่าฟิล์ม', sub: null as string|null, detail: null as string|null,
+                          value: autoFilm, isOverridden: false,
+                        }] : []),
+                      ].map((r, i) => (
+                        <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '7px 0', borderBottom: '1px dashed var(--vk-rule-soft)' }}>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 13 }}>{r.label}</div>
+                            {'detail' in r && r.detail && (
+                              <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 10, color: 'var(--vk-persimmon)', marginTop: 1, letterSpacing: '0.01em' }}>{r.detail}</div>
                             )}
                           </div>
-                          
-                          {isEditingSpecial ? (
-                            <div className="space-y-2 p-3 border border-[#1D9E75]/30 bg-[#1D9E75]/5 rounded-lg animate-in fade-in">
-                              <div className="space-y-1">
-                                <Label className="text-[10px] text-[#1D9E75] font-bold uppercase">จำนวนเงิน (บาท)</Label>
-                                <Input
-                                  type="number"
-                                  value={overrideSpecial ?? autoSpecial}
-                                  onChange={e => setOverrideSpecial(Number(e.target.value) || 0)}
-                                  className="border-[#1D9E75]/30 bg-white"
-                                  autoFocus
-                                  disabled={isApproved}
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-[10px] text-[#1D9E75] font-bold uppercase">หมายเหตุ (จำเป็น)</Label>
-                                <Input
-                                  placeholder="ระบุเหตุผล เช่น ค่าสลับตำแหน่ง, เบี้ยขยันพิเศษ..."
-                                  value={specialNote || autoSpecialNote}
-                                  onChange={e => setSpecialNote(e.target.value)}
-                                  className="border-[#1D9E75]/30 bg-white"
-                                  disabled={isApproved}
-                                />
-                              </div>
-                              <div className="flex gap-2 pt-1">
-                                <Button size="sm" className="bg-[#1D9E75] hover:bg-[#157a5a]" onClick={() => setIsEditingSpecial(false)}>ตกลง</Button>
-                                <Button size="sm" variant="ghost" className="text-slate-500" onClick={() => { 
-                                  setOverrideSpecial(null); 
-                                  setSpecialNote(''); 
-                                  setIsEditingSpecial(false) 
-                                }}>รีเซ็ต</Button>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="space-y-1">
-                              <div className="relative group">
-                                <Input
-                                  className={`pr-10 ${overrideSpecial !== null ? 'border-amber-300 bg-amber-50 text-amber-800' : 'bg-emerald-50 border-emerald-200 text-emerald-800 font-bold'}`}
-                                  readOnly
-                                  value={formatThaiCurrency(effectiveSpecial)}
-                                />
-                                {!isApproved && (
-                                  <div className="absolute inset-y-0 right-0 flex items-center pr-3 group-hover:opacity-100 opacity-100 md:opacity-0 transition-opacity">
-                                    <button
-                                      onClick={() => { 
-                                        setOverrideSpecial(overrideSpecial ?? autoSpecial); 
-                                        setSpecialNote(specialNote || autoSpecialNote);
-                                        setIsEditingSpecial(true) 
-                                      }}
-                                      className="text-slate-400 hover:text-[#1D9E75]"
-                                    >
-                                      <Edit2 className="w-4 h-4" />
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-                              {(specialNote || autoSpecialNote) && (
-                                <p className="text-[10px] text-slate-500 mt-1 italic line-clamp-1">
-                                  📝 {specialNote || autoSpecialNote}
-                                </p>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label>เบี้ยขยัน</Label>
-                          <Input type="number" name="amount_diligence" className="w-full" value={manualEntries.amount_diligence || ''} onChange={handleInputChange} disabled={isApproved} placeholder="0" />
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label>ค่าตำแหน่ง</Label>
-                          <Input type="number" name="amount_position" className="w-full" value={manualEntries.amount_position || ''} onChange={handleInputChange} disabled={isApproved} placeholder="0" />
-                        </div>
-                      </div>
-                    ) : (
-                      /* Clerk: only special/diligence/position bonuses */
-                      <div className="grid grid-cols-1 gap-3">
-                        <div className="space-y-1.5">
-                          <div className="flex justify-between items-center">
-                            <Label>เงินพิเศษ</Label>
-                            {autoSpecial > 0 && (
-                              <span className="text-[10px] text-slate-400">จากสลับตำแหน่ง: {formatThaiCurrency(autoSpecial)}</span>
-                            )}
+                          <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 13, fontVariantNumeric: 'tabular-nums', textAlign: 'right', color: r.isOverridden ? 'var(--vk-marigold)' : 'var(--vk-ink)' }}>
+                            {monoNum(r.value)}
                           </div>
-                          
-                          {isEditingSpecial ? (
-                            <div className="space-y-2 p-3 border border-[#1D9E75]/30 bg-[#1D9E75]/5 rounded-lg animate-in fade-in">
-                              <div className="space-y-1">
-                                <Label className="text-[10px] text-[#1D9E75] font-bold uppercase">จำนวนเงิน (บาท)</Label>
-                                <Input
-                                  type="number"
-                                  value={overrideSpecial ?? autoSpecial}
-                                  onChange={e => setOverrideSpecial(Number(e.target.value) || 0)}
-                                  className="border-[#1D9E75]/30 bg-white"
-                                  autoFocus
-                                  disabled={isApproved}
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-[10px] text-[#1D9E75] font-bold uppercase">หมายเหตุ (จำเป็น)</Label>
-                                <Input
-                                  placeholder="ระบุเหตุผล เช่น ค่าสลับตำแหน่ง, เบี้ยขยันพิเศษ..."
-                                  value={specialNote || autoSpecialNote}
-                                  onChange={e => setSpecialNote(e.target.value)}
-                                  className="border-[#1D9E75]/30 bg-white"
-                                  disabled={isApproved}
-                                />
-                              </div>
-                              <div className="flex gap-2 pt-1">
-                                <Button size="sm" className="bg-[#1D9E75] hover:bg-[#157a5a]" onClick={() => setIsEditingSpecial(false)}>ตกลง</Button>
-                                <Button size="sm" variant="ghost" className="text-slate-500" onClick={() => { 
-                                  setOverrideSpecial(null); 
-                                  setSpecialNote(''); 
-                                  setIsEditingSpecial(false) 
-                                }}>รีเซ็ต</Button>
+                        </div>
+                      ))}
+
+                      {/* ค่าทำงานข้ามตำแหน่ง — grouped with sub-items per position, no sub-dividers */}
+                      {crossPositions.length > 0 && (
+                        <div style={{ padding: '7px 0', borderBottom: '1px dashed var(--vk-rule-soft)' }}>
+                          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                            <div style={{ flex: 1, fontSize: 13 }}>ค่าทำงานข้ามตำแหน่ง</div>
+                            <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 13, fontVariantNumeric: 'tabular-nums', textAlign: 'right' }}>
+                              {monoNum(crossPositions.reduce((s, p) => s + p.amount, 0))}
+                            </div>
+                          </div>
+                          {crossPositions.map((p, i) => (
+                            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 4, paddingLeft: 12 }}>
+                              <span style={{ color: 'var(--vk-ink-3)', fontSize: 11, flexShrink: 0 }}>·</span>
+                              <div style={{ flex: 1, fontSize: 12, color: 'var(--vk-ink-2)' }}>{p.title}</div>
+                              <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'var(--vk-ink-3)' }}>
+                                {monoNum(p.amount)}
                               </div>
                             </div>
-                          ) : (
-                            <div className="space-y-1">
-                              <div className="relative group">
-                                <Input
-                                  className={`pr-10 ${overrideSpecial !== null ? 'border-amber-300 bg-amber-50 text-amber-800' : 'bg-emerald-50 border-emerald-200 text-emerald-800 font-bold'}`}
-                                  readOnly
-                                  value={formatThaiCurrency(effectiveSpecial)}
-                                />
-                                {!isApproved && (
-                                  <button
-                                    onClick={() => { 
-                                      setOverrideSpecial(overrideSpecial ?? autoSpecial); 
-                                      setSpecialNote(specialNote || autoSpecialNote);
-                                      setIsEditingSpecial(true) 
-                                    }}
-                                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-[#1D9E75] p-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
-                                  >
-                                    <Edit2 className="w-4 h-4" />
-                                  </button>
-                                )}
-                              </div>
-                              {(specialNote || autoSpecialNote) && (
-                                <p className="text-[10px] text-slate-500 mt-1 italic line-clamp-1">
-                                  📝 {specialNote || autoSpecialNote}
-                                </p>
-                              )}
-                            </div>
-                          )}
+                          ))}
                         </div>
-                        <div className="space-y-1.5">
-                          <Label>เบี้ยขยัน</Label>
-                          <Input type="number" name="amount_diligence" className="w-full" value={manualEntries.amount_diligence || ''} onChange={handleInputChange} disabled={isApproved} placeholder="0" />
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label>ค่าตำแหน่ง</Label>
-                          <Input type="number" name="amount_position" className="w-full" value={manualEntries.amount_position || ''} onChange={handleInputChange} disabled={isApproved} placeholder="0" />
-                        </div>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
+                      )}
 
-                {/* DEDUCTIONS COLUMN */}
-                <div className="space-y-6">
-                  <Card className="border-t-4 border-t-rose-500 shadow-sm">
-                    <CardHeader className="bg-rose-50/50 pb-4">
-                      <CardTitle className="text-rose-800 flex justify-between items-center">
-                        รายการหัก (Deductions)
-                        <span className="text-sm font-normal text-rose-600">หน่วย: บาท</span>
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-5 pt-6">
-
-                      <div className="space-y-2">
-                        <div className="flex justify-between items-center">
-                          <Label className="text-slate-700 font-semibold flex items-center">
-                            <Lock className="w-3 h-3 mr-1.5 text-slate-400" />
-                            ประกันสังคม ({(socialSecurityRate * 100).toFixed(0)}%)
-                          </Label>
-                        </div>
-                        <Input className="bg-slate-100 text-slate-500 border-slate-200" readOnly value={formatThaiCurrency(calc.deduct_social_security)} />
+                      {/* Income input fields */}
+                      <div style={{ marginTop: 14, borderTop: '1px solid var(--vk-rule-soft)', paddingTop: 14, paddingBottom: 20, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        <div className="vk-eyebrow" style={{ marginBottom: 2 }}>รายการรายได้เพิ่มเติม</div>
+                        {[
+                          { key: 'amount_diligence', label: 'เบี้ยขยัน (฿)' },
+                          { key: 'amount_position',  label: 'ค่าตำแหน่ง (฿)' },
+                          { key: 'amount_special',   label: 'เงินพิเศษ (฿)' },
+                        ].map(f => (
+                          <div key={f.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                            <label style={{ fontSize: 12, color: 'var(--vk-ink-2)' }}>{f.label}</label>
+                            <input type="number" min="0"
+                              value={extraEntries[f.key as keyof typeof extraEntries] || ''}
+                              onChange={e => setExtraEntries(prev => ({ ...prev, [f.key]: Number(e.target.value) || 0 }))}
+                              style={{ width: 90, fontFamily: 'var(--vk-mono)', fontSize: 13, textAlign: 'right', border: '1px solid var(--vk-rule)', background: 'var(--vk-paper)', padding: '4px 8px' }}
+                              placeholder="0" />
+                          </div>
+                        ))}
                       </div>
 
-                      <div className="space-y-2">
-                        <div className="flex justify-between items-center">
-                          <Label className="text-slate-700 font-semibold flex items-center">
-                            <Lock className="w-3 h-3 mr-1.5 text-slate-400" />
-                            เบิกล่วงหน้า
-                          </Label>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '14px 0 0', marginTop: 'auto', borderTop: '2px solid var(--vk-rule)' }}>
+                        <div className="vk-eyebrow">รวมรายได้</div>
+                        <div style={{ fontFamily: 'var(--vk-mono)', fontWeight: 700, fontSize: 16, color: 'var(--vk-jade)' }}>+ {monoNum(calc.total_income)}</div>
+                      </div>
+                    </div>
+
+                    {/* ── Deduct column ── */}
+                    <div className="vk-deduct-col" style={{ padding: '20px 24px', background: 'var(--vk-bone)', display: 'flex', flexDirection: 'column' }}>
+                      <div className="vk-eyebrow" style={{ color: 'var(--vk-crimson)', marginBottom: 14 }}>DEDUCT · รายการหัก</div>
+                      {[
+                        { label: `ประกันสังคม ${(ssRate*100).toFixed(0)}%`, value: calc.deduct_social_security },
+                        { label: 'เบิกล่วงหน้า', value: totalAdvance },
+                        { label: 'หักอุปกรณ์ความปลอดภัย', value: extraEntries.deduct_safety_equipment },
+                        { label: 'หักเครื่องแบบ', value: extraEntries.deduct_uniform },
+                      ].filter(r => r.value !== 0 || r.label.includes('ประกัน') || r.label.includes('เบิก')).map((r, i) => (
+                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: '1px dashed var(--vk-rule-soft)' }}>
+                          <div style={{ flex: 1, fontSize: 13 }}>{r.label}</div>
+                          <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 13, fontVariantNumeric: 'tabular-nums', color: 'var(--vk-crimson)' }}>
+                            {monoNum(r.value)}
+                          </div>
                         </div>
-                        <Input className="bg-slate-100 text-slate-500 border-slate-200" readOnly value={formatThaiCurrency(totalAdvance)} />
+                      ))}
+
+                      {/* Deduct input fields */}
+                      <div style={{ marginTop: 14, borderTop: '1px solid var(--vk-rule-soft)', paddingTop: 14, paddingBottom: 20, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        <div className="vk-eyebrow" style={{ marginBottom: 2 }}>รายการหักเพิ่มเติม</div>
+                        {[
+                          { key: 'deduct_safety_equipment', label: 'ค่าอุปกรณ์ความปลอดภัย (฿)' },
+                          { key: 'deduct_uniform',          label: 'ค่าเสื้อพนักงาน (฿)' },
+                        ].map(f => (
+                          <div key={f.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                            <label style={{ fontSize: 12, color: 'var(--vk-ink-2)' }}>{f.label}</label>
+                            <input type="number" min="0"
+                              value={extraEntries[f.key as keyof typeof extraEntries] || ''}
+                              onChange={e => setExtraEntries(prev => ({ ...prev, [f.key]: Number(e.target.value) || 0 }))}
+                              style={{ width: 90, fontFamily: 'var(--vk-mono)', fontSize: 13, textAlign: 'right', border: '1px solid var(--vk-rule)', background: 'var(--vk-paper)', padding: '4px 8px' }}
+                              placeholder="0" />
+                          </div>
+                        ))}
                       </div>
 
-                      <hr className="my-4" />
-
-                      <div className="space-y-4">
-                        <div className="space-y-1.5">
-                          <Label>ค่าอุปกรณ์ความปลอดภัย</Label>
-                          <Input type="number" name="deduct_safety_equipment" className="w-full" value={manualEntries.deduct_safety_equipment || ''} onChange={handleInputChange} disabled={isApproved} placeholder="0" />
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label>ค่าเสื้อพนักงาน</Label>
-                          <Input type="number" name="deduct_uniform" className="w-full" value={manualEntries.deduct_uniform || ''} onChange={handleInputChange} disabled={isApproved} placeholder="0" />
-                        </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '14px 0 0', marginTop: 'auto', borderTop: '2px solid var(--vk-rule)' }}>
+                        <div className="vk-eyebrow">รวมรายการหัก</div>
+                        <div style={{ fontFamily: 'var(--vk-mono)', fontWeight: 700, fontSize: 16, color: 'var(--vk-crimson)' }}>– {monoNum(calc.total_deductions)}</div>
                       </div>
+                    </div>
+                  </div>
 
-                    </CardContent>
-                  </Card>
-
-                  {/* SUMMARY TOTALS */}
-                  <Card className="bg-[#1D9E75]/5 border-[#1D9E75]/20 shadow-sm">
-                    <CardContent className="p-6">
-                      <div className="space-y-3">
-                        <div className="flex justify-between items-center text-emerald-800">
-                          <span className="font-medium">รวมรายได้</span>
-                          <span className="text-lg font-bold">{formatThaiCurrency(calc.total_income)}</span>
-                        </div>
-                        <div className="flex justify-between items-center text-rose-700">
-                          <span className="font-medium">รวมรายการหัก</span>
-                          <span className="text-lg font-bold">{formatThaiCurrency(calc.total_deductions)}</span>
-                        </div>
-                        <div className="pt-3 border-t border-[#1D9E75]/20 flex flex-col sm:flex-row sm:justify-between sm:items-center text-[#1D9E75] gap-1">
-                          <span className="font-bold text-lg">รวมสุทธิ (Net Pay)</span>
-                          <span className="text-2xl sm:text-3xl font-black whitespace-nowrap">{formatThaiCurrency(calc.net_pay)} ฿</span>
-                        </div>
+                  {/* Net pay hero */}
+                  <div style={{ borderTop: '2px solid var(--vk-ink)', borderBottom: '2px solid var(--vk-rule)', padding: '16px 20px', background: 'var(--vk-paper)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                    <div>
+                      <div className="vk-eyebrow">NET PAY · เงินได้สุทธิ</div>
+                      <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 11, color: 'var(--vk-ink-3)', marginTop: 3 }}>
+                        {isClerk ? clerkWeekdayDays + clerkWeekendDays + holidayOtFullDays + holidayOtHalfDays : calc.normal_days + holidayOtFullDays + holidayOtHalfDays} วันทำงาน
                       </div>
-                    </CardContent>
-                  </Card>
-
-                </div>
-              </div>
-
-              {/* Save Button at bottom */}
-              <div className="pt-4 pb-8">
-                <Button
-                  onClick={() => saveMutation.mutate()}
-                  className="w-full md:w-auto md:min-w-[240px] md:float-right h-14 md:h-12 text-base md:text-lg font-bold bg-[#1D9E75] hover:bg-[#157a5a] shadow-md rounded-xl transition-all active:scale-[0.98]"
-                  disabled={saveMutation.isPending || !selectedEmployeeId || isApproved}
-                >
-                  <Save className="w-5 h-5 mr-2 md:w-6 md:h-6" />
-                  {saveMutation.isPending ? 'กำลังบันทึก...' : 'บันทึกข้อมูลค่าจ้าง'}
-                </Button>
-                <div className="clear-both"></div>
-              </div>
-
-            </div>
+                    </div>
+                    <div className="vk-netpay-num" style={{ fontFamily: 'var(--vk-mono)', fontWeight: 700, letterSpacing: '-0.03em', fontVariantNumeric: 'tabular-nums', color: 'var(--vk-ink)' }}>
+                      {Math.floor(calc.net_pay).toLocaleString()}
+                      <span style={{ fontWeight: 500, fontSize: 16, color: 'var(--vk-ink-3)' }}>
+                        .{(calc.net_pay % 1).toFixed(2).slice(2)}
+                      </span>
+                      <span style={{ fontFamily: 'var(--vk-sans)', fontSize: 12, color: 'var(--vk-ink-3)', marginLeft: 6 }}>บาท</span>
+                    </div>
+                  </div>
+                </>
+              ) : null}
+            </>
           )}
         </div>
       </div>
