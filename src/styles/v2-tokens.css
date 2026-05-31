@@ -380,6 +380,89 @@ html, body, #root {
   }
 }
 
+/* Pinned Pool panel layout to support sticky search & select-all */
+.vk-pool-wrapper {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.vk-pool-header {
+  flex-shrink: 0;
+  padding: 16px 14px 10px;
+  background: transparent;
+}
+
+.vk-pool-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 14px;
+}
+
+/* Premium Search Input Box */
+.vk-search-container {
+  position: relative;
+  margin-top: 8px;
+  margin-bottom: 6px;
+  width: 100%;
+}
+
+.vk-search-icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 14px;
+  height: 14px;
+  color: var(--vk-ink-3);
+  pointer-events: none;
+}
+
+.vk-search-input {
+  width: 100%;
+  height: 34px;
+  padding-left: 30px;
+  padding-right: 28px;
+  font-family: var(--vk-sans);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--vk-ink);
+  background: #ffffff;
+  border: 1px solid var(--vk-rule-soft);
+  border-radius: 6px;
+  transition: all var(--vk-dur) var(--vk-ease);
+  outline: none;
+  box-sizing: border-box;
+}
+
+.vk-search-input:focus {
+  border-color: var(--vk-persimmon);
+  box-shadow: 0 0 0 2px var(--vk-persimmon-tint);
+}
+
+.vk-search-clear {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: none;
+  background: none;
+  color: var(--vk-ink-3);
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: background var(--vk-dur) var(--vk-ease);
+}
+
+.vk-search-clear:hover {
+  background: var(--vk-persimmon-tint);
+  color: var(--vk-persimmon);
+}
+
+
 /* Premium Employee cards in list/pool */
 .vk-employee-card {
   padding: 10px 14px;

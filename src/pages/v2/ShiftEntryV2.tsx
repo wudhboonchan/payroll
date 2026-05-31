@@ -1,11 +1,11 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
 import { useAppStore } from '../../store/useAppStore'
 import { TopBarV2 } from '../../components/v2/layout/TopBarV2'
 import { toast } from 'sonner'
-import { ChevronLeft, ChevronRight, Save, X, Clock, Clock4, CheckSquare } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Save, X, Clock, Clock4, CheckSquare, Search } from 'lucide-react'
 import '../../styles/v2-tokens.css'
 
 // ── helpers ────────────────────────────────────────────────────────────
@@ -57,6 +57,7 @@ export default function ShiftEntryV2() {
   const queryClient = useQueryClient()
   const [isHoliday, setIsHoliday] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [searchTerm, setSearchTerm] = useState('')
   const [assignments, setAssignments] = useState<AssignedEmp[]>([])
   const [detailEmp, setDetailEmp] = useState<AssignedEmp | null>(null)
   const [clerkQueue, setClerkQueue] = useState<AssignedEmp[]>([])
@@ -153,6 +154,26 @@ export default function ShiftEntryV2() {
   const assignedIds = new Set(assignments.map(a => a.employee_id))
   const pool = employees.filter(e => !assignedIds.has(e.id))
 
+  const filteredPool = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase()
+    if (!term) return pool
+    return pool.filter(emp => {
+      const code = emp.employee_code.toLowerCase()
+      const fullName = empName(emp).toLowerCase()
+      const nationality = (emp.nationality || '').toLowerCase()
+      return code.includes(term) || fullName.includes(term) || nationality.includes(term)
+    })
+  }, [pool, searchTerm])
+
+  const visibleEligible = useMemo(() => {
+    return filteredPool.filter(e => !(isHoliday && e.position === 'clerk'))
+  }, [filteredPool, isHoliday])
+
+  const allEligibleSelected = useMemo(() => {
+    if (visibleEligible.length === 0) return false
+    return visibleEligible.every(e => selectedIds.has(e.id))
+  }, [visibleEligible, selectedIds])
+
   // ── selection helpers ──
   const toggleSelect = (emp: Employee) => {
     setSelectedIds(prev => {
@@ -164,9 +185,19 @@ export default function ShiftEntryV2() {
   }
 
   const selectAll = () => {
-    // exclude clerks on holidays (not allowed)
-    const eligible = pool.filter(e => !(isHoliday && e.position === 'clerk'))
-    setSelectedIds(new Set(eligible.map(e => e.id)))
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      visibleEligible.forEach(e => next.add(e.id))
+      return next
+    })
+  }
+
+  const deselectAllVisible = () => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      visibleEligible.forEach(e => next.delete(e.id))
+      return next
+    })
   }
 
   const clearSelection = () => setSelectedIds(new Set())
@@ -259,7 +290,6 @@ export default function ShiftEntryV2() {
   })
 
   const hasSelection = selectedIds.size > 0
-  const allEligibleSelected = pool.filter(e => !(isHoliday && e.position === 'clerk')).every(e => selectedIds.has(e.id)) && pool.length > 0
 
   if (!currentPeriod) return (
     <>
@@ -330,65 +360,92 @@ export default function ShiftEntryV2() {
 
       <div className="vk-shift-split">
         {/* Pool */}
-        <div style={{ padding: '16px 14px' }} className="vk-sidebar-scrollable vk-sidebar-scrollable-shift">
-          {/* Pool header with select-all */}
-          <div style={{ marginBottom: 10 }}>
-            <div className="vk-eyebrow" style={{ marginBottom: 6 }}>POOL · ยังไม่ได้กรอก ({pool.length})</div>
-            {pool.length > 0 && (
-              <button
-                onClick={allEligibleSelected ? clearSelection : selectAll}
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 4,
-                  fontSize: 10, fontWeight: 700, letterSpacing: '0.06em',
-                  color: allEligibleSelected ? 'var(--vk-persimmon)' : 'var(--vk-ink-3)',
-                  background: 'none', border: 'none', cursor: 'pointer', padding: '2px 0',
-                  textTransform: 'uppercase',
-                }}>
-                <CheckSquare style={{ width: 12, height: 12 }} />
-                {allEligibleSelected ? 'ยกเลิก' : 'เลือกทั้งหมด'}
-              </button>
-            )}
-          </div>
-          <hr className="vk-rule-soft" style={{ marginBottom: 10 }} />
-          {pool.length === 0 ? (
-            <div className="vk-small" style={{ color: 'var(--vk-ink-3)', padding: '12px 0' }}>กรอกครบทุกคนแล้ว ✓</div>
-          ) : pool.map(emp => {
-            const isSelected = selectedIds.has(emp.id)
-            const isBlockedClerk = isHoliday && emp.position === 'clerk'
-            return (
-              <div key={emp.id}
-                onClick={() => !isBlockedClerk && toggleSelect(emp)}
-                className="vk-employee-card"
-                data-selected={isSelected}
-                data-blocked={isBlockedClerk}>
+        <div className="vk-pool-wrapper vk-sidebar-scrollable vk-sidebar-scrollable-shift" style={{ overflow: 'hidden' }}>
+          {/* Pool header with search & select-all */}
+          <div className="vk-pool-header">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+              <div className="vk-eyebrow">POOL · ยังไม่ได้กรอก ({pool.length})</div>
+              {visibleEligible.length > 0 && (
+                <button
+                  onClick={allEligibleSelected ? deselectAllVisible : selectAll}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 4,
+                    fontSize: 10, fontWeight: 700, letterSpacing: '0.06em',
+                    color: allEligibleSelected ? 'var(--vk-persimmon)' : 'var(--vk-ink-3)',
+                    background: 'none', border: 'none', cursor: 'pointer', padding: '2px 0',
+                    textTransform: 'uppercase',
+                  }}>
+                  <CheckSquare style={{ width: 12, height: 12 }} />
+                  {allEligibleSelected ? 'ยกเลิก' : 'เลือกทั้งหมด'}
+                </button>
+              )}
+            </div>
 
-                {/* Checkbox indicator */}
-                <div style={{
-                  width: 16, height: 16, borderRadius: 4, flexShrink: 0,
-                  border: `2px solid ${isSelected ? 'var(--vk-persimmon)' : 'var(--vk-rule-soft)'}`,
-                  background: isSelected ? 'var(--vk-persimmon)' : 'transparent',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                }}>
-                  {isSelected && (
-                    <svg width="9" height="7" viewBox="0 0 9 7" fill="none">
-                      <path d="M1 3.5L3.5 6L8 1" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-                    </svg>
-                  )}
-                </div>
-                <div style={{ minWidth: 0, overflow: 'hidden' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'nowrap', overflow: 'hidden' }}>
-                    <span style={{ fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {empName(emp)}{fmtNationality(emp.nationality) ? ` (${fmtNationality(emp.nationality)})` : ''}
-                    </span>
-                    {emp.position === 'clerk' && (
-                      <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 999, background: 'rgba(177,71,41,0.12)', color: 'var(--vk-persimmon)', letterSpacing: '0.04em', flexShrink: 0 }}>เสมียน</span>
+            {/* Premium Search Input Box */}
+            <div className="vk-search-container">
+              <Search className="vk-search-icon" />
+              <input
+                type="text"
+                placeholder="ค้นหาชื่อ, รหัส, สัญชาติ..."
+                value={searchTerm}
+                onChange={e => setSearchTerm(e.target.value)}
+                className="vk-search-input"
+              />
+              {searchTerm && (
+                <button
+                  onClick={() => setSearchTerm('')}
+                  className="vk-search-clear"
+                  title="ล้างคำค้นหา"
+                >
+                  <X style={{ width: 12, height: 12 }} />
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="vk-pool-list">
+            {filteredPool.length === 0 ? (
+              <div className="vk-small" style={{ color: 'var(--vk-ink-3)', padding: '12px 0', textAlign: 'center' }}>
+                {searchTerm ? 'ไม่พบพนักงานที่ตรงกับที่ค้นหา' : 'กรอกครบทุกคนแล้ว ✓'}
+              </div>
+            ) : filteredPool.map(emp => {
+              const isSelected = selectedIds.has(emp.id)
+              const isBlockedClerk = isHoliday && emp.position === 'clerk'
+              return (
+                <div key={emp.id}
+                  onClick={() => !isBlockedClerk && toggleSelect(emp)}
+                  className="vk-employee-card"
+                  data-selected={isSelected}
+                  data-blocked={isBlockedClerk}>
+
+                  {/* Checkbox indicator */}
+                  <div style={{
+                    width: 16, height: 16, borderRadius: 4, flexShrink: 0,
+                    border: `2px solid ${isSelected ? 'var(--vk-persimmon)' : 'var(--vk-rule-soft)'}`,
+                    background: isSelected ? 'var(--vk-persimmon)' : 'transparent',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    {isSelected && (
+                      <svg width="9" height="7" viewBox="0 0 9 7" fill="none">
+                        <path d="M1 3.5L3.5 6L8 1" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
                     )}
                   </div>
-                  <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 10, color: 'var(--vk-ink-3)', marginTop: 1 }}>{emp.employee_code}</div>
+                  <div style={{ minWidth: 0, overflow: 'hidden' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'nowrap', overflow: 'hidden' }}>
+                      <span style={{ fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {empName(emp)}{fmtNationality(emp.nationality) ? ` (${fmtNationality(emp.nationality)})` : ''}
+                      </span>
+                      {emp.position === 'clerk' && (
+                        <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 999, background: 'rgba(177,71,41,0.12)', color: 'var(--vk-persimmon)', letterSpacing: '0.04em', flexShrink: 0 }}>เสมียน</span>
+                      )}
+                    </div>
+                    <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 10, color: 'var(--vk-ink-3)', marginTop: 1 }}>{emp.employee_code}</div>
+                  </div>
                 </div>
-              </div>
-            )
-          })}
+              )
+            })}
+          </div>
         </div>
 
         {/* Shift columns */}
