@@ -181,7 +181,7 @@ export default function Employees() {
             <div className="vk-small" style={{ color: 'var(--vk-ink-3)' }}>ลองเปลี่ยนคำค้นหา หรือเพิ่มพนักงานใหม่</div>
           </div>
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0 }}>
             <thead>
               <tr>
                 {[
@@ -200,7 +200,7 @@ export default function Employees() {
                       textAlign: h.align as any,
                       fontFamily: 'var(--vk-sans)', fontWeight: 600, fontSize: 11,
                       textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--vk-ink-3)',
-                      padding: '12px 14px', borderBottom: '1px solid var(--vk-rule)',
+                      padding: '12px 14px', boxShadow: 'inset 0 -1px 0 var(--vk-rule)',
                       background: 'var(--vk-paper)', cursor: h.col ? 'pointer' : 'default',
                       whiteSpace: 'nowrap', userSelect: 'none',
                       position: 'sticky',
