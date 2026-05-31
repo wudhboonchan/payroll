@@ -82,7 +82,7 @@ export default function ShiftEntry() {
       cancelAnimationFrame(raf)
       window.removeEventListener('resize', update)
     }
-  }, [hasSelection]) // re-measure when selection bar appears/disappears
+  }, [selectedIds.size > 0]) // re-measure when selection bar appears/disappears
 
   // ── periods ──
   const { data: periods = [] } = useQuery<Period[]>({
