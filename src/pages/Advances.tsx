@@ -165,7 +165,7 @@ export default function Advances() {
             <col style={{ width: 160 }} />
             <col style={{ width: 80 }} />
           </colgroup>
-          <thead>
+          <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
             <tr>
               {['รหัส','ชื่อ–นามสกุล','หมายเหตุ','จำนวนเงิน',''].map((h, i) => (
                 <th key={i} style={{ textAlign: i >= 3 ? 'right' : 'left', fontFamily: 'var(--vk-sans)', fontWeight: 600, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--vk-ink-3)', padding: '10px 14px', borderBottom: '2px solid var(--vk-rule)', background: 'var(--vk-paper)' }}>{h}</th>
