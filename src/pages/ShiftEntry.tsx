@@ -82,7 +82,7 @@ export default function ShiftEntry() {
       cancelAnimationFrame(raf)
       window.removeEventListener('resize', update)
     }
-  }, [])
+  }, [hasSelection]) // re-measure when selection bar appears/disappears
 
   // ── periods ──
   const { data: periods = [] } = useQuery<Period[]>({
@@ -381,6 +381,29 @@ export default function ShiftEntry() {
         </div>
       </div>
 
+      {/* Selection bar — appears between date strip and split panel */}
+      {hasSelection && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 12,
+          padding: '8px 20px',
+          background: 'var(--vk-ink)', color: 'var(--vk-bone)',
+          fontFamily: 'var(--vk-sans)',
+          borderBottom: '1px solid rgba(255,255,255,0.08)',
+          flexShrink: 0,
+        }}>
+          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--vk-persimmon)', flexShrink: 0 }}>
+            เลือกแล้ว {selectedIds.size} คน
+          </span>
+          <span style={{ fontSize: 12, fontWeight: 600, flexShrink: 0 }}>→ คลิกที่กะที่ต้องการ</span>
+          <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {pool.filter(e => selectedIds.has(e.id)).map(e => empName(e)).join(', ')}
+          </span>
+          <button onClick={clearSelection} style={{ background: 'rgba(255,255,255,0.1)', border: 'none', cursor: 'pointer', color: 'var(--vk-bone)', padding: '3px 10px', borderRadius: 4, fontSize: 12, flexShrink: 0 }}>
+            ยกเลิก
+          </button>
+        </div>
+      )}
+
       <div ref={splitRef} className="vk-shift-split" style={splitHeight ? { height: splitHeight } : undefined}>
         {/* Pool */}
         <div className="vk-pool-wrapper">
@@ -546,32 +569,6 @@ export default function ShiftEntry() {
         </div>
       </div>
 
-      {/* Floating selection hint — top-right so it doesn't cover pool list */}
-      {hasSelection && (
-        <div style={{
-          position: 'fixed',
-          top: 'calc(var(--vk-topbar-h) + var(--vk-date-strip-h) + 12px)',
-          right: 16,
-          background: 'var(--vk-ink-2)', color: 'var(--vk-bone)',
-          padding: '10px 14px 10px 16px',
-          fontFamily: 'var(--vk-sans)',
-          display: 'flex', alignItems: 'flex-start', gap: 10,
-          zIndex: 100, borderRadius: 10,
-          boxShadow: '0 4px 20px rgba(22,19,17,0.35)',
-          maxWidth: 280,
-        }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', color: 'var(--vk-persimmon)', textTransform: 'uppercase', marginBottom: 2 }}>
-              เลือกแล้ว {selectedIds.size} คน
-            </div>
-            <div style={{ fontSize: 13, fontWeight: 600 }}>คลิกที่กะที่ต้องการ</div>
-            <div style={{ fontSize: 11, color: 'var(--vk-ink-4)', marginTop: 2, lineHeight: 1.5, wordBreak: 'break-word' }}>
-              {pool.filter(e => selectedIds.has(e.id)).map(e => empName(e)).join(', ')}
-            </div>
-          </div>
-          <span style={{ cursor: 'pointer', color: 'var(--vk-ink-4)', fontSize: 18, lineHeight: 1, flexShrink: 0 }} onClick={clearSelection}>×</span>
-        </div>
-      )}
 
       {/* Employee detail modal */}
       {detailEmp && (
