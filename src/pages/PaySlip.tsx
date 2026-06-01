@@ -62,6 +62,7 @@ export default function PaySlip() {
   const { user } = useAppStore()
   const [selectedEmpId, setSelectedEmpId] = useState<string | null>(null)
   const [empSearch, setEmpSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState<'has_slip' | 'no_slip' | null>(null)
   const slipRef = useRef<HTMLDivElement>(null)
   const scalerRef = useRef<HTMLDivElement>(null)
   const innerRef = useRef<HTMLDivElement>(null)
@@ -334,13 +335,20 @@ export default function PaySlip() {
         <div style={{ padding: '16px 12px' }}
           className={`vk-sidebar-scrollable vk-sidebar-scrollable-payroll ${selectedEmpId ? 'hidden md:block' : ''}`}>
           <div className="vk-eyebrow" style={{ marginBottom: 8 }}>พนักงาน ({employees.length})</div>
-          <div style={{ display: 'flex', gap: 8, fontSize: 10, color: 'var(--vk-ink-3)', marginBottom: 10, flexWrap: 'wrap' }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-              <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--vk-jade)', display: 'inline-block' }} />มีสลิป
-            </span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-              <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#d4cfc9', display: 'inline-block' }} />ยังไม่มี
-            </span>
+          <div style={{ display: 'flex', gap: 6, fontSize: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+            {([
+              { key: 'has_slip', color: 'var(--vk-jade)', label: 'มีสลิป' },
+              { key: 'no_slip',  color: '#d4cfc9',        label: 'ยังไม่มี' },
+            ] as const).map(s => {
+              const active = statusFilter === s.key
+              return (
+                <button key={s.key} onClick={() => setStatusFilter(active ? null : s.key)}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', border: `1px solid ${active ? s.color : 'var(--vk-rule-soft)'}`, borderRadius: 999, cursor: 'pointer', background: active ? `${s.color}22` : 'transparent', color: active ? 'var(--vk-ink)' : 'var(--vk-ink-3)', fontFamily: 'var(--vk-sans)', fontWeight: active ? 700 : 400, fontSize: 10, transition: 'all 120ms' }}>
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: s.color, display: 'inline-block', flexShrink: 0 }} />
+                  {s.label}
+                </button>
+              )
+            })}
           </div>
           {/* Search */}
           <div style={{ position: 'relative', marginBottom: 8 }}>
@@ -360,7 +368,10 @@ export default function PaySlip() {
           <hr className="vk-rule-soft" style={{ marginBottom: 10 }} />
           {employees.filter(emp => {
             const q = empSearch.toLowerCase()
-            return !q || emp.employee_code.toLowerCase().includes(q) || emp.first_name.toLowerCase().includes(q) || (emp.last_name || '').toLowerCase().includes(q)
+            const matchSearch = !q || emp.employee_code.toLowerCase().includes(q) || emp.first_name.toLowerCase().includes(q) || (emp.last_name || '').toLowerCase().includes(q)
+            const hasSaved = savedIds.has(emp.id)
+            const matchStatus = !statusFilter || (statusFilter === 'has_slip' ? hasSaved : !hasSaved)
+            return matchSearch && matchStatus
           }).map(emp => {
             const hasSaved = savedIds.has(emp.id)
             const active = emp.id === selectedEmpId
