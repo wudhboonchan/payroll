@@ -5,7 +5,7 @@ import { useAppStore } from '../store/useAppStore'
 import { TopBar } from '../components/layout/TopBar'
 import { useState, useMemo, useEffect } from 'react'
 import { toast } from 'sonner'
-import { Save, CheckCircle2, AlertCircle } from 'lucide-react'
+import { Save, CheckCircle2, AlertCircle, Search, X } from 'lucide-react'
 import { calculatePayroll } from '../lib/payrollCalc'
 import type { PayrollCalculationInput } from '../lib/payrollCalc'
 import '../styles/tokens.css'
@@ -47,6 +47,7 @@ export default function PayrollEntry() {
   const { user } = useAppStore()
   const queryClient = useQueryClient()
   const [selectedEmpId, setSelectedEmpId] = useState<string | null>(null)
+  const [empSearch, setEmpSearch] = useState('')
 
   // ── data queries ──
   const { data: periods = [] } = useQuery<any[]>({
@@ -313,8 +314,26 @@ export default function PayrollEntry() {
             <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}><span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--vk-persimmon)', display: 'inline-block', flexShrink: 0 }} />มีการเปลี่ยนแปลง</span>
             <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}><span style={{ width: 7, height: 7, borderRadius: '50%', background: '#d4cfc9', display: 'inline-block', flexShrink: 0 }} />ยังไม่บันทึก</span>
           </div>
+          {/* Search */}
+          <div style={{ position: 'relative', marginBottom: 8 }}>
+            <Search style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', width: 12, height: 12, color: 'var(--vk-ink-3)', pointerEvents: 'none' }} />
+            <input
+              value={empSearch}
+              onChange={e => setEmpSearch(e.target.value)}
+              placeholder="ค้นหาชื่อหรือรหัส..."
+              style={{ width: '100%', height: 32, paddingLeft: 26, paddingRight: empSearch ? 26 : 8, fontSize: 12, fontFamily: 'var(--vk-sans)', border: '1px solid var(--vk-rule)', background: 'var(--vk-paper)', color: 'var(--vk-ink)', outline: 'none', boxSizing: 'border-box' }}
+            />
+            {empSearch && (
+              <button onClick={() => setEmpSearch('')} style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', padding: 2, color: 'var(--vk-ink-3)', display: 'flex' }}>
+                <X style={{ width: 11, height: 11 }} />
+              </button>
+            )}
+          </div>
           <hr className="vk-rule-soft" style={{ marginBottom: 10 }} />
-          {employees.map(emp => {
+          {employees.filter(emp => {
+            const q = empSearch.toLowerCase()
+            return !q || emp.employee_code.toLowerCase().includes(q) || emp.first_name.toLowerCase().includes(q) || (emp.last_name || '').toLowerCase().includes(q)
+          }).map(emp => {
             const status = empStatus(emp.id)
             const active = emp.id === selectedEmpId
             return (
@@ -343,6 +362,12 @@ export default function PayrollEntry() {
             )
           })}
           {employees.length === 0 && <div className="vk-small" style={{ color: 'var(--vk-ink-3)' }}>ไม่พบพนักงาน</div>}
+          {employees.length > 0 && empSearch && employees.filter(emp => {
+            const q = empSearch.toLowerCase()
+            return emp.employee_code.toLowerCase().includes(q) || emp.first_name.toLowerCase().includes(q) || (emp.last_name || '').toLowerCase().includes(q)
+          }).length === 0 && (
+            <div className="vk-small" style={{ color: 'var(--vk-ink-3)', textAlign: 'center', padding: '12px 0' }}>ไม่พบพนักงานที่ค้นหา</div>
+          )}
         </div>
 
         {/* Right panel */}
