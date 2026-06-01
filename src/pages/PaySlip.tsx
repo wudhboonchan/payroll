@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase'
 import { useAppStore } from '../store/useAppStore'
 import { TopBar } from '../components/layout/TopBar'
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Printer } from 'lucide-react'
+import { Printer, Search, X } from 'lucide-react'
 import { calculatePayroll } from '../lib/payrollCalc'
 import { VKSlipDocument } from '../components/VKSlipDocument'
 import '../styles/tokens.css'
@@ -61,6 +61,7 @@ export default function PaySlip() {
   const { onMenuClick } = useOutletContext<{ onMenuClick: () => void }>()
   const { user } = useAppStore()
   const [selectedEmpId, setSelectedEmpId] = useState<string | null>(null)
+  const [empSearch, setEmpSearch] = useState('')
   const slipRef = useRef<HTMLDivElement>(null)
   const scalerRef = useRef<HTMLDivElement>(null)
   const innerRef = useRef<HTMLDivElement>(null)
@@ -341,8 +342,26 @@ export default function PaySlip() {
               <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#d4cfc9', display: 'inline-block' }} />ยังไม่มี
             </span>
           </div>
+          {/* Search */}
+          <div style={{ position: 'relative', marginBottom: 8 }}>
+            <Search style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', width: 12, height: 12, color: 'var(--vk-ink-3)', pointerEvents: 'none' }} />
+            <input
+              value={empSearch}
+              onChange={e => setEmpSearch(e.target.value)}
+              placeholder="ค้นหาชื่อหรือรหัส..."
+              style={{ width: '100%', height: 32, paddingLeft: 26, paddingRight: empSearch ? 26 : 8, fontSize: 12, fontFamily: 'var(--vk-sans)', border: '1px solid var(--vk-rule)', background: 'var(--vk-paper)', color: 'var(--vk-ink)', outline: 'none', boxSizing: 'border-box' }}
+            />
+            {empSearch && (
+              <button onClick={() => setEmpSearch('')} style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', padding: 2, color: 'var(--vk-ink-3)', display: 'flex' }}>
+                <X style={{ width: 11, height: 11 }} />
+              </button>
+            )}
+          </div>
           <hr className="vk-rule-soft" style={{ marginBottom: 10 }} />
-          {employees.map(emp => {
+          {employees.filter(emp => {
+            const q = empSearch.toLowerCase()
+            return !q || emp.employee_code.toLowerCase().includes(q) || emp.first_name.toLowerCase().includes(q) || (emp.last_name || '').toLowerCase().includes(q)
+          }).map(emp => {
             const hasSaved = savedIds.has(emp.id)
             const active = emp.id === selectedEmpId
             const n = fmtNationality(emp.nationality)
