@@ -76,8 +76,8 @@ export default function Dashboard() {
     queryFn: async () => {
       if (!activePeriod) return null
       const [payroll, shifts, advances] = await Promise.all([
-        supabase.from('payroll_entries').select('employee_id,amount_normal,amount_shift,amount_ot,amount_wood_excess,amount_film,amount_special,amount_diligence,amount_position,deduct_social_security,deduct_advance,deduct_safety_equipment,deduct_uniform,override_special,employee:employees(employee_code,first_name,last_name)').eq('period_id', activePeriod.id),
-        supabase.from('shift_assignments').select('work_date').eq('period_id', activePeriod.id),
+        supabase.from('payroll_entries').select('employee_id,amount_normal,amount_shift,amount_ot,amount_wood_excess,amount_film,amount_special,amount_diligence,amount_position,deduct_social_security,deduct_advance,deduct_safety_equipment,deduct_uniform,override_special,employee:employees(employee_code,first_name,last_name)').eq('period_id', activePeriod.id).limit(10000),
+        supabase.from('shift_assignments').select('work_date').eq('period_id', activePeriod.id).limit(10000),
         supabase.from('advance_payments').select('amount').eq('period_id', activePeriod.id),
       ])
       const entries = payroll.data ?? []

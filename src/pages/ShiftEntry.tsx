@@ -296,7 +296,7 @@ export default function ShiftEntry() {
         cross_position_title: a.crossPositionTitle || '',
         cross_position_extra_pay: a.crossPositionExtraPay || 0,
       }))
-      const { error } = await supabase.from('shift_assignments' as any).upsert(payload, { onConflict: 'employee_id,work_date' })
+      const { error } = await supabase.from('shift_assignments' as any).upsert(payload, { onConflict: 'period_id,employee_id,work_date' })
       if (error) throw error
       const keepIds = assignments.map(a => a.employee_id)
       await supabase.from('shift_assignments').delete().eq('period_id', currentPeriod.id).eq('work_date', activeDateStr).not('employee_id', 'in', `(${keepIds.join(',')})`)
@@ -304,6 +304,7 @@ export default function ShiftEntry() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['shifts-v2'] })
       queryClient.invalidateQueries({ queryKey: ['all-period-shifts'] })
+      queryClient.invalidateQueries({ queryKey: ['summary-all-shifts'] })
       toast.success(`บันทึกข้อมูล ${fmtDisplay(activeDateStr)} สำเร็จ`)
     },
     onError: (e: Error) => toast.error('บันทึกไม่สำเร็จ', { description: e.message }),

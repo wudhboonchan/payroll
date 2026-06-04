@@ -110,13 +110,25 @@ export default function EmployeeSummary() {
     queryKey: ['summary-all-shifts', selectedPeriodId],
     queryFn: async () => {
       if (!selectedPeriodId) return []
-      const { data, error } = await supabase.from('shift_assignments' as any)
-        .select('employee_id,work_date,shift_type,is_holiday_ot,is_holiday_ot_exempt,is_half_shift,actual_hours,ot_hours,wood_excess,film_amount,is_cross_position,cross_position_title,cross_position_extra_pay')
-        .eq('period_id', selectedPeriodId)
-      if (error) throw error
-      return data
+      const PAGE = 1000
+      let all: any[] = []
+      let from = 0
+      while (true) {
+        const { data, error } = await supabase.from('shift_assignments' as any)
+          .select('employee_id,work_date,shift_type,is_holiday_ot,is_holiday_ot_exempt,is_half_shift,actual_hours,ot_hours,wood_excess,film_amount,is_cross_position,cross_position_title,cross_position_extra_pay')
+          .eq('period_id', selectedPeriodId)
+          .range(from, from + PAGE - 1)
+        if (error) throw error
+        all = all.concat(data ?? [])
+        if (!data || data.length < PAGE) break
+        from += PAGE
+      }
+      return all
     },
     enabled: !!selectedPeriodId,
+    staleTime: 0,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
   })
 
   // ── 4. Fetch payroll entries for the selected period ──

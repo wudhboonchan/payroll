@@ -331,7 +331,7 @@ export default function Export() {
         amount_special,amount_diligence,amount_position,
         deduct_social_security,deduct_advance,deduct_safety_equipment,deduct_uniform,
         employee:employees(employee_code,first_name,last_name)
-      `).in('period_id', ids)
+      `).in('period_id', ids).limit(10000)
       if (error) throw error
       if (!data?.length) { toast.error('ไม่พบข้อมูลในช่วงเวลานี้'); return }
 
@@ -371,7 +371,7 @@ export default function Export() {
       const { data, error } = await supabase.from('payroll_entries').select(`
         amount_normal,deduct_social_security,
         employee:employees(national_id,prefix,first_name,last_name,nationality)
-      `).in('period_id', ids)
+      `).in('period_id', ids).limit(10000)
       if (error) throw error; if (!data?.length) { toast.error('ไม่พบข้อมูล'); return }
       const map: Record<string,any> = {}
       ;(data as any[]).filter(r=>r.employee&&(r.employee.nationality||'ไทย')==='ไทย').forEach(r=>{
@@ -428,7 +428,7 @@ export default function Export() {
         *,
         employee:employees(id,employee_code,first_name,last_name,position,job_title,wage_type,rate_per_12h,payment_method,bank_name,bank_account,nationality),
         period:payroll_periods(period_start,period_end)
-      `).in('period_id', targetPeriodIds)
+      `).in('period_id', targetPeriodIds).limit(10000)
       if (!isNormalUser && pdfTarget === 'individual') q = q.eq('employee_id', pdfEmpId!)
 
       const { data: entries, error } = await q
@@ -446,6 +446,7 @@ export default function Export() {
         .select('employee_id,period_id,work_date,is_holiday_ot,is_holiday_ot_exempt,is_half_shift,actual_hours,ot_hours')
         .in('period_id', targetPeriodIds)
         .in('employee_id', empIds)
+        .limit(10000)
 
       const sorted = [...(entries as any[])].sort((a,b)=>{
         const cmp = String(a.employee.employee_code).localeCompare(String(b.employee.employee_code))

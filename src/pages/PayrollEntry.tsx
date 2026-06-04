@@ -77,6 +77,7 @@ export default function PayrollEntry() {
       const { data, error } = await supabase.from('shift_assignments' as any)
         .select('employee_id,shift_type,is_holiday_ot,is_holiday_ot_exempt,is_half_shift,wood_excess,film_amount,ot_hours,actual_hours,work_date,is_cross_position,cross_position_title,cross_position_extra_pay')
         .eq('period_id', currentPeriod.id)
+        .limit(10000)
       if (error) throw error; return data as any
     }, enabled: !!currentPeriod?.id, staleTime: 0,
   })
@@ -87,6 +88,7 @@ export default function PayrollEntry() {
       const { data, error } = await supabase.from('payroll_entries' as any)
         .select('employee_id,amount_normal,amount_shift,amount_ot,amount_wood_excess,amount_film,amount_special,override_special,special_note,amount_diligence,amount_position,deduct_social_security,deduct_safety_equipment,deduct_uniform,deduct_advance,override_normal,override_reason')
         .eq('period_id', currentPeriod.id)
+        .limit(10000)
       if (error) throw error; return data as any
     }, enabled: !!currentPeriod?.id, staleTime: 0,
   })
@@ -95,6 +97,7 @@ export default function PayrollEntry() {
     queryKey: ['advances', 'all', currentPeriod?.id],
     queryFn: async () => {
       const { data, error } = await supabase.from('advance_payments').select('employee_id,amount').eq('period_id', currentPeriod.id)
+        .limit(10000)
       if (error) throw error; return data
     }, enabled: !!currentPeriod?.id, staleTime: 30_000,
   })
