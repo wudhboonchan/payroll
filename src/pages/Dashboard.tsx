@@ -81,8 +81,6 @@ export default function Dashboard() {
         supabase.from('advance_payments').select('amount').eq('period_id', activePeriod.id),
       ])
       const entries = payroll.data ?? []
-      const dupIds = entries.map((e: any) => e.employee_id).filter((id: string, i: number, arr: string[]) => arr.indexOf(id) !== i)
-      console.log('[Dashboard] entries:', entries.length, 'duplicates:', dupIds.length, dupIds.slice(0,3))
       const gross = entries.reduce((s, e) => {
         const income = Number(e.amount_normal||0) + Number(e.amount_shift||0) + Number(e.amount_ot||0)
           + Number(e.amount_wood_excess||0) + Number(e.amount_film||0)
