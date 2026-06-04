@@ -284,13 +284,11 @@ export default function EmployeeSummary() {
     })
   }, [selectedEmp, currentPeriod, empShifts])
 
-  // Clerk period base (monthly/30 × period_days) — shown as a single period-level item
+  // Clerk period base = monthly_salary / 2 (fixed regardless of period length)
   const clerkPeriodBase = useMemo(() => {
-    if (!selectedEmp || selectedEmp.position !== 'clerk' || !currentPeriod) return 0
-    const rate = Number(selectedEmp.rate_per_12h) || 0
-    const days = getDatesInRange(currentPeriod.period_start, currentPeriod.period_end).length
-    return (rate / 30) * days
-  }, [selectedEmp, currentPeriod])
+    if (!selectedEmp || selectedEmp.position !== 'clerk') return 0
+    return (Number(selectedEmp.rate_per_12h) || 0) / 2
+  }, [selectedEmp])
 
   // Summarize daily estimates for UI stats
   const stats = useMemo(() => {
@@ -660,9 +658,9 @@ export default function EmployeeSummary() {
                   {clerkPeriodBase > 0 && (
                     <div style={{ display: 'grid', gridTemplateColumns: '130px 90px 1fr 90px', gap: 8, padding: '8px 32px', borderTop: '1px solid var(--vk-rule-soft)', alignItems: 'center', borderLeft: '3px solid var(--vk-jade)' }}>
                       <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--vk-ink)', gridColumn: '1 / 3' }}>
-                        ค่าจ้างพื้นฐาน ({currentPeriod ? getDatesInRange(currentPeriod.period_start, currentPeriod.period_end).length : 0} วัน)
+                        ค่าจ้างพื้นฐาน (ครึ่งเดือน)
                       </div>
-                      <div style={{ fontSize: 11, color: 'var(--vk-ink-3)', fontStyle: 'italic' }}>เงินเดือน ÷ 30 × จำนวนวันในงวด</div>
+                      <div style={{ fontSize: 11, color: 'var(--vk-ink-3)', fontStyle: 'italic' }}>เงินเดือน ÷ 2</div>
                       <div style={{ textAlign: 'right', fontFamily: 'var(--vk-mono)', fontSize: 13, fontWeight: 700, color: 'var(--vk-jade)' }}>฿{monoNum(clerkPeriodBase)}</div>
                     </div>
                   )}

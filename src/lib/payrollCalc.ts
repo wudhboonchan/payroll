@@ -198,11 +198,9 @@ export function calculateClerkPayroll(input: PayrollCalculationInput): PayrollCa
     deduct_uniform = 0,
   } = input;
 
-  // Clerk base pay = monthly_salary / 30 * period_calendar_days
-  // (e.g. 17000 / 30 * 15 = 8500 for a standard 15-day period)
+  // Clerk base pay = monthly_salary / 2 (fixed per bi-monthly period)
   const daily_rate = monthly_salary / 30;
-  const base_days = period_days ?? normal_days;
-  const amount_normal = daily_rate * base_days;
+  const amount_normal = monthly_salary / 2;
 
   // Clerk has no "shift pay" — always 8h only
   const amount_shift = 0;
@@ -263,7 +261,7 @@ export function calculateClerkPayroll(input: PayrollCalculationInput): PayrollCa
     deduct_advance,
     total_deductions,
     net_pay,
-    normal_days: base_days,
+    normal_days: normal_days,
     half_shift_days: 0,
   };
 }
