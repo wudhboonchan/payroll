@@ -37,6 +37,10 @@ interface PayrollRow {
 }
 
 function isWeekendDate(s: string) { const d = new Date(s); return d.getDay() === 0 || d.getDay() === 6 }
+function getPeriodDays(start: string, end: string): number {
+  const s = new Date(start + 'T00:00:00'), e = new Date(end + 'T00:00:00')
+  return Math.round((e.getTime() - s.getTime()) / 86400000) + 1
+}
 function fmtNationality(nationality: string | null) {
   if (!nationality || nationality === 'ไทย') return null
   if (nationality === 'เมียนมา' || nationality.toLowerCase().includes('myanmar') || nationality.toLowerCase().includes('burma')) return 'เมียนมา/กะเหรี่ยง'
@@ -171,6 +175,7 @@ export default function PayrollEntry() {
       wage_type: selectedEmp.wage_type as 'daily' | 'monthly',
       rate_per_12h: Number(selectedEmp.rate_per_12h) || 0,
       normal_days: isClerk ? clerkNormDays : normDays,
+      period_days: isClerk && currentPeriod ? getPeriodDays(currentPeriod.period_start, currentPeriod.period_end) : undefined,
       half_shift_days: isClerk ? 0 : halfDays,
       holiday_ot_full_days: holFull,
       holiday_ot_half_days: holHalf,
@@ -230,6 +235,7 @@ export default function PayrollEntry() {
         wage_type: emp.wage_type as 'daily' | 'monthly',
         rate_per_12h: Number(emp.rate_per_12h) || 0,
         normal_days: isEmpClerk ? clerkNorm : normDays,
+        period_days: isEmpClerk && currentPeriod ? getPeriodDays(currentPeriod.period_start, currentPeriod.period_end) : undefined,
         half_shift_days: isEmpClerk ? 0 : halfDays,
         holiday_ot_full_days: holFull, holiday_ot_half_days: holHalf,
         partial_hours_total: isEmpClerk ? 0 : partialHrs,

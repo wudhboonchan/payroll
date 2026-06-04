@@ -184,6 +184,14 @@ export default function EmployeeSummary() {
     const clerkDaily = rate / 30
     const clerkHourly = clerkDaily / 8
 
+    // Clerk base: monthly/30 × period_days, distributed evenly across worked weekdays
+    const periodDays = dates.length
+    const clerkWeekdaysWorked = isClerk
+      ? empShifts.filter(s => !isWeekendDate(s.work_date)).length
+      : 0
+    const clerkPeriodBase = isClerk ? clerkDaily * periodDays : 0
+    const clerkBasePerDay = clerkWeekdaysWorked > 0 ? clerkPeriodBase / clerkWeekdaysWorked : 0
+
     return dates.map(dateStr => {
       const shift = empShifts.find(s => s.work_date === dateStr)
       const weekend = isWeekendDate(dateStr)
@@ -223,7 +231,7 @@ export default function EmployeeSummary() {
           baseWage = 0
           otPay = clerkHourly * 1.0 * (shift.ot_hours || 0)
         } else {
-          baseWage = clerkDaily
+          baseWage = clerkBasePerDay
           otPay = clerkHourly * 1.5 * (shift.ot_hours || 0)
         }
       } else {

@@ -13,9 +13,12 @@ export interface PayrollCalculationInput {
 
   // For clerk (position === 'clerk')
   // rate_per_12h stores monthly salary
-  // ot_hours: hours worked beyond 8h per day (sum of all OT hours in period)
+  // period_days: total calendar days in the payroll period (e.g. 15 for a standard bi-monthly period)
+  // ot_hours: hours worked beyond 8h on weekdays (sum per period)
+  // clerk_ot_1x_hours: actual hours worked on weekends (paid 1x hourly)
   clerk_ot_hours?: number;
   clerk_ot_1x_hours?: number;
+  period_days?: number;
 
   override_normal?: number | null;
   override_shift?: number | null;
@@ -178,6 +181,7 @@ export function calculateClerkPayroll(input: PayrollCalculationInput): PayrollCa
   const {
     rate_per_12h: monthly_salary,
     normal_days,
+    period_days,
     clerk_ot_hours = 0,
     clerk_ot_1x_hours = 0,
     override_normal,
@@ -194,10 +198,11 @@ export function calculateClerkPayroll(input: PayrollCalculationInput): PayrollCa
     deduct_uniform = 0,
   } = input;
 
-  // Clerk's 15-day base pay = monthly_salary / 2
-  // But we calculate day by day: monthly_salary / 30 * days_worked
+  // Clerk base pay = monthly_salary / 30 * period_calendar_days
+  // (e.g. 17000 / 30 * 15 = 8500 for a standard 15-day period)
   const daily_rate = monthly_salary / 30;
-  const amount_normal = daily_rate * normal_days;
+  const base_days = period_days ?? normal_days;
+  const amount_normal = daily_rate * base_days;
 
   // Clerk has no "shift pay" — always 8h only
   const amount_shift = 0;
@@ -258,7 +263,7 @@ export function calculateClerkPayroll(input: PayrollCalculationInput): PayrollCa
     deduct_advance,
     total_deductions,
     net_pay,
-    normal_days,
+    normal_days: base_days,
     half_shift_days: 0,
   };
 }

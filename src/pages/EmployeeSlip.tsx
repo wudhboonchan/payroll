@@ -119,7 +119,18 @@ export default function EmployeeSlip() {
 
   const isClerkSlip = empPosition === 'clerk'
   const normalShiftsForSlip = slipShifts.filter((s: ShiftAssignment) => !s.is_holiday_ot)
-  const days_normal = normalShiftsForSlip.length
+  // For clerks: days_normal = period calendar days (base = monthly/30 × period_days)
+  // For workers: days_normal = shifts worked
+  const clerkPeriodDays = useMemo(() => {
+    if (!isClerkSlip) return 0
+    const p = typeof rawData === 'string' ? JSON.parse(rawData) : rawData
+    const start = p?.period?.period_start ?? p?.token_data?.period_start
+    const end = p?.period?.period_end ?? p?.token_data?.period_end
+    if (!start || !end) return normalShiftsForSlip.length
+    const s = new Date(start + 'T00:00:00'), e = new Date(end + 'T00:00:00')
+    return Math.round((e.getTime() - s.getTime()) / 86400000) + 1
+  }, [isClerkSlip, rawData, normalShiftsForSlip.length])
+  const days_normal = isClerkSlip ? clerkPeriodDays : normalShiftsForSlip.length
   const days_shift = normalShiftsForSlip.filter((s: ShiftAssignment) => !s.is_half_shift).length
   const autoClerkOt1_5x = slipShifts.filter((s: ShiftAssignment) => !isWeekend(new Date(s.work_date))).reduce((sum: number, s: ShiftAssignment) => sum + Number(s.ot_hours || 0), 0)
   const autoClerkOt1x = slipShifts.filter((s: ShiftAssignment) => isWeekend(new Date(s.work_date))).reduce((sum: number, s: ShiftAssignment) => sum + Number(s.ot_hours || 0), 0)
