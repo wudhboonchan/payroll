@@ -78,11 +78,20 @@ export default function PayrollEntry() {
   const { data: allShifts = [] } = useQuery<Shift[]>({
     queryKey: ['all-period-shifts', currentPeriod?.id],
     queryFn: async () => {
-      const { data, error } = await supabase.from('shift_assignments' as any)
-        .select('employee_id,shift_type,is_holiday_ot,is_holiday_ot_exempt,is_half_shift,wood_excess,film_amount,ot_hours,actual_hours,work_date,is_cross_position,cross_position_title,cross_position_extra_pay')
-        .eq('period_id', currentPeriod.id)
-        .limit(10000)
-      if (error) throw error; return data as any
+      const PAGE = 1000
+      let all: any[] = []
+      let from = 0
+      while (true) {
+        const { data, error } = await supabase.from('shift_assignments' as any)
+          .select('employee_id,shift_type,is_holiday_ot,is_holiday_ot_exempt,is_half_shift,wood_excess,film_amount,ot_hours,actual_hours,work_date,is_cross_position,cross_position_title,cross_position_extra_pay')
+          .eq('period_id', currentPeriod.id)
+          .range(from, from + PAGE - 1)
+        if (error) throw error
+        all = all.concat(data ?? [])
+        if (!data || data.length < PAGE) break
+        from += PAGE
+      }
+      return all as any
     }, enabled: !!currentPeriod?.id, staleTime: 0,
   })
 
@@ -474,12 +483,12 @@ export default function PayrollEntry() {
 
                       {/* Calculated rows */}
                       {[
-                        ...(!isClerk ? [{
+                        {
                           label: 'ค่าจ้างปกติ (8 ชม.)',
-                          sub: `${calc.normal_days} วัน` as string|null,
-                          detail: `฿${baseNormal} × ${calc.normal_days} วัน`,
+                          sub: isClerk ? null : `${calc.normal_days} วัน` as string|null,
+                          detail: isClerk ? null : `฿${baseNormal} × ${calc.normal_days} วัน` as string|null,
                           value: calc.effective_normal, isOverridden: overrideNormal !== null,
-                        }] : []),
+                        },
                         ...(!isClerk ? [{
                           label: 'ค่ากะ (4 ชม.)',
                           sub: `${shiftPayDays} วัน` as string|null,
