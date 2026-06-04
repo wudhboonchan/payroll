@@ -140,8 +140,8 @@ export default function PayrollEntry() {
   }, [existingEntry, selectedEmpId])
 
   // ── calculation ──
-  const { calc, totalAdvance, autoWood, autoFilm, autoSpecial, autoSpecialNote, crossPositions, isClerk, clerkOtHours, clerkOt1xHours, clerkWeekdayDays, clerkWeekendDays, shiftPayDays, holidayOtFullDays, holidayOtHalfDays, baseNormal, baseShift, clerkDaily, clerkHourly } = useMemo(() => {
-    const empty = { calc: null, totalAdvance: 0, autoWood: 0, autoFilm: 0, autoSpecial: 0, autoSpecialNote: '', crossPositions: [] as { title: string; amount: number }[], isClerk: false, clerkOtHours: 0, clerkOt1xHours: 0, clerkWeekdayDays: 0, clerkWeekendDays: 0, shiftPayDays: 0, holidayOtFullDays: 0, holidayOtHalfDays: 0, baseNormal: 357, baseShift: 0, clerkDaily: 0, clerkHourly: 0 }
+  const { calc, totalAdvance, autoWood, autoFilm, autoSpecial, autoSpecialNote, crossPositions, isClerk, clerkOtHours, clerkOt1xHours, clerkOtDays, clerkWeekdayDays, clerkWeekendDays, shiftPayDays, holidayOtFullDays, holidayOtHalfDays, baseNormal, baseShift, clerkDaily, clerkHourly } = useMemo(() => {
+    const empty = { calc: null, totalAdvance: 0, autoWood: 0, autoFilm: 0, autoSpecial: 0, autoSpecialNote: '', crossPositions: [] as { title: string; amount: number }[], isClerk: false, clerkOtHours: 0, clerkOt1xHours: 0, clerkOtDays: 0, clerkWeekdayDays: 0, clerkWeekendDays: 0, shiftPayDays: 0, holidayOtFullDays: 0, holidayOtHalfDays: 0, baseNormal: 357, baseShift: 0, clerkDaily: 0, clerkHourly: 0 }
     if (!selectedEmp) return empty
     const isClerk = selectedEmp.position === 'clerk'
     const advTotal = empAdvances.reduce((s, a) => s + Number(a.amount), 0)
@@ -158,6 +158,7 @@ export default function PayrollEntry() {
     const clerkNormDays = clerkWeekdayShifts.length  // only weekday shifts count as normal pay
     const clerkOt  = empShifts.filter(s => !isWeekendDate(s.work_date)).reduce((s, sh) => s + Number(sh.ot_hours || 0), 0)
     const clerkOt1x = empShifts.filter(s => isWeekendDate(s.work_date)).reduce((s, sh) => s + Number(sh.ot_hours || 0), 0)
+    const clerkOtDays = empShifts.filter(s => !isWeekendDate(s.work_date) && Number(s.ot_hours || 0) > 0).length
     const autoW = empShifts.reduce((s, sh) => s + Number(sh.wood_excess || 0), 0)
     const autoF = empShifts.reduce((s, sh) => s + Number(sh.film_amount || 0), 0)
     const crossPos = empShifts.filter(s => s.is_cross_position)
@@ -200,7 +201,7 @@ export default function PayrollEntry() {
     const baseShift  = Math.max(0, rate - baseNormal)
     const clerkDaily = rate / 30
     const clerkHourly = clerkDaily / 8
-    return { calc: calculatePayroll(input), totalAdvance: advTotal, autoWood: autoW, autoFilm: autoF, autoSpecial: autoSp, autoSpecialNote: autoSpNote, crossPositions, isClerk, clerkOtHours: clerkOt, clerkOt1xHours: clerkOt1x, clerkWeekdayDays: clerkNormDays, clerkWeekendDays: clerkWeekendShifts.length, shiftPayDays: normDays, holidayOtFullDays: holFull, holidayOtHalfDays: holHalf, baseNormal, baseShift, clerkDaily, clerkHourly, holFull, holHalf }
+    return { calc: calculatePayroll(input), totalAdvance: advTotal, autoWood: autoW, autoFilm: autoF, autoSpecial: autoSp, autoSpecialNote: autoSpNote, crossPositions, isClerk, clerkOtHours: clerkOt, clerkOt1xHours: clerkOt1x, clerkOtDays, clerkWeekdayDays: clerkNormDays, clerkWeekendDays: clerkWeekendShifts.length, shiftPayDays: normDays, holidayOtFullDays: holFull, holidayOtHalfDays: holHalf, baseNormal, baseShift, clerkDaily, clerkHourly, holFull, holHalf }
   }, [selectedEmp, empShifts, empAdvances, overrideNormal, overrideSpecial, extraEntries, ssRate, isThai])
 
   // ── outdated detection — computed for ALL employees upfront ──
@@ -473,14 +474,12 @@ export default function PayrollEntry() {
 
                       {/* Calculated rows */}
                       {[
-                        {
+                        ...(!isClerk ? [{
                           label: 'ค่าจ้างปกติ (8 ชม.)',
-                          sub: isClerk ? `${clerkWeekdayDays} วัน (วันธรรมดา)` : `${calc.normal_days} วัน`,
-                          detail: isClerk
-                            ? `฿${Math.round(clerkDaily)} × ${clerkWeekdayDays} วัน`
-                            : `฿${baseNormal} × ${calc.normal_days} วัน`,
+                          sub: `${calc.normal_days} วัน` as string|null,
+                          detail: `฿${baseNormal} × ${calc.normal_days} วัน`,
                           value: calc.effective_normal, isOverridden: overrideNormal !== null,
-                        },
+                        }] : []),
                         ...(!isClerk ? [{
                           label: 'ค่ากะ (4 ชม.)',
                           sub: `${shiftPayDays} วัน` as string|null,
@@ -495,8 +494,8 @@ export default function PayrollEntry() {
                         }] : []),
                         ...(isClerk && clerkOtHours > 0 ? [{
                           label: 'OT ล่วงเวลา (×1.5)',
-                          sub: `${clerkOtHours} ชั่วโมง`,
-                          detail: `฿${monoNum(clerkHourly)} × 1.5 × ${clerkOtHours} ชม.`,
+                          sub: `${clerkOtHours} ชั่วโมง · ${clerkOtDays} วัน` as string|null,
+                          detail: `฿${monoNum(clerkHourly)} × 1.5 × ${clerkOtHours} ชม. (${clerkOtDays} วัน)`,
                           value: Number(calc.effective_ot) || 0, isOverridden: false,
                         }] : []),
                         ...(isClerk && clerkOt1xHours > 0 ? [{
