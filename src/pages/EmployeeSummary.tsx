@@ -577,16 +577,17 @@ export default function EmployeeSummary() {
                   .map((day, idx) => {
                     const isHoliday = day.dayType === 'holiday'
                     const isWeekend = day.dayType === 'weekend'
-                    const accentColor = isHoliday ? 'var(--vk-persimmon)' : isWeekend ? '#7c3aed' : 'var(--vk-rule)'
+                    const isClerkAbsentWeekday = selectedEmp?.position === 'clerk' && !day.isWorked && !isWeekend && !isHoliday
+                    const accentColor = isHoliday ? 'var(--vk-persimmon)' : isWeekend ? '#7c3aed' : isClerkAbsentWeekday ? '#dc2626' : 'var(--vk-rule)'
 
                     return (
                       <div key={idx} style={{
                         display: 'grid', gridTemplateColumns: '130px 90px 1fr 90px', gap: 8,
                         padding: '9px 32px',
                         borderBottom: '1px solid var(--vk-rule-soft)',
-                        background: day.isWorked ? 'var(--vk-paper)' : 'transparent',
+                        background: day.isWorked ? 'var(--vk-paper)' : isClerkAbsentWeekday ? 'rgba(220,38,38,0.04)' : 'transparent',
                         borderLeft: `3px solid ${accentColor}`,
-                        opacity: day.isWorked ? 1 : 0.45,
+                        opacity: day.isWorked ? 1 : isClerkAbsentWeekday ? 0.85 : 0.45,
                         alignItems: 'center',
                       }}>
                         {/* Date */}
