@@ -90,13 +90,26 @@ export default function Dashboard() {
       const ss = entries.reduce((s, e) => s + Number(e.deduct_social_security||0), 0)
       const ssCount = entries.filter(e => Number(e.deduct_social_security||0) > 0).length
       const totalDeduct = entries.reduce((s, e) => s + Number(e.deduct_social_security||0) + Number(e.deduct_advance||0) + Number(e.deduct_safety_equipment||0) + Number(e.deduct_uniform||0), 0)
-      const net = gross - totalDeduct
+      const rawNet = gross - totalDeduct
+      // Per-employee clamped net: negative entries become 0, deficit carries to next period
+      let net = 0, carryOver = 0
+      for (const e of entries) {
+        const income = Number(e.amount_normal||0) + Number(e.amount_shift||0) + Number(e.amount_ot||0)
+          + Number(e.amount_wood_excess||0) + Number(e.amount_film||0)
+          + Number(e.override_special ?? e.amount_special ?? 0)
+          + Number(e.amount_diligence||0) + Number(e.amount_position||0)
+        const deduct = Number(e.deduct_social_security||0) + Number(e.deduct_advance||0) + Number(e.deduct_safety_equipment||0) + Number(e.deduct_uniform||0)
+        const entryNet = income - deduct
+        if (entryNet < 0) carryOver += Math.abs(entryNet)
+        else net += entryNet
+      }
+      void rawNet
       const adv = advances.data?.reduce((s, a) => s + Number(a.amount), 0) ?? 0
       const advCount = advances.data?.length ?? 0
       const uniqueDays = new Set(shifts.data?.map(d => d.work_date)).size
       const start = parseLocal(activePeriod.period_start), end = parseLocal(activePeriod.period_end)
       const totalDays = Math.ceil((end.getTime()-start.getTime())/86400000)+1
-      return { gross, ss, ssCount, net, adv, advCount, uniqueDays, totalDays }
+      return { gross, ss, ssCount, net, carryOver, adv, advCount, uniqueDays, totalDays }
     },
     enabled: !!activePeriod,
     staleTime: 0,
@@ -278,14 +291,14 @@ export default function Dashboard() {
         ) : (
           <>
             {/* Stats row */}
-            <div className="vk-grid-4" style={{ marginBottom: 36 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', marginBottom: (stats?.carryOver ?? 0) > 0 ? 0 : 36 }}>
               {[
                 { eyebrow: 'พนักงานทั้งหมด', value: String(activeEmployeeCount), sub: 'คน (สถานะปกติ)', color: 'var(--vk-ink)' },
                 { eyebrow: 'ยอดจ่ายรวม',    value: (stats?.gross ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 }), sub: 'บาท', color: 'var(--vk-jade)' },
                 { eyebrow: 'ประกันสังคม',    value: (stats?.ss   ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 }), sub: 'บาท', color: 'var(--vk-ink-3)' },
                 { eyebrow: 'ยอดจ่ายสุทธิ',  value: (stats?.net  ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 }), sub: 'บาท', color: 'var(--vk-persimmon)' },
               ].map((s, i) => (
-                <div key={i} style={{ padding: '18px 20px', background: 'var(--vk-bone)' }}>
+                <div key={i} style={{ padding: '18px 20px', background: 'var(--vk-bone)', borderRight: i < 3 ? '1px solid var(--vk-rule)' : undefined }}>
                   <div className="vk-eyebrow" style={{ marginBottom: 10 }}>{s.eyebrow}</div>
                   <div style={{ fontFamily: 'var(--vk-mono)', fontWeight: 600, fontSize: 28, letterSpacing: '-0.025em', color: s.color, fontVariantNumeric: 'tabular-nums', lineHeight: 1.1, marginBottom: 4 }}>
                     {s.value}
@@ -294,6 +307,24 @@ export default function Dashboard() {
                 </div>
               ))}
             </div>
+
+            {/* Carry-over card — only shown when there are negative net entries */}
+            {(stats?.carryOver ?? 0) > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 20, padding: '14px 20px', background: 'var(--vk-crimson-tint)', border: '1px solid var(--vk-crimson)', borderTop: 'none', marginBottom: 36 }}>
+                <div style={{ flex: 1 }}>
+                  <div className="vk-eyebrow" style={{ color: 'var(--vk-crimson)', marginBottom: 4 }}>ยอดยกไปงวดหน้า</div>
+                  <div style={{ fontFamily: 'var(--vk-sans)', fontSize: 13, color: 'var(--vk-crimson)', opacity: 0.8 }}>
+                    พนักงานบางรายมียอดเบิกล่วงหน้าเกินค่าจ้างงวดนี้ — จ่ายจริง ฿0 และยอดส่วนเกินจะถูกหักในงวดถัดไป
+                  </div>
+                </div>
+                <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                  <div style={{ fontFamily: 'var(--vk-mono)', fontWeight: 700, fontSize: 22, color: 'var(--vk-crimson)', letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>
+                    − {(stats?.carryOver ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                  </div>
+                  <div className="vk-small" style={{ color: 'var(--vk-crimson)', opacity: 0.7 }}>บาท</div>
+                </div>
+              </div>
+            )}
 
             {/* Progress + Status */}
             <div className="vk-grid-2">

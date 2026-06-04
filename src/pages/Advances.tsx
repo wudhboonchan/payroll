@@ -61,6 +61,7 @@ export default function Advances() {
     }, enabled: !!user?.factory_id,
   })
   const currentPeriod = periods[0]
+  const prevPeriod = periods[1] ?? null
 
   const { data: employees = [] } = useQuery<any[]>({
     queryKey: ['employees', user?.factory_id],
@@ -79,8 +80,40 @@ export default function Advances() {
     }, enabled: !!currentPeriod,
   })
 
+  // Auto-compute carryovers from previous period's payroll entries
+  const { data: prevEntries = [] } = useQuery<any[]>({
+    queryKey: ['prev-entries-for-carryover', prevPeriod?.id],
+    queryFn: async () => {
+      if (!prevPeriod) return []
+      const { data, error } = await supabase.from('payroll_entries')
+        .select('employee_id,amount_normal,amount_shift,amount_ot,amount_wood_excess,amount_film,amount_special,amount_diligence,amount_position,override_special,deduct_social_security,deduct_advance,deduct_safety_equipment,deduct_uniform,employee:employees(id,employee_code,first_name,last_name,nationality)')
+        .eq('period_id', prevPeriod.id)
+      if (error) throw error
+      return data ?? []
+    },
+    enabled: !!prevPeriod,
+  })
+
+  // Compute per-employee deficit from previous period
+  const autoCarryovers = prevEntries
+    .map(e => {
+      const income = Number(e.amount_normal||0) + Number(e.amount_shift||0) + Number(e.amount_ot||0)
+        + Number(e.amount_wood_excess||0) + Number(e.amount_film||0)
+        + Number(e.override_special ?? e.amount_special ?? 0)
+        + Number(e.amount_diligence||0) + Number(e.amount_position||0)
+      const deduct = Number(e.deduct_social_security||0) + Number(e.deduct_advance||0) + Number(e.deduct_safety_equipment||0) + Number(e.deduct_uniform||0)
+      const net = income - deduct
+      return { employee_id: e.employee_id, deficit: net < 0 ? Math.abs(net) : 0, employee: e.employee }
+    })
+    .filter(e => e.deficit > 0)
+
   const carryovers = advances.filter(a => a.is_carryover)
   const regularAdvances = advances.filter(a => !a.is_carryover)
+
+  // Pending = auto-carryovers not yet recorded for this period
+  const savedCarryoverEmpIds = new Set(carryovers.map(a => a.employee_id))
+  const pendingCarryovers = autoCarryovers.filter(e => !savedCarryoverEmpIds.has(e.employee_id))
+
   const totalCarryover = carryovers.reduce((s, a) => s + Number(a.amount), 0)
   const totalRegular = regularAdvances.reduce((s, a) => s + Number(a.amount), 0)
   const totalAdv = totalCarryover + totalRegular
@@ -108,6 +141,27 @@ export default function Advances() {
       queryClient.invalidateQueries({ queryKey: ['advances'] })
       toast.success(isEdit ? 'อัปเดตรายการแล้ว' : 'บันทึกการเบิกล่วงหน้าแล้ว')
       closeModal()
+    },
+    onError: (e: Error) => toast.error('บันทึกไม่สำเร็จ', { description: e.message }),
+  })
+
+  const bulkCarryoverMutation = useMutation({
+    mutationFn: async () => {
+      if (!currentPeriod || pendingCarryovers.length === 0) return
+      const rows = pendingCarryovers.map(e => ({
+        period_id: currentPeriod.id,
+        employee_id: e.employee_id,
+        amount: e.deficit,
+        notes: 'ยอดเบิกเกินค้างจากงวดก่อน',
+        is_carryover: true,
+      }))
+      const { error } = await supabase.from('advance_payments').insert(rows)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['advances-v2'] })
+      queryClient.invalidateQueries({ queryKey: ['advances'] })
+      toast.success(`บันทึกยอดตกค้าง ${pendingCarryovers.length} รายการแล้ว`)
     },
     onError: (e: Error) => toast.error('บันทึกไม่สำเร็จ', { description: e.message }),
   })
@@ -140,10 +194,13 @@ export default function Advances() {
             )}
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button className="vk-btn vk-btn--ghost" onClick={() => openCreate('carryover')} disabled={!currentPeriod}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, borderColor: '#d97706', color: '#92400e' }}>
-              <AlertTriangle style={{ width: 13, height: 13 }} /> บันทึกยอดค้างจากงวดก่อน
-            </button>
+            {pendingCarryovers.length > 0 && (
+              <button className="vk-btn vk-btn--ghost" onClick={() => bulkCarryoverMutation.mutate()} disabled={bulkCarryoverMutation.isPending}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, borderColor: '#d97706', color: '#92400e' }}>
+                <AlertTriangle style={{ width: 13, height: 13 }} />
+                {bulkCarryoverMutation.isPending ? 'กำลังบันทึก...' : `บันทึกยอดค้าง ${pendingCarryovers.length} รายการ`}
+              </button>
+            )}
             <button className="vk-btn vk-btn--primary" onClick={() => openCreate('advance')} disabled={!currentPeriod}>
               <Plus style={{ width: 15, height: 15 }} /> เพิ่มรายการเบิก
             </button>
@@ -173,6 +230,45 @@ export default function Advances() {
             </tr>
           </thead>
           <tbody>
+
+            {/* ── section: ยอดตกค้างอัตโนมัติ (ยังไม่บันทึก) ── */}
+            {pendingCarryovers.length > 0 && (
+              <>
+                <tr>
+                  <td colSpan={5} style={{ padding: '8px 14px', background: '#fef9ec', borderBottom: '1px solid #fde68a', borderLeft: '3px dashed #d97706' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontFamily: 'var(--vk-sans)', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#92400e' }}>
+                        <AlertTriangle style={{ width: 12, height: 12 }} />
+                        ยอดตกค้างจากงวดก่อน (อัตโนมัติ) — {pendingCarryovers.length} รายการ · ยังไม่บันทึก
+                      </span>
+                      <button className="vk-btn vk-btn--ghost" onClick={() => bulkCarryoverMutation.mutate()} disabled={bulkCarryoverMutation.isPending}
+                        style={{ fontSize: 11, padding: '3px 10px', borderColor: '#d97706', color: '#92400e', height: 26 }}>
+                        {bulkCarryoverMutation.isPending ? 'กำลังบันทึก...' : 'บันทึกทั้งหมด'}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+                {pendingCarryovers.map(e => {
+                  const emp = e.employee as any
+                  return (
+                    <tr key={e.employee_id} style={{ borderBottom: '1px solid #fde68a', background: '#fef9ec', borderLeft: '3px dashed #d97706', opacity: 0.85 }}>
+                      <td style={{ padding: '13px 14px', fontFamily: 'var(--vk-mono)', fontSize: 12, color: '#92400e' }}>{emp?.employee_code}</td>
+                      <td style={{ padding: '13px 14px', fontWeight: 600, fontSize: 14, color: '#78350f' }}>
+                        {emp?.first_name} {emp?.last_name}{fmtNationality(emp?.nationality) ? ` (${fmtNationality(emp?.nationality)})` : ''}
+                      </td>
+                      <td style={{ padding: '13px 14px', fontSize: 13, color: '#92400e', fontStyle: 'italic' }}>ยอดเบิกเกินค้างจากงวดก่อน</td>
+                      <td style={{ padding: '13px 14px', textAlign: 'right', fontFamily: 'var(--vk-mono)', fontSize: 14, fontVariantNumeric: 'tabular-nums', color: '#b45309', fontWeight: 700 }}>
+                        – {e.deficit.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                      </td>
+                      <td style={{ padding: '13px 14px', textAlign: 'right' }}>
+                        <span style={{ fontSize: 11, color: '#b45309', fontStyle: 'italic' }}>รอบันทึก</span>
+                      </td>
+                    </tr>
+                  )
+                })}
+                <tr><td colSpan={5} style={{ padding: 0, height: 16, background: 'var(--vk-paper)' }} /></tr>
+              </>
+            )}
 
             {/* ── section: ยอดตกค้าง ── */}
             {carryovers.length > 0 && (
