@@ -6,7 +6,8 @@ import { toast } from 'sonner'
 import {
   LayoutDashboard, Users, CalendarClock, Calculator,
   CreditCard, FileText, Download, LogOut,
-  Link2, UserCog, ChevronDown, X, Menu, KeyRound, Eye, EyeOff
+  Link2, UserCog, ChevronDown, X, Menu, KeyRound, Eye, EyeOff,
+  ClipboardList
 } from 'lucide-react'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
@@ -22,6 +23,7 @@ const NAV = [
   { href: '/advances',   label: 'เบิกล่วงหน้า',      icon: CreditCard,      roles: ['admin','superUser'] },
   { href: '/payroll',    label: 'กรอกค่าจ้าง',       icon: Calculator,      roles: ['admin','superUser'] },
   { href: '/payslip',    label: 'ดูสลิปเงินเดือน',   icon: FileText,        roles: ['admin','superUser','normalUser'] },
+  { href: '/employee-summary', label: 'สรุปภาพรวมพนักงาน', icon: ClipboardList, roles: ['admin','superUser','normalUser'] },
   { href: '/share-links',label: 'ลิงก์สลิปพนักงาน',  icon: Link2,           roles: ['admin','superUser','normalUser'] },
   { href: '/export',     label: 'ส่งออกข้อมูล',      icon: Download,        roles: ['admin','superUser','normalUser'] },
   { href: '/users',      label: 'จัดการผู้ใช้งาน',   icon: UserCog,         roles: ['admin'] },
@@ -163,18 +165,16 @@ export function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
         {/* User */}
         <div style={{ padding: '10px 12px', borderTop: '1px solid var(--vk-rule-soft)' }}>
           <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 8, background: 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left' }}
-                className="hover:bg-[--vk-paper-2]">
-                <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--vk-persimmon-tint)', color: 'var(--vk-persimmon-ink)', display: 'grid', placeItems: 'center', fontWeight: 700, fontSize: 13, flexShrink: 0, fontFamily: 'var(--vk-sans)' }}>
-                  {user?.full_name?.charAt(0) || 'U'}
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--vk-ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{user?.full_name || 'ผู้ใช้งาน'}</div>
-                  <div style={{ fontSize: 11, color: 'var(--vk-ink-3)' }}>{user?.role === 'superUser' ? 'SuperAdmin' : user?.role === 'normalUser' ? 'User' : user?.role}</div>
-                </div>
-                <ChevronDown style={{ width: 14, height: 14, color: 'var(--vk-ink-3)', flexShrink: 0 }} />
-              </button>
+            <DropdownMenuTrigger style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 8, background: 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left' }}
+              className="hover:bg-[--vk-paper-2]">
+              <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--vk-persimmon-tint)', color: 'var(--vk-persimmon-ink)', display: 'grid', placeItems: 'center', fontWeight: 700, fontSize: 13, flexShrink: 0, fontFamily: 'var(--vk-sans)' }}>
+                {user?.full_name?.charAt(0) || 'U'}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--vk-ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{user?.full_name || 'ผู้ใช้งาน'}</div>
+                <div style={{ fontSize: 11, color: 'var(--vk-ink-3)' }}>{user?.role === 'superUser' ? 'SuperAdmin' : user?.role === 'normalUser' ? 'User' : user?.role}</div>
+              </div>
+              <ChevronDown style={{ width: 14, height: 14, color: 'var(--vk-ink-3)', flexShrink: 0 }} />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" side="top" className="w-52 mb-1">
               <DropdownMenuItem onClick={() => { setShowPwModal(true); setPwError(''); setPwForm({ current: '', next: '', confirm: '' }) }} className="flex items-center gap-2 cursor-pointer">

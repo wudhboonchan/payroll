@@ -14,6 +14,7 @@ import ShareLinks from './pages/ShareLinks'
 import EmployeeSlipPage from './pages/EmployeeSlip'
 import LiffSlip from './pages/LiffSlip'
 import UserManagement from './pages/UserManagement'
+import EmployeeSummary from './pages/EmployeeSummary'
 import { AppLayout, RequireAuth } from './components/layout/AppLayout'
 
 // Created once outside component to prevent re-instantiation on re-render
@@ -58,6 +59,7 @@ function App() {
                 </Route>
                 <Route element={<RequireAuth allowedRoles={['admin', 'superUser', 'normalUser']} />}>
                   <Route path="/payslip"    element={<PaySlip />} />
+                  <Route path="/employee-summary" element={<EmployeeSummary />} />
                   <Route path="/share-links" element={<ShareLinks />} />
                   <Route path="/export"     element={<Export />} />
                 </Route>

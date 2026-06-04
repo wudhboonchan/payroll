@@ -201,6 +201,10 @@ export default function Advances() {
                 {bulkCarryoverMutation.isPending ? 'กำลังบันทึก...' : `บันทึกยอดค้าง ${pendingCarryovers.length} รายการ`}
               </button>
             )}
+            <button className="vk-btn vk-btn--ghost" onClick={() => openCreate('carryover')} disabled={!currentPeriod}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, borderColor: '#d97706', color: '#92400e' }}>
+              <AlertTriangle style={{ width: 13, height: 13 }} /> บันทึกยอดค้างจากงวดก่อน
+            </button>
             <button className="vk-btn vk-btn--primary" onClick={() => openCreate('advance')} disabled={!currentPeriod}>
               <Plus style={{ width: 15, height: 15 }} /> เพิ่มรายการเบิก
             </button>
