@@ -268,12 +268,7 @@ export default function PayrollEntry() {
         [advTotal,                     Number(entry.deduct_advance)],
         [c.deduct_social_security,     Number(entry.deduct_social_security)],
       ]
-      const failedChecks = checks.filter(([a, b]) => Math.abs(a - b) > eps)
-      if (failedChecks.length > 0) {
-        const labels = ['amount_normal','amount_shift','amount_ot','wood','film','special','advance','deduct_ss']
-        console.log(`[outdated] ${emp.employee_code}:`, failedChecks.map(([a,b],i) => `${labels[checks.findIndex(c=>c===failedChecks[i])]}: calc=${a} saved=${b}`))
-        set.add(emp.id)
-      }
+      if (checks.some(([a, b]) => Math.abs(a - b) > eps)) set.add(emp.id)
     }
     return set
   }, [allEntries, allShifts, allAdvances, employees, currentPeriod])

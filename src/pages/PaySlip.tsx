@@ -192,10 +192,20 @@ export default function PaySlip() {
   const { data: allShifts = [] } = useQuery<any[]>({
     queryKey: ['payslip-all-shifts', currentPeriod?.id],
     queryFn: async () => {
-      const { data, error } = await supabase.from('shift_assignments' as any)
-        .select('employee_id,work_date,is_holiday_ot,is_holiday_ot_exempt,is_half_shift,actual_hours,ot_hours')
-        .eq('period_id', currentPeriod.id)
-      if (error) throw error; return data
+      const PAGE = 1000
+      let all: any[] = []
+      let from = 0
+      while (true) {
+        const { data, error } = await supabase.from('shift_assignments' as any)
+          .select('employee_id,work_date,is_holiday_ot,is_holiday_ot_exempt,is_half_shift,actual_hours,ot_hours')
+          .eq('period_id', currentPeriod.id)
+          .range(from, from + PAGE - 1)
+        if (error) throw error
+        all = all.concat(data ?? [])
+        if (!data || data.length < PAGE) break
+        from += PAGE
+      }
+      return all
     }, enabled: !!currentPeriod?.id, staleTime: 0,
   })
   const empShifts = allShifts.filter((s: any) => s.employee_id === selectedEmpId)
@@ -234,11 +244,17 @@ export default function PaySlip() {
   // Recalculate from current rate+shifts and compare to saved amounts
   let isOutdated = false
   if (entry && selectedEmp && empShifts.length > 0) {
+    const periodDays = currentPeriod ? (() => {
+      const s = new Date(currentPeriod.period_start + 'T00:00:00')
+      const e = new Date(currentPeriod.period_end + 'T00:00:00')
+      return Math.round((e.getTime() - s.getTime()) / 86400000) + 1
+    })() : undefined
     const c = calculatePayroll({
       position: selectedEmp.position as 'worker' | 'clerk',
       wage_type: selectedEmp.wage_type as 'daily' | 'monthly',
       rate_per_12h: empRate,
       normal_days: empIsClerk ? clerkNorm : normDays,
+      period_days: empIsClerk ? periodDays : undefined,
       half_shift_days: empIsClerk ? 0 : halfDays,
       holiday_ot_full_days: holFull, holiday_ot_half_days: holHalf,
       partial_hours_total: empIsClerk ? 0 : partialHrs,
