@@ -616,6 +616,9 @@ export default function EmployeeSummary() {
                               {selectedEmp?.position === 'clerk' && day.otPay === 0 && (
                                 <span style={{ fontSize: 11, color: 'var(--vk-ink-3)' }}>ทำงานปกติ</span>
                               )}
+                              {selectedEmp?.position === 'clerk' && day.otPay > 0 && (
+                                <span style={{ fontFamily: 'var(--vk-mono)', fontSize: 10, color: 'var(--vk-ink-3)' }}>{day.hours} ชม.</span>
+                              )}
                             </div>
                           ) : (
                             <span style={{ fontSize: 11, color: 'var(--vk-ink-3)', fontStyle: 'italic' }}>หยุด</span>
