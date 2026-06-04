@@ -30,6 +30,7 @@ interface AssignedEmp {
   isHolidayOTExempt: boolean; isCrossPosition: boolean
   crossPositionTitle: string; crossPositionExtraPay: number
   isNew: boolean
+  isAutoAssigned: boolean  // clerk auto-placed Mon-Fri; user confirms or removes
   rate_per_12h: number
 }
 
@@ -162,10 +163,29 @@ export default function ShiftEntry() {
           crossPositionTitle: a.cross_position_title || '',
           crossPositionExtraPay: Number(a.cross_position_extra_pay ?? 0),
           isNew: false,
+          isAutoAssigned: false,
           rate_per_12h: Number(emp.rate_per_12h ?? 0),
         }
       })
-    setAssignments(mapped)
+
+    // Auto-assign clerks to morning shift on weekdays (Mon-Fri)
+    const assignedIds = new Set(mapped.map(a => a.employee_id))
+    const isWeekday = !weekend
+    const autoAssigned: AssignedEmp[] = (!isWeekday || isHoliday) ? [] : employees
+      .filter(e => e.position === 'clerk' && !assignedIds.has(e.id))
+      .map(e => ({
+        employee_id: e.id, shift_type: 'morning',
+        code: e.employee_code, name: empName(e),
+        nationality: e.nationality ?? null,
+        isClerk: true, isHalfShift: false, partialHours: 0,
+        woodExcess: 0, filmAmount: 0, otHours: 0,
+        isHolidayOTExempt: false, isCrossPosition: false,
+        crossPositionTitle: '', crossPositionExtraPay: 0,
+        isNew: false, isAutoAssigned: true,
+        rate_per_12h: Number(e.rate_per_12h ?? 0),
+      }))
+
+    setAssignments([...mapped, ...autoAssigned])
     if (rawAssignments.length > 0) setIsHoliday((rawAssignments[0] as any).is_holiday_ot ?? false)
     else setIsHoliday(false)
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -247,6 +267,7 @@ export default function ShiftEntry() {
         woodExcess: 0, filmAmount: 0, otHours: 0,
         isHolidayOTExempt: false, isCrossPosition: false,
         crossPositionTitle: '', crossPositionExtraPay: 0, isNew: true,
+        isAutoAssigned: false,
         rate_per_12h: Number(emp.rate_per_12h ?? 0),
       }
     })
@@ -262,6 +283,10 @@ export default function ShiftEntry() {
         setClerkQueue(clerks.slice(1))
       }
     }
+  }
+
+  const handleConfirmAuto = (empId: string) => {
+    setAssignments(prev => prev.map(a => a.employee_id === empId ? { ...a, isAutoAssigned: false } : a))
   }
 
   const handleRemove = (empId: string) => {
@@ -522,15 +547,18 @@ export default function ShiftEntry() {
                 <div className="vk-shift-list-scroll">
                   {shiftEmps.map(emp => (
                     <div key={emp.employee_id}
-                       onClick={e => { e.stopPropagation(); setDetailEmp(emp) }}
+                       onClick={e => { e.stopPropagation(); if (!emp.isAutoAssigned) setDetailEmp(emp) }}
                        style={{
                          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                         padding: '8px 12px', background: 'var(--vk-paper)',
-                         border: '1px solid var(--vk-rule-soft)', cursor: 'pointer',
+                         padding: '8px 12px',
+                         background: emp.isAutoAssigned ? 'rgba(0,0,0,0.02)' : 'var(--vk-paper)',
+                         border: `1px solid ${emp.isAutoAssigned ? 'var(--vk-rule-soft)' : 'var(--vk-rule-soft)'}`,
+                         opacity: emp.isAutoAssigned ? 0.7 : 1,
+                         cursor: emp.isAutoAssigned ? 'default' : 'pointer',
                          transition: 'border-color 120ms',
                        }}
-                       onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--vk-persimmon)')}
-                       onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--vk-rule-soft)')}>
+                       onMouseEnter={e => { if (!emp.isAutoAssigned) e.currentTarget.style.borderColor = 'var(--vk-persimmon)' }}
+                       onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--vk-rule-soft)' }}>
                       <div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                           <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--vk-ink)' }}>
@@ -538,6 +566,9 @@ export default function ShiftEntry() {
                           </span>
                           {emp.isClerk && (
                             <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 999, background: 'rgba(177,71,41,0.12)', color: 'var(--vk-persimmon)', letterSpacing: '0.04em', flexShrink: 0 }}>เสมียน</span>
+                          )}
+                          {emp.isAutoAssigned && (
+                            <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 999, background: 'rgba(0,120,80,0.1)', color: '#065f46', letterSpacing: '0.04em', flexShrink: 0 }}>รอยืนยัน</span>
                           )}
                         </div>
                         <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 3 }}>
@@ -552,10 +583,20 @@ export default function ShiftEntry() {
                           {emp.isCrossPosition && <Pill color="jade">สลับตำแหน่ง</Pill>}
                         </div>
                       </div>
+                      <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+                        {emp.isAutoAssigned && (
+                          <button onClick={e => { e.stopPropagation(); handleConfirmAuto(emp.employee_id) }}
+                            title="ยืนยันมาทำงาน"
+                            style={{ background: 'rgba(0,120,80,0.1)', border: '1px solid rgba(0,120,80,0.25)', cursor: 'pointer', color: '#065f46', padding: '3px 8px', borderRadius: 4, fontSize: 12, fontWeight: 700, display: 'flex', alignItems: 'center' }}>
+                            ✓
+                          </button>
+                        )}
                       <button onClick={e => { e.stopPropagation(); handleRemove(emp.employee_id) }}
+                        title={emp.isAutoAssigned ? 'ไม่มาทำงาน' : 'ลบออก'}
                         style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--vk-ink-3)', padding: 4, display: 'flex', flexShrink: 0 }}>
                         <X style={{ width: 14, height: 14 }} />
                       </button>
+                      </div>
                     </div>
                   ))}
                   {canDrop && (

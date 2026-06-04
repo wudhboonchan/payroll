@@ -184,14 +184,6 @@ export default function EmployeeSummary() {
     const clerkDaily = rate / 30
     const clerkHourly = clerkDaily / 8
 
-    // Clerk base: monthly/30 × period_days, distributed evenly across worked weekdays
-    const periodDays = dates.length
-    const clerkWeekdaysWorked = isClerk
-      ? empShifts.filter(s => !isWeekendDate(s.work_date)).length
-      : 0
-    const clerkPeriodBase = isClerk ? clerkDaily * periodDays : 0
-    const clerkBasePerDay = clerkWeekdaysWorked > 0 ? clerkPeriodBase / clerkWeekdaysWorked : 0
-
     return dates.map(dateStr => {
       const shift = empShifts.find(s => s.work_date === dateStr)
       const weekend = isWeekendDate(dateStr)
@@ -231,7 +223,7 @@ export default function EmployeeSummary() {
           baseWage = 0
           otPay = clerkHourly * 1.0 * (shift.ot_hours || 0)
         } else {
-          baseWage = clerkBasePerDay
+          baseWage = 0  // clerk base shown as period total, not per-day
           otPay = clerkHourly * 1.5 * (shift.ot_hours || 0)
         }
       } else {
@@ -292,6 +284,14 @@ export default function EmployeeSummary() {
     })
   }, [selectedEmp, currentPeriod, empShifts])
 
+  // Clerk period base (monthly/30 × period_days) — shown as a single period-level item
+  const clerkPeriodBase = useMemo(() => {
+    if (!selectedEmp || selectedEmp.position !== 'clerk' || !currentPeriod) return 0
+    const rate = Number(selectedEmp.rate_per_12h) || 0
+    const days = getDatesInRange(currentPeriod.period_start, currentPeriod.period_end).length
+    return (rate / 30) * days
+  }, [selectedEmp, currentPeriod])
+
   // Summarize daily estimates for UI stats
   const stats = useMemo(() => {
     const workedDaysList = dailyEstimates.filter(d => d.isWorked)
@@ -311,7 +311,7 @@ export default function EmployeeSummary() {
     const entryPosition = Number(empEntry?.amount_position || 0)
     const entrySpecial = Number(empEntry?.amount_special || 0) + Number(empEntry?.override_special || 0)
 
-    const grossEarnings = estBaseWages + estShiftAllowances + estOtPay + estWood + estFilm + estCross + entryDiligence + entryPosition + entrySpecial
+    const grossEarnings = clerkPeriodBase + estBaseWages + estShiftAllowances + estOtPay + estWood + estFilm + estCross + entryDiligence + entryPosition + entrySpecial
 
     // Deductions
     const entrySS = Number(empEntry?.deduct_social_security || 0)
@@ -346,7 +346,7 @@ export default function EmployeeSummary() {
       netEarnings,
       totalSpecialAllowances,
     }
-  }, [dailyEstimates, empEntry, empAdvances])
+  }, [dailyEstimates, empEntry, empAdvances, clerkPeriodBase])
 
   // Collect itemized list of special allowances and extra pay chronologically
   const itemizedSpecialIncomes = useMemo(() => {
@@ -603,14 +603,21 @@ export default function EmployeeSummary() {
                           )}
                         </div>
 
-                        {/* Shift */}
+                        {/* Shift — clerks always morning, no label needed */}
                         <div>
                           {day.isWorked ? (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                              <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 6px', background: day.shiftType === 'morning' ? 'rgba(216,154,42,0.15)' : 'rgba(74,110,138,0.15)', color: day.shiftType === 'morning' ? '#a16207' : '#1e6091', display: 'inline-block' }}>
-                                {day.shiftType === 'morning' ? 'เช้า' : day.shiftType === 'afternoon' ? 'บ่าย' : 'เข้า'}
-                              </span>
-                              <span style={{ fontFamily: 'var(--vk-mono)', fontSize: 10, color: 'var(--vk-ink-3)' }}>{day.hours} ชม.</span>
+                              {selectedEmp?.position !== 'clerk' && (
+                                <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 6px', background: day.shiftType === 'morning' ? 'rgba(216,154,42,0.15)' : 'rgba(74,110,138,0.15)', color: day.shiftType === 'morning' ? '#a16207' : '#1e6091', display: 'inline-block' }}>
+                                  {day.shiftType === 'morning' ? 'เช้า' : day.shiftType === 'afternoon' ? 'บ่าย' : 'เข้า'}
+                                </span>
+                              )}
+                              {selectedEmp?.position !== 'clerk' && (
+                                <span style={{ fontFamily: 'var(--vk-mono)', fontSize: 10, color: 'var(--vk-ink-3)' }}>{day.hours} ชม.</span>
+                              )}
+                              {selectedEmp?.position === 'clerk' && day.otPay === 0 && (
+                                <span style={{ fontSize: 11, color: 'var(--vk-ink-3)' }}>ทำงานปกติ</span>
+                              )}
                             </div>
                           ) : (
                             <span style={{ fontSize: 11, color: 'var(--vk-ink-3)', fontStyle: 'italic' }}>หยุด</span>
@@ -623,7 +630,9 @@ export default function EmployeeSummary() {
                             <>
                               {day.baseWage > 0 && <span style={chipStyle('#374151', '#f3f4f6')}>ค่าจ้าง ฿{monoNum(day.baseWage)}</span>}
                               {day.shiftAllowance > 0 && <span style={chipStyle('#065f46', '#d1fae5')}>ค่ากะ +฿{monoNum(day.shiftAllowance)}</span>}
-                              {day.otPay > 0 && <span style={chipStyle('#4c1d95', '#ede9fe')}>OT +฿{monoNum(day.otPay)}</span>}
+                              {/* OT 1.5x weekday = purple, OT 1x weekend = blue */}
+                              {day.otPay > 0 && day.dayType !== 'weekend' && <span style={chipStyle('#4c1d95', '#ede9fe')}>OT ×1.5 +฿{monoNum(day.otPay)}</span>}
+                              {day.otPay > 0 && day.dayType === 'weekend' && <span style={chipStyle('#1e40af', '#dbeafe')}>OT ×1 +฿{monoNum(day.otPay)}</span>}
                               {day.woodExcess > 0 && <span style={chipStyle('#92400e', '#fef3c7')}>ไม้ส่วนเกิน +฿{monoNum(day.woodExcess)}</span>}
                               {day.filmAmount > 0 && <span style={chipStyle('#92400e', '#fef3c7')}>ฟิล์ม +฿{monoNum(day.filmAmount)}</span>}
                               {day.crossPay > 0 && <span style={chipStyle('#065f46', '#d1fae5')} title={day.crossTitle}>สลับตำแหน่ง ({day.crossTitle}) +฿{monoNum(day.crossPay)}</span>}
@@ -642,12 +651,21 @@ export default function EmployeeSummary() {
                   })}
               </div>
 
-              {/* ── D. Period-level income (bonuses etc.) ── */}
-              {(stats.entryDiligence > 0 || stats.entryPosition > 0 || stats.entrySpecial > 0) && (
+              {/* ── D. Period-level income (clerk base + bonuses) ── */}
+              {(clerkPeriodBase > 0 || stats.entryDiligence > 0 || stats.entryPosition > 0 || stats.entrySpecial > 0) && (
                 <div style={{ borderTop: '2px solid var(--vk-rule)', background: 'var(--vk-paper)' }}>
                   <div style={{ padding: '10px 32px 7px', display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--vk-jade)' }}>รายได้เพิ่มเติมประจำงวด</div>
+                    <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--vk-jade)' }}>รายได้ประจำงวด</div>
                   </div>
+                  {clerkPeriodBase > 0 && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '130px 90px 1fr 90px', gap: 8, padding: '8px 32px', borderTop: '1px solid var(--vk-rule-soft)', alignItems: 'center', borderLeft: '3px solid var(--vk-jade)' }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--vk-ink)', gridColumn: '1 / 3' }}>
+                        ค่าจ้างพื้นฐาน ({currentPeriod ? getDatesInRange(currentPeriod.period_start, currentPeriod.period_end).length : 0} วัน)
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--vk-ink-3)', fontStyle: 'italic' }}>เงินเดือน ÷ 30 × จำนวนวันในงวด</div>
+                      <div style={{ textAlign: 'right', fontFamily: 'var(--vk-mono)', fontSize: 13, fontWeight: 700, color: 'var(--vk-jade)' }}>฿{monoNum(clerkPeriodBase)}</div>
+                    </div>
+                  )}
                   {[
                     { label: 'เบี้ยขยัน', val: stats.entryDiligence, note: '' },
                     { label: 'ค่าตำแหน่งงาน', val: stats.entryPosition, note: '' },
