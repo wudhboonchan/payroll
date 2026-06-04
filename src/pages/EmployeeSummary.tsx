@@ -218,7 +218,7 @@ export default function EmployeeSummary() {
       let otPay = 0
 
       if (isClerk) {
-        hours = 8 + (shift.ot_hours || 0)
+        hours = weekend ? (shift.ot_hours || 0) : 8 + (shift.ot_hours || 0)
         if (weekend) {
           baseWage = 0
           otPay = clerkHourly * 1.0 * (shift.ot_hours || 0)
