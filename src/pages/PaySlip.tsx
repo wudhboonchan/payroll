@@ -300,11 +300,17 @@ export default function PaySlip() {
     const otDays  = !empIsClerk && empRate > 0 ? Math.round(amtOtRaw / (empRate * 2)) : 0
     workingDays = empIsClerk ? (dnDays + daysShift + holFull + holHalf) : (dnDays + holFull + holHalf)
 
-    // Detail lines: workers show formula, clerks show hours only (formula not meaningful to employees)
-    const detailNormal = !isOutdated && dnDays > 0 && !empIsClerk ? `฿${baseNormal} × ${dnDays} วัน` : null
+    // Detail lines with formula for all employee types
+    const detailNormal = !isOutdated && dnDays > 0
+      ? (empIsClerk ? `฿${Math.round(clerkDaily)} × ${dnDays} วัน` : `฿${baseNormal} × ${dnDays} วัน`)
+      : null
     const detailShift  = !isOutdated && dsDays > 0 && !empIsClerk ? `฿${Math.round(baseShift)} × ${dsDays} วัน` : null
-    const detailOt     = !isOutdated && !empIsClerk && otDays > 0 ? `฿${empRate} × 2 × ${otDays} วัน` : null
-    const detailOt1x   = null  // clerk OT: no formula detail on slip
+    const detailOt     = !isOutdated
+      ? (empIsClerk && otHrs  > 0 ? `฿${clerkHourly.toFixed(2)} × 1.5 × ${otHrs} ชม.`  : null)
+      || (!empIsClerk && otDays > 0 ? `฿${empRate} × 2 × ${otDays} วัน`                 : null)
+      : null
+    const detailOt1x   = !isOutdated && empIsClerk && ot1Hrs > 0
+      ? `฿${clerkHourly.toFixed(2)} × 1.0 × ${ot1Hrs} ชม. (${daysShift} วัน)` : null
 
     // split special_note by comma into individual sub-lines
     const specialSubs = entry.special_note
