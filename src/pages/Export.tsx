@@ -330,13 +330,13 @@ export default function Export() {
         amount_normal,amount_shift,amount_ot,amount_wood_excess,amount_film,
         amount_special,amount_diligence,amount_position,
         deduct_social_security,deduct_advance,deduct_safety_equipment,deduct_uniform,
-        employee:employees(employee_code,first_name,last_name)
+        employee:employees(employee_code,first_name,last_name,status)
       `).in('period_id', ids).limit(10000)
       if (error) throw error
       if (!data?.length) { toast.error('ไม่พบข้อมูลในช่วงเวลานี้'); return }
 
       const map: Record<string, any> = {}
-      ;(data as any[]).filter(r => r.employee).forEach(r => {
+      ;(data as any[]).filter(r => r.employee && r.employee.status !== 'inactive').forEach(r => {
         const k = r.employee.employee_code
         if (!map[k]) map[k] = { emp: r.employee, n:0,s:0,ot:0,w:0,f:0,sp:0,d:0,p:0,ss:0,adv:0,safe:0,uni:0 }
         map[k].n+=r.amount_normal||0; map[k].s+=r.amount_shift||0; map[k].ot+=r.amount_ot||0
@@ -370,11 +370,11 @@ export default function Export() {
       const XLSX = await import('xlsx')
       const { data, error } = await supabase.from('payroll_entries').select(`
         amount_normal,deduct_social_security,
-        employee:employees(national_id,prefix,first_name,last_name,nationality)
+        employee:employees(national_id,prefix,first_name,last_name,nationality,status)
       `).in('period_id', ids).limit(10000)
       if (error) throw error; if (!data?.length) { toast.error('ไม่พบข้อมูล'); return }
       const map: Record<string,any> = {}
-      ;(data as any[]).filter(r=>r.employee&&(r.employee.nationality||'ไทย')==='ไทย').forEach(r=>{
+      ;(data as any[]).filter(r=>r.employee&&r.employee.status!=='inactive'&&(r.employee.nationality||'ไทย')==='ไทย').forEach(r=>{
         const k=r.employee.national_id||r.employee.first_name
         if(!map[k]) map[k]={emp:r.employee,n:0,ss:0}
         map[k].n+=r.amount_normal||0; map[k].ss+=r.deduct_social_security||0
@@ -426,14 +426,15 @@ export default function Export() {
       // Fetch payroll entries with full employee fields
       let q = supabase.from('payroll_entries').select(`
         *,
-        employee:employees(id,employee_code,first_name,last_name,position,job_title,wage_type,rate_per_12h,payment_method,bank_name,bank_account,nationality),
+        employee:employees(id,employee_code,first_name,last_name,position,job_title,wage_type,rate_per_12h,payment_method,bank_name,bank_account,nationality,status),
         period:payroll_periods(period_start,period_end)
       `).in('period_id', targetPeriodIds).limit(10000)
       if (!isNormalUser && pdfTarget === 'individual') q = q.eq('employee_id', pdfEmpId!)
 
-      const { data: entries, error } = await q
+      const { data: rawEntries, error } = await q
       if (error) throw error
-      if (!entries?.length) { toast.error('ไม่พบข้อมูลสลิปในช่วงที่เลือก'); return }
+      if (!rawEntries?.length) { toast.error('ไม่พบข้อมูลสลิปในช่วงที่เลือก'); return }
+      const entries = (rawEntries as any[]).filter(e => e.employee?.status !== 'inactive')
 
       // Fetch factory name and map to full legal name
       const { data: factoryData } = await supabase.from('factories')
