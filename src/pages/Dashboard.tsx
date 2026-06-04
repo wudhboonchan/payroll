@@ -27,6 +27,7 @@ export default function Dashboard() {
   const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(null)
   const [showCancelConfirm, setShowCancelConfirm] = useState(false)
   const [showDeletePeriodConfirm, setShowDeletePeriodConfirm] = useState(false)
+  const [showCarryOverModal, setShowCarryOverModal] = useState(false)
   const [editingSSRate, setEditingSSRate] = useState(false)
   const [ssRateDraft, setSSRateDraft] = useState('')
 
@@ -75,7 +76,7 @@ export default function Dashboard() {
     queryFn: async () => {
       if (!activePeriod) return null
       const [payroll, shifts, advances] = await Promise.all([
-        supabase.from('payroll_entries').select('amount_normal,amount_shift,amount_ot,amount_wood_excess,amount_film,amount_special,amount_diligence,amount_position,deduct_social_security,deduct_advance,deduct_safety_equipment,deduct_uniform,override_special').eq('period_id', activePeriod.id),
+        supabase.from('payroll_entries').select('employee_id,amount_normal,amount_shift,amount_ot,amount_wood_excess,amount_film,amount_special,amount_diligence,amount_position,deduct_social_security,deduct_advance,deduct_safety_equipment,deduct_uniform,override_special,employee:employees(employee_code,first_name,last_name)').eq('period_id', activePeriod.id),
         supabase.from('shift_assignments').select('work_date').eq('period_id', activePeriod.id),
         supabase.from('advance_payments').select('amount').eq('period_id', activePeriod.id),
       ])
@@ -93,6 +94,7 @@ export default function Dashboard() {
       const rawNet = gross - totalDeduct
       // Per-employee clamped net: negative entries become 0, deficit carries to next period
       let net = 0, carryOver = 0
+      const carryOverDetails: { employee_code: string; first_name: string; last_name: string; deficit: number }[] = []
       for (const e of entries) {
         const income = Number(e.amount_normal||0) + Number(e.amount_shift||0) + Number(e.amount_ot||0)
           + Number(e.amount_wood_excess||0) + Number(e.amount_film||0)
@@ -100,8 +102,11 @@ export default function Dashboard() {
           + Number(e.amount_diligence||0) + Number(e.amount_position||0)
         const deduct = Number(e.deduct_social_security||0) + Number(e.deduct_advance||0) + Number(e.deduct_safety_equipment||0) + Number(e.deduct_uniform||0)
         const entryNet = income - deduct
-        if (entryNet < 0) carryOver += Math.abs(entryNet)
-        else net += entryNet
+        if (entryNet < 0) {
+          carryOver += Math.abs(entryNet)
+          const emp = (e as any).employee
+          carryOverDetails.push({ employee_code: emp?.employee_code ?? '—', first_name: emp?.first_name ?? '', last_name: emp?.last_name ?? '', deficit: Math.abs(entryNet) })
+        } else net += entryNet
       }
       void rawNet
       const adv = advances.data?.reduce((s, a) => s + Number(a.amount), 0) ?? 0
@@ -109,7 +114,7 @@ export default function Dashboard() {
       const uniqueDays = new Set(shifts.data?.map(d => d.work_date)).size
       const start = parseLocal(activePeriod.period_start), end = parseLocal(activePeriod.period_end)
       const totalDays = Math.ceil((end.getTime()-start.getTime())/86400000)+1
-      return { gross, ss, ssCount, net, carryOver, adv, advCount, uniqueDays, totalDays }
+      return { gross, ss, ssCount, net, carryOver, carryOverDetails, adv, advCount, uniqueDays, totalDays }
     },
     enabled: !!activePeriod,
     staleTime: 0,
@@ -310,16 +315,18 @@ export default function Dashboard() {
 
             {/* Carry-over card — only shown when there are negative net entries */}
             {(stats?.carryOver ?? 0) > 0 && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 20, padding: '14px 20px', background: 'var(--vk-crimson-tint)', border: '1px solid var(--vk-crimson)', borderTop: 'none', marginBottom: 36 }}>
+              <div onClick={() => setShowCarryOverModal(true)} style={{ display: 'flex', alignItems: 'center', gap: 20, padding: '14px 20px', background: 'var(--vk-crimson-tint)', border: '1px solid var(--vk-crimson)', borderTop: 'none', marginBottom: 36, cursor: 'pointer' }}
+                onMouseEnter={e => (e.currentTarget.style.background = '#fde0dc')}
+                onMouseLeave={e => (e.currentTarget.style.background = 'var(--vk-crimson-tint)')}>
                 <div style={{ flex: 1 }}>
-                  <div className="vk-eyebrow" style={{ color: 'var(--vk-crimson)', marginBottom: 4 }}>ยอดยกไปงวดหน้า</div>
+                  <div className="vk-eyebrow" style={{ color: 'var(--vk-crimson)', marginBottom: 4 }}>ยอดยกไปงวดหน้า — คลิกเพื่อดูรายละเอียด</div>
                   <div style={{ fontFamily: 'var(--vk-sans)', fontSize: 13, color: 'var(--vk-crimson)', opacity: 0.8 }}>
-                    พนักงานบางรายมียอดเบิกล่วงหน้าเกินค่าจ้างงวดนี้ — จ่ายจริง ฿0 และยอดส่วนเกินจะถูกหักในงวดถัดไป
+                    พนักงาน {stats?.carryOverDetails?.length ?? 0} ราย มียอดเบิกล่วงหน้าเกินค่าจ้างงวดนี้ — จ่ายจริง ฿0 และยอดส่วนเกินจะถูกหักในงวดถัดไป
                   </div>
                 </div>
                 <div style={{ textAlign: 'right', flexShrink: 0 }}>
                   <div style={{ fontFamily: 'var(--vk-mono)', fontWeight: 700, fontSize: 22, color: 'var(--vk-crimson)', letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>
-                    − {(stats?.carryOver ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                    − {(stats?.carryOver ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </div>
                   <div className="vk-small" style={{ color: 'var(--vk-crimson)', opacity: 0.7 }}>บาท</div>
                 </div>
@@ -473,6 +480,50 @@ export default function Dashboard() {
       )}
 
       {/* Delete period confirm modal */}
+      {/* Carry-over detail modal */}
+      {showCarryOverModal && (
+        <div className="vk-root" style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(22,19,17,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+          onClick={() => setShowCarryOverModal(false)}>
+          <div style={{ background: 'var(--vk-paper)', border: '1px solid var(--vk-rule)', width: '100%', maxWidth: 480, overflow: 'hidden', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}
+            onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div style={{ background: 'var(--vk-crimson)', color: '#fff', padding: '16px 20px', flexShrink: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 15 }}>ยอดยกไปงวดหน้า</div>
+              <div style={{ fontSize: 11, opacity: 0.7, marginTop: 2 }}>งวด {activePeriod?.label} · {stats?.carryOverDetails?.length ?? 0} รายการ</div>
+            </div>
+            {/* Table */}
+            <div style={{ overflowY: 'auto', flex: 1 }}>
+              {/* thead */}
+              <div style={{ display: 'grid', gridTemplateColumns: '60px 1fr 120px', padding: '8px 20px', background: 'var(--vk-bone)', borderBottom: '1px solid var(--vk-rule)', position: 'sticky', top: 0 }}>
+                {['รหัส', 'ชื่อ-นามสกุล', 'ยอดยกไป'].map((h, i) => (
+                  <div key={i} style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--vk-ink-3)', textAlign: i === 2 ? 'right' : 'left' }}>{h}</div>
+                ))}
+              </div>
+              {/* rows */}
+              {(stats?.carryOverDetails ?? []).map((d, i) => (
+                <div key={i} style={{ display: 'grid', gridTemplateColumns: '60px 1fr 120px', padding: '11px 20px', borderBottom: '1px solid var(--vk-rule-soft)', alignItems: 'center' }}>
+                  <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 11, color: 'var(--vk-ink-3)' }}>{d.employee_code}</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--vk-ink)' }}>{d.first_name} {d.last_name}</div>
+                  <div style={{ textAlign: 'right', fontFamily: 'var(--vk-mono)', fontSize: 13, fontWeight: 700, color: 'var(--vk-crimson)' }}>
+                    − {d.deficit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                </div>
+              ))}
+            </div>
+            {/* Footer total */}
+            <div style={{ padding: '12px 20px', borderTop: '2px solid var(--vk-rule)', background: 'var(--vk-bone)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+              <span style={{ fontFamily: 'var(--vk-sans)', fontWeight: 700, fontSize: 13 }}>รวมยอดยกไปทั้งหมด</span>
+              <span style={{ fontFamily: 'var(--vk-mono)', fontWeight: 800, fontSize: 18, color: 'var(--vk-crimson)' }}>
+                − {(stats?.carryOver ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} บาท
+              </span>
+            </div>
+            <div style={{ padding: '10px 20px', background: 'var(--vk-paper)', borderTop: '1px solid var(--vk-rule)', display: 'flex', justifyContent: 'flex-end' }}>
+              <button className="vk-btn" onClick={() => setShowCarryOverModal(false)}>ปิด</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showDeletePeriodConfirm && (
         <div className="vk-root" style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(22,19,17,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
           onClick={() => setShowDeletePeriodConfirm(false)}>
