@@ -149,7 +149,7 @@ export default function PaySlip() {
     queryKey: ['employees-payslip', user?.factory_id],
     queryFn: async () => {
       const { data, error } = await supabase.from('employees')
-        .select('id,employee_code,first_name,last_name,nationality,position,job_title,wage_type,rate_per_12h,payment_method,bank_name,bank_account')
+        .select('id,employee_code,first_name,last_name,nationality,position,job_title,wage_type,rate_per_12h,payment_method,bank_name,bank_account,exempt_social_security')
         .eq('factory_id', user?.factory_id ?? '').eq('status', 'active').order('employee_code')
       if (error) throw error; return data
     }, enabled: !!user?.factory_id, staleTime: 0,
@@ -263,7 +263,7 @@ export default function PaySlip() {
       override_special: null,
       amount_wood_excess: 0, amount_film: 0, amount_special: 0,
       amount_diligence: 0, amount_position: 0,
-      social_security_rate: isThai ? (currentPeriod?.social_security_rate ?? 0.05) : 0,
+      social_security_rate: (isThai && !selectedEmp?.exempt_social_security) ? (currentPeriod?.social_security_rate ?? 0.05) : 0,
       deduct_advance: 0, deduct_safety_equipment: 0, deduct_uniform: 0,
     })
     const eps = 0.5
