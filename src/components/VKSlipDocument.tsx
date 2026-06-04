@@ -50,7 +50,7 @@ export interface VKSlipDocumentProps {
   isOutdated?: boolean
 }
 
-const mono = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2 })
+const mono = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 function thaiDateTimeNow() {
   const now = new Date()

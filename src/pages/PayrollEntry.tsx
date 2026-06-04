@@ -1,3 +1,4 @@
+import React from 'react'
 import { useOutletContext } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
@@ -305,43 +306,50 @@ export default function PayrollEntry() {
 
       <div className="vk-split">
         {/* Left panel — hidden on mobile when employee is selected */}
-        <div style={{ padding: '16px 12px' }}
+        <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}
           className={`vk-sidebar-scrollable vk-sidebar-scrollable-payroll ${selectedEmpId ? 'hidden md:block' : ''}`}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-            <div className="vk-eyebrow">พนักงาน ({employees.length})</div>
-          </div>
-          <div style={{ display: 'flex', gap: 6, fontSize: 10, marginBottom: 10, flexWrap: 'wrap' }}>
-            {([
-              { key: 'saved',    color: 'var(--vk-jade)',      label: 'บันทึกแล้ว' },
-              { key: 'outdated', color: 'var(--vk-persimmon)', label: 'มีการเปลี่ยนแปลง' },
-              { key: 'unsaved',  color: '#d4cfc9',             label: 'ยังไม่บันทึก' },
-            ] as const).map(s => {
-              const active = statusFilter === s.key
-              return (
-                <button key={s.key} onClick={() => setStatusFilter(active ? null : s.key)}
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', border: `1px solid ${active ? s.color : 'var(--vk-rule-soft)'}`, borderRadius: 999, cursor: 'pointer', background: active ? `${s.color}22` : 'transparent', color: active ? 'var(--vk-ink)' : 'var(--vk-ink-3)', fontFamily: 'var(--vk-sans)', fontWeight: active ? 700 : 400, fontSize: 10, transition: 'all 120ms' }}>
-                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: s.color, display: 'inline-block', flexShrink: 0 }} />
-                  {s.label}
+
+          {/* Sticky header — does not scroll */}
+          <div style={{ flexShrink: 0, padding: '16px 12px 0' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <div className="vk-eyebrow">พนักงาน ({employees.length})</div>
+            </div>
+            <div style={{ display: 'flex', gap: 6, fontSize: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+              {([
+                { key: 'saved',    color: 'var(--vk-jade)',      label: 'บันทึกแล้ว' },
+                { key: 'outdated', color: 'var(--vk-persimmon)', label: 'มีการเปลี่ยนแปลง' },
+                { key: 'unsaved',  color: '#d4cfc9',             label: 'ยังไม่บันทึก' },
+              ] as const).map(s => {
+                const active = statusFilter === s.key
+                return (
+                  <button key={s.key} onClick={() => setStatusFilter(active ? null : s.key)}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', border: `1px solid ${active ? s.color : 'var(--vk-rule-soft)'}`, borderRadius: 999, cursor: 'pointer', background: active ? `${s.color}22` : 'transparent', color: active ? 'var(--vk-ink)' : 'var(--vk-ink-3)', fontFamily: 'var(--vk-sans)', fontWeight: active ? 700 : 400, fontSize: 10, transition: 'all 120ms' }}>
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: s.color, display: 'inline-block', flexShrink: 0 }} />
+                    {s.label}
+                  </button>
+                )
+              })}
+            </div>
+            {/* Search */}
+            <div style={{ position: 'relative', marginBottom: 8 }}>
+              <Search style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', width: 12, height: 12, color: 'var(--vk-ink-3)', pointerEvents: 'none' }} />
+              <input
+                value={empSearch}
+                onChange={e => setEmpSearch(e.target.value)}
+                placeholder="ค้นหาชื่อหรือรหัส..."
+                style={{ width: '100%', height: 32, paddingLeft: 26, paddingRight: empSearch ? 26 : 8, fontSize: 12, fontFamily: 'var(--vk-sans)', border: '1px solid var(--vk-rule)', background: 'var(--vk-bone)', color: 'var(--vk-ink)', outline: 'none', boxSizing: 'border-box' }}
+              />
+              {empSearch && (
+                <button onClick={() => setEmpSearch('')} style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', padding: 2, color: 'var(--vk-ink-3)', display: 'flex' }}>
+                  <X style={{ width: 11, height: 11 }} />
                 </button>
-              )
-            })}
+              )}
+            </div>
+            <hr className="vk-rule-soft" style={{ margin: 0 }} />
           </div>
-          {/* Search */}
-          <div style={{ position: 'relative', marginBottom: 8 }}>
-            <Search style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', width: 12, height: 12, color: 'var(--vk-ink-3)', pointerEvents: 'none' }} />
-            <input
-              value={empSearch}
-              onChange={e => setEmpSearch(e.target.value)}
-              placeholder="ค้นหาชื่อหรือรหัส..."
-              style={{ width: '100%', height: 32, paddingLeft: 26, paddingRight: empSearch ? 26 : 8, fontSize: 12, fontFamily: 'var(--vk-sans)', border: '1px solid var(--vk-rule)', background: 'var(--vk-paper)', color: 'var(--vk-ink)', outline: 'none', boxSizing: 'border-box' }}
-            />
-            {empSearch && (
-              <button onClick={() => setEmpSearch('')} style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', padding: 2, color: 'var(--vk-ink-3)', display: 'flex' }}>
-                <X style={{ width: 11, height: 11 }} />
-              </button>
-            )}
-          </div>
-          <hr className="vk-rule-soft" style={{ marginBottom: 10 }} />
+
+          {/* Scrollable list */}
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '10px 12px 16px', marginRight: 1, scrollbarGutter: 'stable' } as React.CSSProperties}>
           {employees.filter(emp => {
             const q = empSearch.toLowerCase()
             const matchSearch = !q || emp.employee_code.toLowerCase().includes(q) || emp.first_name.toLowerCase().includes(q) || (emp.last_name || '').toLowerCase().includes(q)
@@ -382,6 +390,7 @@ export default function PayrollEntry() {
           }).length === 0 && (
             <div className="vk-small" style={{ color: 'var(--vk-ink-3)', textAlign: 'center', padding: '12px 0' }}>ไม่พบพนักงานที่ค้นหา</div>
           )}
+          </div>
         </div>
 
         {/* Right panel */}

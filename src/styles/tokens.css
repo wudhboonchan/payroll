@@ -495,7 +495,7 @@ html, body, #root {
   font-size: 12px;
   font-weight: 500;
   color: var(--vk-ink);
-  background: #ffffff;
+  background: var(--vk-bone);
   border: 1px solid var(--vk-rule-soft);
   border-radius: 6px;
   transition: all var(--vk-dur) var(--vk-ease);

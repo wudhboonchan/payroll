@@ -57,7 +57,7 @@ const POSITIONS: Record<string, string> = {
   manager: 'ผู้จัดการ',
 }
 
-const monoNum = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2 })
+const monoNum = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 function chipStyle(color: string, bg: string): React.CSSProperties {
   return { fontSize: 10, fontWeight: 700, padding: '2px 6px', color, background: bg, whiteSpace: 'nowrap' as const }
@@ -399,29 +399,31 @@ export default function EmployeeSummary() {
 
       <div className="vk-split">
         {/* ── Left Panel (Employee Pool) ── */}
-        <div style={{ padding: '16px 12px' }}
+        <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}
           className={`vk-sidebar-scrollable vk-sidebar-scrollable-payroll ${selectedEmpId ? 'hidden md:block' : ''}`}>
-          <div className="vk-eyebrow" style={{ marginBottom: 8 }}>พนักงาน ({employees.length})</div>
-          
-          {/* Search bar */}
-          <div style={{ position: 'relative', marginBottom: 8 }}>
-            <Search style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', width: 12, height: 12, color: 'var(--vk-ink-3)', pointerEvents: 'none' }} />
-            <input
-              value={empSearch}
-              onChange={e => setEmpSearch(e.target.value)}
-              placeholder="ค้นหาชื่อหรือรหัส..."
-              className="vk-search-input"
-              style={{ paddingLeft: 26 }}
-            />
-            {empSearch && (
-              <button onClick={() => setEmpSearch('')} style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', padding: 2, color: 'var(--vk-ink-3)', display: 'flex' }}>
-                <X style={{ width: 11, height: 11 }} />
-              </button>
-            )}
-          </div>
-          <hr className="vk-rule-soft" style={{ marginBottom: 10 }} />
 
-          {/* List scroll area */}
+          {/* Sticky header + search — does not scroll */}
+          <div style={{ flexShrink: 0, padding: '16px 12px 0' }}>
+            <div className="vk-eyebrow" style={{ marginBottom: 8 }}>พนักงาน ({employees.length})</div>
+            <div style={{ position: 'relative', marginBottom: 8 }}>
+              <Search style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', width: 12, height: 12, color: 'var(--vk-ink-3)', pointerEvents: 'none' }} />
+              <input
+                value={empSearch}
+                onChange={e => setEmpSearch(e.target.value)}
+                placeholder="ค้นหาชื่อหรือรหัส..."
+                style={{ width: '100%', height: 32, paddingLeft: 26, paddingRight: empSearch ? 26 : 8, fontSize: 12, fontFamily: 'var(--vk-sans)', border: '1px solid var(--vk-rule)', background: 'var(--vk-bone)', color: 'var(--vk-ink)', outline: 'none', boxSizing: 'border-box' }}
+              />
+              {empSearch && (
+                <button onClick={() => setEmpSearch('')} style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', padding: 2, color: 'var(--vk-ink-3)', display: 'flex' }}>
+                  <X style={{ width: 11, height: 11 }} />
+                </button>
+              )}
+            </div>
+            <hr className="vk-rule-soft" style={{ margin: 0 }} />
+          </div>
+
+          {/* Scrollable list only */}
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '10px 12px 16px', marginRight: 1, scrollbarGutter: 'stable' } as React.CSSProperties}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             {filteredEmployees.map(emp => {
               const active = emp.id === selectedEmpId
@@ -458,6 +460,7 @@ export default function EmployeeSummary() {
             {filteredEmployees.length === 0 && (
               <div className="vk-small" style={{ color: 'var(--vk-ink-3)', textAlign: 'center', padding: '16px 0' }}>ไม่พบพนักงานที่ตรงเงื่อนไข</div>
             )}
+          </div>
           </div>
         </div>
 
@@ -598,12 +601,12 @@ export default function EmployeeSummary() {
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
                           {day.isWorked ? (
                             <>
-                              {day.baseWage > 0 && <span style={chipStyle('#374151', '#f3f4f6')}>ค่าจ้าง ฿{day.baseWage.toLocaleString()}</span>}
-                              {day.shiftAllowance > 0 && <span style={chipStyle('#065f46', '#d1fae5')}>ค่ากะ +฿{day.shiftAllowance.toLocaleString()}</span>}
-                              {day.otPay > 0 && <span style={chipStyle('#4c1d95', '#ede9fe')}>OT +฿{day.otPay.toLocaleString()}</span>}
-                              {day.woodExcess > 0 && <span style={chipStyle('#92400e', '#fef3c7')}>ไม้ส่วนเกิน +฿{day.woodExcess.toLocaleString()}</span>}
-                              {day.filmAmount > 0 && <span style={chipStyle('#92400e', '#fef3c7')}>ฟิล์ม +฿{day.filmAmount.toLocaleString()}</span>}
-                              {day.crossPay > 0 && <span style={chipStyle('#065f46', '#d1fae5')} title={day.crossTitle}>สลับตำแหน่ง ({day.crossTitle}) +฿{day.crossPay.toLocaleString()}</span>}
+                              {day.baseWage > 0 && <span style={chipStyle('#374151', '#f3f4f6')}>ค่าจ้าง ฿{monoNum(day.baseWage)}</span>}
+                              {day.shiftAllowance > 0 && <span style={chipStyle('#065f46', '#d1fae5')}>ค่ากะ +฿{monoNum(day.shiftAllowance)}</span>}
+                              {day.otPay > 0 && <span style={chipStyle('#4c1d95', '#ede9fe')}>OT +฿{monoNum(day.otPay)}</span>}
+                              {day.woodExcess > 0 && <span style={chipStyle('#92400e', '#fef3c7')}>ไม้ส่วนเกิน +฿{monoNum(day.woodExcess)}</span>}
+                              {day.filmAmount > 0 && <span style={chipStyle('#92400e', '#fef3c7')}>ฟิล์ม +฿{monoNum(day.filmAmount)}</span>}
+                              {day.crossPay > 0 && <span style={chipStyle('#065f46', '#d1fae5')} title={day.crossTitle}>สลับตำแหน่ง ({day.crossTitle}) +฿{monoNum(day.crossPay)}</span>}
                             </>
                           ) : (
                             <span style={{ fontSize: 11, color: 'var(--vk-ink-3)' }}>—</span>
@@ -612,7 +615,7 @@ export default function EmployeeSummary() {
 
                         {/* Day total */}
                         <div style={{ textAlign: 'right', fontFamily: 'var(--vk-mono)', fontSize: 13, fontWeight: 700, color: day.totalEarned > 0 ? 'var(--vk-jade)' : 'var(--vk-ink-3)' }}>
-                          {day.totalEarned > 0 ? `฿${day.totalEarned.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '—'}
+                          {day.totalEarned > 0 ? `฿${day.totalEarned.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
                         </div>
                       </div>
                     )
