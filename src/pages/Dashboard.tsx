@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabase'
 import { useAppStore } from '../store/useAppStore'
 import { TopBar } from '../components/layout/TopBar'
 import { toast } from 'sonner'
-import { Plus, CheckCircle, XCircle, Pencil, Check, X, Trash2 } from 'lucide-react'
+import { Plus, CheckCircle, XCircle, Pencil, Check, X, Trash2, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
 import '../styles/tokens.css'
 
 interface PayrollPeriod { id: string; label: string; period_start: string; period_end: string; status: string; social_security_rate: number; approved_by: string | null; approver?: { full_name: string | null } | null }
@@ -30,6 +30,7 @@ export default function Dashboard() {
   const [showCarryOverModal, setShowCarryOverModal] = useState(false)
   const [editingSSRate, setEditingSSRate] = useState(false)
   const [ssRateDraft, setSSRateDraft] = useState('')
+  const [channelSort, setChannelSort] = useState<{ key: 'channel' | 'count' | 'total'; dir: 'asc' | 'desc' }>({ key: 'total', dir: 'desc' })
 
   const { data: periods = [] } = useQuery<PayrollPeriod[]>({
     queryKey: ['periods', user?.factory_id],
@@ -69,6 +70,40 @@ export default function Dashboard() {
     },
     enabled: !!user?.factory_id,
     staleTime: 0,
+  })
+
+  const { data: paymentChannelStats } = useQuery({
+    queryKey: ['payment-channel-stats', activePeriod?.id],
+    queryFn: async () => {
+      if (!activePeriod) return []
+      const { data, error } = await supabase
+        .from('payroll_entries')
+        .select('amount_normal,amount_shift,amount_ot,amount_wood_excess,amount_film,amount_special,amount_diligence,amount_position,deduct_social_security,deduct_advance,deduct_safety_equipment,deduct_uniform,override_special,employee:employees(payment_method,bank_name)')
+        .eq('period_id', activePeriod.id)
+        .limit(10000)
+      if (error) throw error
+      const map = new Map<string, { count: number; total: number }>()
+      for (const e of data ?? []) {
+        const emp = (e as any).employee
+        const method: string = emp?.payment_method ?? 'bank_transfer'
+        const bank: string | null = emp?.bank_name ?? null
+        const key = method === 'cash' ? 'เงินสด' : (bank || 'ไม่ระบุธนาคาร')
+        const income = Number(e.amount_normal||0) + Number(e.amount_shift||0) + Number(e.amount_ot||0)
+          + Number(e.amount_wood_excess||0) + Number(e.amount_film||0)
+          + Number((e as any).override_special ?? e.amount_special ?? 0)
+          + Number(e.amount_diligence||0) + Number(e.amount_position||0)
+        const deduct = Number(e.deduct_social_security||0) + Number(e.deduct_advance||0) + Number(e.deduct_safety_equipment||0) + Number(e.deduct_uniform||0)
+        const net = Math.max(0, income - deduct)
+        const prev = map.get(key) ?? { count: 0, total: 0 }
+        map.set(key, { count: prev.count + 1, total: prev.total + net })
+      }
+      return Array.from(map.entries())
+        .map(([channel, v]) => ({ channel, ...v }))
+        .sort((a, b) => b.total - a.total)
+    },
+    enabled: !!activePeriod,
+    staleTime: 0,
+    refetchInterval: 30_000,
   })
 
   const { data: stats } = useQuery({
@@ -446,6 +481,71 @@ export default function Dashboard() {
                 <hr className="vk-rule" />
               </div>
             </div>
+
+            {/* Payment channel breakdown */}
+            {(paymentChannelStats ?? []).length > 0 && (() => {
+              const sorted = [...(paymentChannelStats ?? [])].sort((a, b) => {
+                const mul = channelSort.dir === 'asc' ? 1 : -1
+                if (channelSort.key === 'channel') return mul * a.channel.localeCompare(b.channel, 'th')
+                if (channelSort.key === 'count') return mul * (a.count - b.count)
+                return mul * (a.total - b.total)
+              })
+              const toggleSort = (key: typeof channelSort.key) =>
+                setChannelSort(prev => prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: key === 'channel' ? 'asc' : 'desc' })
+              const SortIcon = ({ k }: { k: typeof channelSort.key }) => {
+                if (channelSort.key !== k) return <ArrowUpDown style={{ width: 11, height: 11, opacity: 0.35 }} />
+                return channelSort.dir === 'asc' ? <ArrowUp style={{ width: 11, height: 11, color: 'var(--vk-persimmon)' }} /> : <ArrowDown style={{ width: 11, height: 11, color: 'var(--vk-persimmon)' }} />
+              }
+              return (
+                <div style={{ marginTop: 36 }}>
+                  <div className="vk-eyebrow" style={{ marginBottom: 8 }}>PAYMENT CHANNELS · สรุปยอดแยกตามช่องทางจ่ายเงิน</div>
+                  <hr className="vk-rule" />
+                  <div style={{ marginTop: 0 }}>
+                    {/* Header */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 160px', background: 'var(--vk-bone)', borderBottom: '1px solid var(--vk-rule)' }}>
+                      {([
+                        { label: 'ช่องทาง', key: 'channel' as const, align: 'left' },
+                        { label: 'จำนวน', key: 'count' as const, align: 'center' },
+                        { label: 'ยอดสุทธิ (บาท)', key: 'total' as const, align: 'right' },
+                      ]).map(col => (
+                        <button key={col.key} onClick={() => toggleSort(col.key)}
+                          style={{ display: 'flex', alignItems: 'center', gap: 4, justifyContent: col.align === 'right' ? 'flex-end' : col.align === 'center' ? 'center' : 'flex-start', padding: '8px 16px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: channelSort.key === col.key ? 'var(--vk-persimmon)' : 'var(--vk-ink-3)', fontFamily: 'var(--vk-sans)' }}>
+                          {col.label}
+                          <SortIcon k={col.key} />
+                        </button>
+                      ))}
+                    </div>
+                    {sorted.map((row, i) => (
+                      <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 80px 160px', padding: '12px 16px', borderBottom: '1px solid var(--vk-rule-soft)', alignItems: 'center' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          {row.channel === 'เงินสด'
+                            ? <span style={{ width: 28, height: 28, borderRadius: 6, background: 'var(--vk-jade-tint)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, flexShrink: 0 }}>💴</span>
+                            : <span style={{ width: 28, height: 28, borderRadius: 6, background: 'var(--vk-persimmon-tint)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, flexShrink: 0 }}>💳</span>
+                          }
+                          <span style={{ fontFamily: 'var(--vk-sans)', fontSize: 14, fontWeight: 600, color: 'var(--vk-ink)' }}>{row.channel}</span>
+                        </div>
+                        <div style={{ textAlign: 'center', fontFamily: 'var(--vk-mono)', fontSize: 13, color: 'var(--vk-ink-2)' }}>
+                          {row.count} <span style={{ color: 'var(--vk-ink-3)', fontSize: 11 }}>คน</span>
+                        </div>
+                        <div style={{ textAlign: 'right', fontFamily: 'var(--vk-mono)', fontSize: 15, fontWeight: 700, color: 'var(--vk-persimmon)', fontVariantNumeric: 'tabular-nums' }}>
+                          {row.total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                      </div>
+                    ))}
+                    {/* Total row */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 160px', padding: '12px 16px', background: 'var(--vk-bone)', borderTop: '2px solid var(--vk-rule)', alignItems: 'center' }}>
+                      <div style={{ fontFamily: 'var(--vk-sans)', fontSize: 13, fontWeight: 700, color: 'var(--vk-ink)' }}>รวมทั้งหมด</div>
+                      <div style={{ textAlign: 'center', fontFamily: 'var(--vk-mono)', fontSize: 13, fontWeight: 700, color: 'var(--vk-ink)' }}>
+                        {(paymentChannelStats ?? []).reduce((s, r) => s + r.count, 0)} <span style={{ color: 'var(--vk-ink-3)', fontSize: 11, fontWeight: 400 }}>คน</span>
+                      </div>
+                      <div style={{ textAlign: 'right', fontFamily: 'var(--vk-mono)', fontSize: 16, fontWeight: 800, color: 'var(--vk-persimmon)', fontVariantNumeric: 'tabular-nums' }}>
+                        {(paymentChannelStats ?? []).reduce((s, r) => s + r.total, 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )
+            })()}
           </>
         )}
       </div>
