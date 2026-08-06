@@ -5,7 +5,9 @@ import { supabase } from '../lib/supabase'
 import { useAppStore } from '../store/useAppStore'
 import { TopBar } from '../components/layout/TopBar'
 import { useState, useEffect, useMemo } from 'react'
-import { Search, X, CreditCard } from 'lucide-react'
+import { Search, X, CreditCard, FileSpreadsheet, Printer, Loader2 } from 'lucide-react'
+import { toast } from 'sonner'
+import { formatPeriodLabel } from '../lib/formatters'
 import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
 import { calculatePayroll } from '../lib/payrollCalc'
@@ -61,6 +63,190 @@ const monoNum = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits
 
 function chipStyle(color: string, bg: string): React.CSSProperties {
   return { fontSize: 10, fontWeight: 700, padding: '2px 6px', color, background: bg, whiteSpace: 'nowrap' as const }
+}
+
+function thaiDateTimeNow() {
+  const now = new Date()
+  const MONTHS = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม']
+  const hh = String(now.getHours()).padStart(2, '0'), mm = String(now.getMinutes()).padStart(2, '0')
+  return `${now.getDate()} ${MONTHS[now.getMonth()]} ${now.getFullYear() + 543} เวลา ${hh}:${mm} น.`
+}
+
+function buildEmployeeSummaryPdfHtml(
+  emp: any,
+  periodLabelStr: string,
+  stats: any,
+  dailyEstimates: any[],
+  empAdvances: any[],
+  clerkPeriodBase: number,
+  generatedAt: string
+): string {
+  const posLabel = POSITIONS[emp.position] || emp.position || ''
+  const payMethodLabel = emp.payment_method === 'bank_transfer' ? 'โอนผ่านธนาคาร' : 'เงินสด'
+  const bankDetails = emp.payment_method === 'bank_transfer' && emp.bank_name
+    ? `${emp.bank_name} ${maskBank(emp.bank_account)}`
+    : '—'
+
+  const dailyRowsHtml = dailyEstimates.map(day => {
+    const isHoliday = day.dayType === 'holiday'
+    const isWeekend = day.dayType === 'weekend'
+    const dayLabel = isHoliday ? 'วันหยุดนักขัตฤกษ์' : isWeekend ? 'วันหยุดสัปดาห์' : 'วันธรรมดา'
+    const shiftLabel = day.isWorked
+      ? (emp.position === 'clerk' ? 'ทำงานปกติ' : (day.shiftType === 'morning' ? 'กะเช้า' : day.shiftType === 'afternoon' ? 'กะบ่าย' : 'เข้ากะ'))
+      : 'หยุด'
+
+    const items: string[] = []
+    if (day.isWorked) {
+      if (day.baseWage > 0) items.push(`ค่าจ้าง ฿${monoNum(day.baseWage)}`)
+      if (day.shiftAllowance > 0) items.push(`ค่ากะ ฿${monoNum(day.shiftAllowance)}`)
+      if (day.otPay > 0) items.push(`OT ฿${monoNum(day.otPay)}`)
+      if (day.woodExcess > 0) items.push(`ไม้เกิน ฿${monoNum(day.woodExcess)}`)
+      if (day.filmAmount > 0) items.push(`ฟิล์ม ฿${monoNum(day.filmAmount)}`)
+      if (day.crossPay > 0) items.push(`สลับตำแหน่ง (${day.crossTitle || ''}) ฿${monoNum(day.crossPay)}`)
+    }
+
+    return `
+      <tr style="${!day.isWorked ? 'opacity:0.55;background:#fafafa' : ''}">
+        <td style="padding:6px 8px;border-bottom:1px solid #eee;font-size:11px">${fmtDisplayDate(day.workDate)}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #eee;font-size:11px;color:#666">${dayLabel}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #eee;font-size:11px">${shiftLabel}${day.isWorked && emp.position !== 'clerk' ? ` (${day.hours} ชม.)` : ''}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #eee;font-size:11px">${items.join(' · ') || '—'}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #eee;font-size:11px;text-align:right;font-family:monospace;font-weight:600">
+          ${day.totalEarned > 0 ? '฿' + monoNum(day.totalEarned) : '—'}
+        </td>
+      </tr>
+    `
+  }).join('')
+
+  const periodIncomeRowsHtml = [
+    clerkPeriodBase > 0 ? `<tr><td style="padding:5px 8px;border-bottom:1px solid #eee">ค่าจ้างพื้นฐาน (ครึ่งเดือน)</td><td style="padding:5px 8px;border-bottom:1px solid #eee">เงินเดือน ÷ 2</td><td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:right;font-family:monospace">฿${monoNum(clerkPeriodBase)}</td></tr>` : '',
+    stats.entryDiligence > 0 ? `<tr><td style="padding:5px 8px;border-bottom:1px solid #eee">เบี้ยขยัน</td><td style="padding:5px 8px;border-bottom:1px solid #eee">เบี้ยขยันประจำงวด</td><td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:right;font-family:monospace">฿${monoNum(stats.entryDiligence)}</td></tr>` : '',
+    stats.entryPosition > 0 ? `<tr><td style="padding:5px 8px;border-bottom:1px solid #eee">ค่าตำแหน่ง</td><td style="padding:5px 8px;border-bottom:1px solid #eee">ค่าตำแหน่งประจำงวด</td><td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:right;font-family:monospace">฿${monoNum(stats.entryPosition)}</td></tr>` : '',
+    stats.entrySpecial > 0 ? `<tr><td style="padding:5px 8px;border-bottom:1px solid #eee">เงินพิเศษ / ปรับปรุง</td><td style="padding:5px 8px;border-bottom:1px solid #eee">${emp.special_note || 'บันทึกในงวดนี้'}</td><td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:right;font-family:monospace">฿${monoNum(stats.entrySpecial)}</td></tr>` : '',
+  ].join('')
+
+  const deductionRowsHtml = [
+    stats.entrySS > 0 ? `<tr><td style="padding:5px 8px;border-bottom:1px solid #eee;color:#c0392b">ประกันสังคม</td><td style="padding:5px 8px;border-bottom:1px solid #eee;color:#666">หัก ณ ที่จ่าย</td><td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:right;font-family:monospace;color:#c0392b">−฿${monoNum(stats.entrySS)}</td></tr>` : '',
+    ...empAdvances.map((adv: any, i: number) => `<tr><td style="padding:5px 8px;border-bottom:1px solid #eee;color:#c0392b">เบิกล่วงหน้า (#${i+1})</td><td style="padding:5px 8px;border-bottom:1px solid #eee;color:#666">${adv.request_date ? fmtDisplayDate(adv.request_date) + ' ' : ''}${adv.notes || ''}</td><td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:right;font-family:monospace;color:#c0392b">−฿${monoNum(Number(adv.amount))}</td></tr>`),
+    stats.entrySafety > 0 ? `<tr><td style="padding:5px 8px;border-bottom:1px solid #eee;color:#c0392b">อุปกรณ์ความปลอดภัย</td><td style="padding:5px 8px;border-bottom:1px solid #eee;color:#666">หักค่าอุปกรณ์</td><td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:right;font-family:monospace;color:#c0392b">−฿${monoNum(stats.entrySafety)}</td></tr>` : '',
+    stats.entryUniform > 0 ? `<tr><td style="padding:5px 8px;border-bottom:1px solid #eee;color:#c0392b">ค่าเสื้อพนักงาน</td><td style="padding:5px 8px;border-bottom:1px solid #eee;color:#666">หักค่าชุดทำงาน</td><td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:right;font-family:monospace;color:#c0392b">−฿${monoNum(stats.entryUniform)}</td></tr>` : '',
+  ].join('')
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Summary_${emp.employee_code}_${emp.first_name}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;padding:20px;background:#fff;font-family:'Sarabun',sans-serif;color:#1a1a1a;font-size:12px}
+  .header{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:12px;border-bottom:2px solid #1a1a1a;margin-bottom:16px}
+  .emp-box{background:#f8f9fa;border:1px solid #e9ecef;padding:12px 16px;margin-bottom:16px;display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px}
+  .kpi-card{background:#1a1a1a;color:#fff;padding:10px 12px;border-radius:4px}
+  .kpi-title{font-size:10px;text-transform:uppercase;color:#aaa;margin-bottom:2px}
+  .kpi-val{font-size:16px;font-weight:700;font-family:monospace}
+  table{width:100%;border-collapse:collapse;margin-bottom:16px}
+  th{background:#f1f3f5;text-align:left;padding:7px 8px;font-size:11px;font-weight:700;border-bottom:1px solid #dee2e6}
+  .net-box{background:#1a1a1a;color:#fff;padding:14px 16px;display:flex;justify-content:space-between;align-items:center;margin-top:16px}
+  @page{size:A4 portrait;margin:10mm}
+  @media print{html,body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+</style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <div style="font-weight:800;font-size:18px">ห้างหุ้นส่วนจำกัด วิราญกร</div>
+      <div style="font-size:14px;font-weight:700;color:#555;margin-top:2px">รายงานสรุปภาพรวมพนักงาน (Employee Ledger Summary)</div>
+    </div>
+    <div style="text-align:right;font-size:11px;color:#666">
+      <div>งวดเงินเดือน: <strong>${periodLabelStr}</strong></div>
+      <div>พิมพ์เมื่อ: ${generatedAt}</div>
+    </div>
+  </div>
+
+  <div class="emp-box">
+    <div>
+      <div><strong>ชื่อ-นามสกุล:</strong> ${emp.first_name} ${emp.last_name} ${fmtNationality(emp.nationality) ? `(${fmtNationality(emp.nationality)})` : ''}</div>
+      <div><strong>รหัสพนักงาน:</strong> <span style="font-family:monospace">${emp.employee_code}</span></div>
+      <div><strong>ตำแหน่ง:</strong> ${posLabel}${emp.job_title ? ' - ' + emp.job_title : ''}</div>
+    </div>
+    <div>
+      <div><strong>อัตราค่าจ้าง:</strong> ฿${(Number(emp.rate_per_12h)||0).toLocaleString()}/${emp.wage_type==='monthly'?'เดือน':'12ชม.'}</div>
+      <div><strong>วิธีรับเงิน:</strong> ${payMethodLabel}</div>
+      <div><strong>ธนาคาร/เลขบัญชี:</strong> ${bankDetails}</div>
+    </div>
+  </div>
+
+  <div class="kpi-grid">
+    <div class="kpi-card">
+      <div class="kpi-title">วันทำงาน</div>
+      <div class="kpi-val">${stats.totalDaysWorked} วัน</div>
+      <div style="font-size:9px;color:#aaa">เช้า ${stats.morningShifts} · บ่าย ${stats.afternoonShifts}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-title">รายได้รวม</div>
+      <div class="kpi-val" style="color:#6ee7b7">฿${monoNum(stats.grossEarnings)}</div>
+      <div style="font-size:9px;color:#aaa">ก่อนหักรายการ</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-title">หักรวม</div>
+      <div class="kpi-val" style="color:#fca5a5">฿${monoNum(stats.totalDeductions)}</div>
+      <div style="font-size:9px;color:#aaa">ประกัน + เบิก + อื่นๆ</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-title">สุทธิรับจริง</div>
+      <div class="kpi-val" style="color:#fde047">฿${monoNum(stats.netEarnings)}</div>
+      <div style="font-size:9px;color:#aaa">NET PAY</div>
+    </div>
+  </div>
+
+  <div style="font-weight:700;font-size:13px;margin-bottom:6px">1. บันทึกรายวัน (Daily Log)</div>
+  <table>
+    <thead>
+      <tr>
+        <th>วันที่</th>
+        <th>ประเภทวัน</th>
+        <th>กะ / ชั่วโมง</th>
+        <th>รายการรายได้</th>
+        <th style="text-align:right">รวมรายวัน</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${dailyRowsHtml}
+    </tbody>
+  </table>
+
+  ${(periodIncomeRowsHtml || deductionRowsHtml) ? `
+    <div style="font-weight:700;font-size:13px;margin-bottom:6px">2. รายการประจำงวด & รายการหักเงิน</div>
+    <table>
+      <thead>
+        <tr>
+          <th>รายการ</th>
+          <th>รายละเอียด / หมายเหตุ</th>
+          <th style="text-align:right">จำนวนเงิน</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${periodIncomeRowsHtml}
+        ${deductionRowsHtml}
+      </tbody>
+    </table>
+  ` : ''}
+
+  <div class="net-box">
+    <div>
+      <div style="font-size:11px;color:#aaa;text-transform:uppercase">NET PAY · สุทธิรับจริง</div>
+      <div style="font-size:11px;color:#ccc;margin-top:2px">${stats.totalDaysWorked} วันทำงาน · รายได้ ฿${monoNum(stats.grossEarnings)} · หัก ฿${monoNum(stats.totalDeductions)}</div>
+    </div>
+    <div style="font-family:monospace;font-size:24px;font-weight:800;color:#fde047">
+      ฿${monoNum(stats.netEarnings)}
+    </div>
+  </div>
+</body>
+</html>`
 }
 
 export default function EmployeeSummary() {
@@ -411,6 +597,143 @@ export default function EmployeeSummary() {
     return `${s.getDate()} ${MONTHS_SHORT[s.getMonth()]} – ${e.getDate()} ${MONTHS_SHORT[e.getMonth()]} ${e.getFullYear() + 543}`
   }
 
+  const [isExportingExcel, setIsExportingExcel] = useState(false)
+  const [isExportingPdf, setIsExportingPdf] = useState(false)
+
+  const handleExportPdf = async () => {
+    if (!selectedEmp || !currentPeriod) return
+    setIsExportingPdf(true)
+    try {
+      const generatedAt = thaiDateTimeNow()
+      const periodLabelStr = currentPeriod ? formatPeriodLabel(currentPeriod.period_start, currentPeriod.period_end) : '—'
+      const html = buildEmployeeSummaryPdfHtml(
+        selectedEmp,
+        periodLabelStr,
+        stats,
+        dailyEstimates,
+        empAdvances,
+        clerkPeriodBase,
+        generatedAt
+      )
+
+      const win = window.open('', '_blank', 'width=900,height=750')
+      if (!win) {
+        toast.error('กรุณาอนุญาต popup สำหรับการพิมพ์')
+        return
+      }
+      win.document.write(html)
+      win.document.close()
+      win.focus()
+      setTimeout(() => {
+        win.print()
+        win.close()
+      }, 500)
+      toast.success('เปิดหน้าต่างพิมพ์ PDF แล้ว')
+    } catch (e: any) {
+      toast.error('เกิดข้อผิดพลาดในการสร้าง PDF', { description: e.message })
+    } finally {
+      setIsExportingPdf(false)
+    }
+  }
+
+  const handleExportExcel = async () => {
+    if (!selectedEmp || !currentPeriod) return
+    setIsExportingExcel(true)
+    try {
+      const XLSX = await import('xlsx')
+      const posLabel = POSITIONS[selectedEmp.position] || selectedEmp.position || ''
+      const periodLabelStr = currentPeriod ? formatPeriodLabel(currentPeriod.period_start, currentPeriod.period_end) : '—'
+      const payMethodLabel = selectedEmp.payment_method === 'bank_transfer' ? 'โอนผ่านธนาคาร' : 'เงินสด'
+      const bankName = selectedEmp.payment_method === 'bank_transfer' ? (selectedEmp.bank_name || '-') : '-'
+      const bankAccount = selectedEmp.payment_method === 'bank_transfer' ? (selectedEmp.bank_account || '-') : '-'
+
+      const rows: any[] = []
+
+      // Header section
+      rows.push(['รายงานสรุปภาพรวมพนักงาน (Employee Ledger Summary)'])
+      rows.push(['งวดการจ่ายเงิน:', periodLabelStr])
+      rows.push([])
+
+      // Employee Profile
+      rows.push(['รหัสพนักงาน', selectedEmp.employee_code, 'ชื่อ-นามสกุล', `${selectedEmp.first_name} ${selectedEmp.last_name}`.trim()])
+      rows.push(['ตำแหน่ง', posLabel, 'อัตราค่าจ้าง', selectedEmp.rate_per_12h])
+      rows.push(['วิธีการรับเงิน', payMethodLabel, 'ธนาคาร', bankName, 'เลขที่บัญชี', bankAccount])
+      rows.push([])
+
+      // Summary KPIs
+      rows.push(['สรุปยอดงวดนี้'])
+      rows.push(['วันทำงานทั้งหมด (วัน)', stats.totalDaysWorked, 'กะเช้า', stats.morningShifts, 'กะบ่าย', stats.afternoonShifts])
+      rows.push(['รายได้รวม (บาท)', stats.grossEarnings, 'รายการหักรวม (บาท)', stats.totalDeductions, 'สุทธิรับจริง NET PAY (บาท)', stats.netEarnings])
+      rows.push([])
+
+      // Daily Log Table
+      rows.push(['1. บันทึกรายวัน (Daily Log)'])
+      rows.push(['วันที่', 'ประเภทวัน', 'กะ/สถานะ', 'จำนวนชั่วโมง', 'ค่าจ้างปกติ', 'ค่ากะ', 'OT', 'ไม้ส่วนเกิน', 'ค่าฟิล์ม', 'สลับตำแหน่ง', 'รวมรายได้วัน'])
+
+      dailyEstimates.forEach(day => {
+        const isHoliday = day.dayType === 'holiday'
+        const isWeekend = day.dayType === 'weekend'
+        const dayTypeLabel = isHoliday ? 'วันหยุดนักขัตฤกษ์' : isWeekend ? 'วันหยุดสัปดาห์' : 'วันธรรมดา'
+        const shiftLabel = day.isWorked
+          ? (selectedEmp.position === 'clerk' ? 'ทำงานปกติ' : (day.shiftType === 'morning' ? 'เช้า' : day.shiftType === 'afternoon' ? 'บ่าย' : 'เข้ากะ'))
+          : 'หยุด'
+
+        rows.push([
+          day.workDate,
+          dayTypeLabel,
+          shiftLabel,
+          day.isWorked ? day.hours : 0,
+          day.baseWage,
+          day.shiftAllowance,
+          day.otPay,
+          day.woodExcess,
+          day.filmAmount,
+          day.crossPay > 0 ? `${day.crossPay} (${day.crossTitle || ''})` : 0,
+          day.totalEarned
+        ])
+      })
+
+      rows.push([])
+
+      // Period Adjustments & Deductions
+      rows.push(['2. รายการประจำงวด & รายการหักเงิน'])
+      rows.push(['ประเภทรายการ', 'รายละเอียด / หมายเหตุ', 'จำนวนเงิน (บาท)'])
+
+      if (clerkPeriodBase > 0) rows.push(['รายได้', 'ค่าจ้างพื้นฐาน (ครึ่งเดือน)', clerkPeriodBase])
+      if (stats.entryDiligence > 0) rows.push(['รายได้', 'เบี้ยขยันประจำงวด', stats.entryDiligence])
+      if (stats.entryPosition > 0) rows.push(['รายได้', 'ค่าตำแหน่งประจำงวด', stats.entryPosition])
+      if (stats.entrySpecial > 0) rows.push(['รายได้', `เงินพิเศษ / ปรับปรุง (${empEntry?.special_note || ''})`, stats.entrySpecial])
+
+      if (stats.entrySS > 0) rows.push(['รายการหัก', 'ประกันสังคม', -stats.entrySS])
+      empAdvances.forEach((adv, i) => {
+        rows.push(['รายการหัก', `เบิกล่วงหน้า (#${i+1}) ${adv.notes || ''}`, -Number(adv.amount || 0)])
+      })
+      if (stats.entrySafety > 0) rows.push(['รายการหัก', 'อุปกรณ์ความปลอดภัย', -stats.entrySafety])
+      if (stats.entryUniform > 0) rows.push(['รายการหัก', 'ค่าเสื้อพนักงาน', -stats.entryUniform])
+
+      rows.push([])
+      rows.push(['ยอดเงินสุทธิรับจริง (NET PAY)', '', stats.netEarnings])
+
+      const wb = XLSX.utils.book_new()
+      const ws = XLSX.utils.aoa_to_sheet(rows)
+
+      ws['!cols'] = [
+        { wch: 16 }, { wch: 22 }, { wch: 14 }, { wch: 14 }, { wch: 14 },
+        { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 20 }, { wch: 16 }
+      ]
+
+      XLSX.utils.book_append_sheet(wb, ws, 'Employee Summary')
+      const safeName = `${selectedEmp.employee_code}_${selectedEmp.first_name}`.replace(/[\s/*?:[\]]/g, '_')
+      const safePeriod = periodLabelStr.replace(/[\s/*?:[\]]/g, '_')
+      XLSX.writeFile(wb, `Summary_${safeName}_${safePeriod}.xlsx`)
+      toast.success('ดาวน์โหลด Excel สรุปพนักงานสำเร็จ')
+    } catch (e: any) {
+      toast.error('เกิดข้อผิดพลาดในการสร้าง Excel', { description: e.message })
+    } finally {
+      setIsExportingExcel(false)
+    }
+  }
+
   return (
     <>
       <TopBar title="สรุปภาพรวมพนักงาน" subtitle={currentPeriod ? currentPeriod.label : 'กำลังโหลด...'} onMenuClick={onMenuClick} />
@@ -526,12 +849,26 @@ export default function EmployeeSummary() {
                     )}
                   </div>
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'flex-end' }}>
-                  <label className="vk-eyebrow" style={{ fontSize: 9 }}>งวดการจ่ายเงิน</label>
-                  <select value={selectedPeriodId ?? ''} onChange={e => setSelectedPeriodId(e.target.value)}
-                    style={{ height: 32, fontFamily: 'var(--vk-sans)', fontSize: 12, fontWeight: 600, border: '1px solid var(--vk-rule)', padding: '0 20px 0 8px', background: 'var(--vk-bone)', color: 'var(--vk-ink)', cursor: 'pointer', outline: 'none' }}>
-                    {periods.map(p => <option key={p.id} value={p.id}>{p.label} {p.status === 'approved' ? '✓' : '(ร่าง)'}</option>)}
-                  </select>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end' }}>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <button className="vk-btn" onClick={handleExportExcel} disabled={isExportingExcel}
+                      style={{ fontSize: 11, padding: '4px 10px', height: 28, borderColor: 'var(--vk-jade)', color: 'var(--vk-jade)', display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer', background: 'var(--vk-paper)', opacity: isExportingExcel ? 0.6 : 1 }}>
+                      {isExportingExcel ? <Loader2 style={{ width: 12, height: 12 }} className="animate-spin" /> : <FileSpreadsheet style={{ width: 12, height: 12 }} />}
+                      Excel
+                    </button>
+                    <button className="vk-btn" onClick={handleExportPdf} disabled={isExportingPdf}
+                      style={{ fontSize: 11, padding: '4px 10px', height: 28, borderColor: 'var(--vk-crimson)', color: 'var(--vk-crimson)', display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer', background: 'var(--vk-paper)', opacity: isExportingPdf ? 0.6 : 1 }}>
+                      {isExportingPdf ? <Loader2 style={{ width: 12, height: 12 }} className="animate-spin" /> : <Printer style={{ width: 12, height: 12 }} />}
+                      PDF
+                    </button>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'flex-end' }}>
+                    <label className="vk-eyebrow" style={{ fontSize: 9 }}>งวดการจ่ายเงิน</label>
+                    <select value={selectedPeriodId ?? ''} onChange={e => setSelectedPeriodId(e.target.value)}
+                      style={{ height: 28, fontFamily: 'var(--vk-sans)', fontSize: 12, fontWeight: 600, border: '1px solid var(--vk-rule)', padding: '0 20px 0 8px', background: 'var(--vk-bone)', color: 'var(--vk-ink)', cursor: 'pointer', outline: 'none' }}>
+                      {periods.map(p => <option key={p.id} value={p.id}>{p.label} {p.status === 'approved' ? '✓' : '(ร่าง)'}</option>)}
+                    </select>
+                  </div>
                 </div>
               </div>
 
