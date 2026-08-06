@@ -330,7 +330,7 @@ export default function Export() {
         amount_normal,amount_shift,amount_ot,amount_wood_excess,amount_film,
         amount_special,amount_diligence,amount_position,
         deduct_social_security,deduct_advance,deduct_safety_equipment,deduct_uniform,
-        employee:employees(employee_code,first_name,last_name,status)
+        employee:employees(employee_code,first_name,last_name,payment_method,bank_name,bank_account,status)
       `).in('period_id', ids).limit(10000)
       if (error) throw error
       if (!data?.length) { toast.error('ไม่พบข้อมูลในช่วงเวลานี้'); return }
@@ -347,10 +347,30 @@ export default function Export() {
       })
       const rows = Object.values(map).map((x: any) => {
         const income = x.n+x.s+x.ot+x.w+x.f+x.sp+x.d+x.p; const deduct = x.ss+x.adv+x.safe+x.uni
-        return { 'รหัสพนักงาน':x.emp.employee_code,'ชื่อ-นามสกุล':`${x.emp.first_name} ${x.emp.last_name}`.trim(),
-          'ค่าจ้างรวม':x.n+x.s,'ค่าจ้างปกติ':x.n,'ค่ากะ':x.s,'OT':x.ot,'ค่าไม้เกิน':x.w,'ค่าฟิล์ม':x.f,
-          'ค่าพิเศษ':x.sp,'เบี้ยขยัน':x.d,'ค่าตำแหน่ง':x.p,'ประกันสังคม':x.ss,'เบิกล่วงหน้า':x.adv,
-          'ค่าอุปกรณ์ความปลอดภัย':x.safe,'ค่าเสื้อพนักงาน':x.uni,'รวม':income-deduct }
+        const payMethod = x.emp.payment_method === 'bank_transfer' ? 'โอนธนาคาร' : (x.emp.payment_method === 'cash' ? 'เงินสด' : (x.emp.payment_method || '-'))
+        const bankName = x.emp.payment_method === 'bank_transfer' ? (x.emp.bank_name || '-') : '-'
+        const bankAccount = x.emp.payment_method === 'bank_transfer' ? (x.emp.bank_account || '-') : '-'
+        return {
+          'รหัสพนักงาน': x.emp.employee_code,
+          'ชื่อ-นามสกุล': `${x.emp.first_name} ${x.emp.last_name}`.trim(),
+          'วิธีการรับเงิน': payMethod,
+          'ธนาคาร': bankName,
+          'เลขที่บัญชี': bankAccount,
+          'ค่าจ้างรวม': x.n+x.s,
+          'ค่าจ้างปกติ': x.n,
+          'ค่ากะ': x.s,
+          'OT': x.ot,
+          'ค่าไม้เกิน': x.w,
+          'ค่าฟิล์ม': x.f,
+          'ค่าพิเศษ': x.sp,
+          'เบี้ยขยัน': x.d,
+          'ค่าตำแหน่ง': x.p,
+          'ประกันสังคม': x.ss,
+          'เบิกล่วงหน้า': x.adv,
+          'ค่าอุปกรณ์ความปลอดภัย': x.safe,
+          'ค่าเสื้อพนักงาน': x.uni,
+          'รวม': income-deduct
+        }
       }).sort((a,b)=>String(a['รหัสพนักงาน']).localeCompare(String(b['รหัสพนักงาน'])))
       const label = getExportLabel()
       const wb = XLSX.utils.book_new(); const ws = XLSX.utils.aoa_to_sheet([[`ค่าแรง ${label}`]])
