@@ -1063,19 +1063,32 @@ body{margin:0;padding:0;background:#fff;font-family:'Sarabun',sans-serif}
         )}
 
         {/* Cards */}
-        <div style={isNormalUser ? { display: 'flex', maxWidth: 360, border: '1px solid var(--vk-rule)' } : undefined} className={isNormalUser ? undefined : 'vk-grid-3'}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 20 }}>
           {cards.map((card, i) => {
             const Icon = card.icon
             return (
-              <div key={i} style={{ background: 'var(--vk-bone)', padding: '28px 24px', display: 'flex', flexDirection: 'column' }}>
-                <div style={{ width: 40, height: 40, border: '1px solid var(--vk-rule)', background: 'var(--vk-paper)', display: 'grid', placeItems: 'center', marginBottom: 18, flexShrink: 0 }}>
-                  <Icon style={{ width: 18, height: 18, color: card.color }} />
+              <div key={i} style={{
+                background: 'var(--vk-bone)',
+                border: '1px solid var(--vk-rule)',
+                padding: '24px 24px 20px',
+                display: 'flex',
+                flexDirection: 'column',
+                boxShadow: '0 2px 4px rgba(29,26,21,0.02)',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+                  <div style={{ width: 42, height: 42, border: '1px solid var(--vk-rule)', background: 'var(--vk-paper)', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+                    <Icon style={{ width: 20, height: 20, color: card.color }} />
+                  </div>
+                  <div style={{ fontFamily: 'var(--vk-sans)', fontWeight: 700, fontSize: 16, letterSpacing: '-0.01em', color: 'var(--vk-ink)' }}>{card.title}</div>
                 </div>
-                <div style={{ fontFamily: 'var(--vk-sans)', fontWeight: 700, fontSize: 15, letterSpacing: '-0.01em', color: 'var(--vk-ink)', marginBottom: 8 }}>{card.title}</div>
-                <div style={{ fontFamily: 'var(--vk-sans)', fontSize: 13, color: 'var(--vk-ink-3)', lineHeight: 1.55, flex: 1 }}>{card.desc}</div>
+
+                <div style={{ fontFamily: 'var(--vk-sans)', fontSize: 13, color: 'var(--vk-ink-3)', lineHeight: 1.55, flex: 1, marginBottom: 20 }}>
+                  {card.desc}
+                </div>
+
                 <button className="vk-btn" onClick={card.onClick} disabled={card.loading}
-                  style={{ marginTop: 20, borderColor: card.color, color: card.color, display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: 'center', opacity: card.loading ? 0.6 : 1 }}>
-                  {card.loading ? <><Loader2 style={{ width: 13, height: 13 }} />กำลังสร้างไฟล์...</> : <><Download style={{ width: 13, height: 13 }} />{card.btn}</>}
+                  style={{ width: '100%', borderColor: card.color, color: card.color, display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: 'center', height: 38, opacity: card.loading ? 0.6 : 1 }}>
+                  {card.loading ? <><Loader2 style={{ width: 14, height: 14 }} className="animate-spin" />กำลังสร้างไฟล์...</> : <><Download style={{ width: 14, height: 14 }} />{card.btn}</>}
                 </button>
               </div>
             )
