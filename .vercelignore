@@ -1,0 +1,15 @@
+# Deployment contains application code only, never local credentials or payroll samples.
+.env
+.env.*
+*.xlsx
+*.xls
+*.csv
+*.sql
+*.md
+lint_output*.txt
+scratch/
+.claude/
+.git/
+node_modules/
+dist/
+*.log

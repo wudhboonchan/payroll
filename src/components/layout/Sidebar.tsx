@@ -17,15 +17,15 @@ import {
 interface Factory { id: string; name: string; companies: any }
 
 const NAV = [
-  { href: '/dashboard',  label: 'Dashboard',         icon: LayoutDashboard, roles: ['admin','superUser'] },
-  { href: '/employees',  label: 'ฐานข้อมูลพนักงาน', icon: Users,           roles: ['admin','superUser'] },
-  { href: '/shifts',     label: 'กรอกกะรายวัน',      icon: CalendarClock,   roles: ['admin','superUser'] },
-  { href: '/advances',   label: 'เบิกล่วงหน้า',      icon: CreditCard,      roles: ['admin','superUser'] },
-  { href: '/payroll',    label: 'กรอกค่าจ้าง',       icon: Calculator,      roles: ['admin','superUser'] },
-  { href: '/payslip',    label: 'ดูสลิปเงินเดือน',   icon: FileText,        roles: ['admin','superUser','normalUser'] },
-  { href: '/employee-summary', label: 'สรุปภาพรวมพนักงาน', icon: ClipboardList, roles: ['admin','superUser','normalUser'] },
-  { href: '/share-links',label: 'ลิงก์สลิปพนักงาน',  icon: Link2,           roles: ['admin','superUser','normalUser'] },
-  { href: '/export',     label: 'ส่งออกข้อมูล',      icon: Download,        roles: ['admin','superUser','normalUser'] },
+  { href: '/dashboard',  label: 'Dashboard',         icon: LayoutDashboard, roles: ['admin'] },
+  { href: '/employees',  label: 'ฐานข้อมูลพนักงาน', icon: Users,           roles: ['admin'] },
+  { href: '/shifts',     label: 'กรอกกะรายวัน',      icon: CalendarClock,   roles: ['admin'] },
+  { href: '/advances',   label: 'เบิกล่วงหน้า',      icon: CreditCard,      roles: ['admin'] },
+  { href: '/payroll',    label: 'กรอกค่าจ้าง',       icon: Calculator,      roles: ['admin'] },
+  { href: '/payslip',    label: 'ดูสลิปเงินเดือน',   icon: FileText,        roles: ['admin','normalUser'] },
+  { href: '/employee-summary', label: 'สรุปภาพรวมพนักงาน', icon: ClipboardList, roles: ['admin','normalUser'] },
+  { href: '/share-links',label: 'ลิงก์สลิปพนักงาน',  icon: Link2,           roles: ['admin','normalUser'] },
+  { href: '/export',     label: 'ส่งออกข้อมูล',      icon: Download,        roles: ['admin','normalUser'] },
   { href: '/users',      label: 'จัดการผู้ใช้งาน',   icon: UserCog,         roles: ['admin'] },
 ]
 
@@ -42,7 +42,7 @@ export function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
   const [showPw, setShowPw] = useState(false)
 
   useEffect(() => {
-    if (user?.role === 'admin' || user?.role === 'superUser') {
+    if (user?.role === 'admin') {
       supabase.from('factories').select('id, name, companies(id, name, short_name, company_type)').order('name')
         .then(({ data }) => { if (data) setFactories(data) })
     }
@@ -130,7 +130,7 @@ export function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
         {/* Factory picker */}
         <div style={{ margin: '10px 12px', padding: '10px 12px', background: 'var(--vk-paper)', border: '1px solid var(--vk-rule-soft)', borderRadius: 6 }}>
           <div className="vk-eyebrow" style={{ marginBottom: 3 }}>โรงงาน · บริษัท</div>
-          {(user?.role === 'admin' || user?.role === 'superUser') ? (
+          {user?.role === 'admin' ? (
             <select value={user?.factory_id || ''} onChange={handleFactoryChange}
               style={{ width: '100%', fontFamily: 'var(--vk-sans)', fontWeight: 600, fontSize: 13, color: 'var(--vk-persimmon-ink)', background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', outline: 'none' }}>
               <option value="" disabled>เลือกโรงงาน</option>
@@ -172,7 +172,7 @@ export function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--vk-ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{user?.full_name || 'ผู้ใช้งาน'}</div>
-                <div style={{ fontSize: 11, color: 'var(--vk-ink-3)' }}>{user?.role === 'superUser' ? 'SuperAdmin' : user?.role === 'normalUser' ? 'User' : user?.role}</div>
+                <div style={{ fontSize: 11, color: 'var(--vk-ink-3)' }}>{user?.role === 'admin' ? 'ผู้ดูแลระบบ' : 'ผู้ใช้ทั่วไป'}</div>
               </div>
               <ChevronDown style={{ width: 14, height: 14, color: 'var(--vk-ink-3)', flexShrink: 0 }} />
             </DropdownMenuTrigger>

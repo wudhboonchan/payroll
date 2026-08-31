@@ -7,6 +7,7 @@ export function useAuth() {
   const { setUser, setCompanyContext } = useAppStore()
   const [loading, setLoading] = useState(true)
   const loadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const sessionRevision = useRef(0)
 
   interface Company {
     id: string;
@@ -28,6 +29,7 @@ export function useAuth() {
   }
 
   const handleSession = useCallback(async (session: Session | null) => {
+    const revision = ++sessionRevision.current;
     if (!session?.user) {
       setUser(null);
       setCompanyContext(null);
@@ -42,19 +44,24 @@ export function useAuth() {
         .eq('id', session.user.id)
         .single();
 
+      if (revision !== sessionRevision.current) return;
+
       if (error) {
         console.error('Profile fetch error:', error);
-        setUser({
-          id: session.user.id,
-          role: 'admin',
-          factory_id: '',
-          full_name: session.user.email
-        });
+        // Fail closed. A missing/broken profile must never grant admin access.
+        setUser(null);
+        setCompanyContext(null);
       } else if (data) {
         const profile = data as unknown as Profile;
+        if (!['admin', 'normalUser'].includes(profile.role)) {
+          setUser(null);
+          setCompanyContext(null);
+          return;
+        }
+        setCompanyContext(null);
         setUser({
           id: profile.id,
-          role: profile.role || 'admin',
+          role: profile.role,
           factory_id: profile.factory_id,
           full_name: profile.full_name || session.user.email
         });
@@ -72,12 +79,17 @@ export function useAuth() {
       }
     } catch (e) {
       console.error('handleSession error:', e);
+      if (revision === sessionRevision.current) {
+        setUser(null);
+        setCompanyContext(null);
+      }
     } finally {
-      setLoading(false);
+      if (revision === sessionRevision.current) setLoading(false);
     }
   }, [setUser, setCompanyContext]);
 
   useEffect(() => {
+    const revisionRef = sessionRevision;
     let isMounted = true;
     // ใช้ local variable แทน ref เพื่อ track ว่า initial session ถูก handle แล้วหรือยัง
     let initialSessionHandled = false;
@@ -120,6 +132,7 @@ export function useAuth() {
 
     return () => {
       isMounted = false;
+      revisionRef.current++;
       if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current);
       subscription.unsubscribe();
     }

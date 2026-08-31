@@ -26,7 +26,7 @@ CREATE TABLE factories (
 CREATE TABLE profiles (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   factory_id UUID REFERENCES factories(id) ON DELETE SET NULL,
-  role TEXT CHECK (role IN ('admin', 'superUser', 'normalUser')),
+  role TEXT NOT NULL DEFAULT 'normalUser' CHECK (role IN ('admin', 'normalUser')),
   full_name TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );

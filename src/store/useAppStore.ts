@@ -25,7 +25,11 @@ interface AppState {
 
 export const useAppStore = create<AppState>((set) => ({
   user: null,
-  setUser: (user) => set({ user }),
+  setUser: (user) => set((state) => ({
+    user,
+    selectedPeriodId: state.user?.id === user?.id && state.user?.factory_id === user?.factory_id
+      ? state.selectedPeriodId : null,
+  })),
   companyContext: null,
   setCompanyContext: (companyContext) => set({ companyContext }),
   selectedPeriodId: null,

@@ -1,6 +1,5 @@
 import { useOutletContext } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { createClient } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 import { useAppStore } from '../store/useAppStore'
 import { TopBar } from '../components/layout/TopBar'
@@ -8,13 +7,6 @@ import { useState } from 'react'
 import { Plus, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import '../styles/tokens.css'
-
-// Admin client — uses service role key to create users without email confirmation / rate limits
-const adminClient = createClient(
-  import.meta.env.VITE_SUPABASE_URL || '',
-  import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY || '',
-  { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } }
-)
 
 export default function UserManagement() {
   const { onMenuClick } = useOutletContext<{ onMenuClick: () => void }>()
@@ -27,7 +19,7 @@ export default function UserManagement() {
   const { data: profiles = [] } = useQuery<any[]>({
     queryKey: ['user-profiles'],
     queryFn: async () => {
-      const { data, error } = await adminClient.from('profiles').select('id,full_name,role,factory_id,factory:factories(name)').eq('role','normalUser').order('full_name')
+      const { data, error } = await supabase.from('profiles').select('id,full_name,role,factory_id,factory:factories(name)').order('full_name')
       if (error) throw error; return data
     },
     staleTime: 0,
@@ -45,18 +37,19 @@ export default function UserManagement() {
     mutationFn: async () => {
       setFormError('')
       if (!form.email || !form.password || !form.full_name || !form.factory_id) throw new Error('กรุณากรอกข้อมูลให้ครบทุกช่อง')
-      if (form.password.length < 6) throw new Error('รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร')
-      // Use admin API — no confirmation email, no rate limit
-      const { data: createData, error: signUpError } = await adminClient.auth.admin.createUser({
-        email: form.email, password: form.password, email_confirm: true,
+      if (form.password.length < 8) throw new Error('รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร')
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.access_token) throw new Error('Session หมดอายุ กรุณาเข้าสู่ระบบใหม่')
+      const response = await fetch('/api/admin-users', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ ...form, role: 'normalUser' }),
       })
-      if (signUpError) throw signUpError
-      if (!createData.user) throw new Error('ไม่สามารถสร้างบัญชีได้')
-      // Admin client has service role → bypasses RLS
-      const { error: profileError } = await adminClient.from('profiles').upsert({
-        id: createData.user.id, full_name: form.full_name, role: 'normalUser', factory_id: form.factory_id,
-      })
-      if (profileError) throw profileError
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || 'ไม่สามารถสร้างบัญชีได้')
     },
     onSuccess: () => {
       queryClient.refetchQueries({ queryKey: ['user-profiles'] })
@@ -69,8 +62,18 @@ export default function UserManagement() {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from('profiles').delete().eq('id', id)
-      if (error) throw error
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.access_token) throw new Error('Session หมดอายุ กรุณาเข้าสู่ระบบใหม่')
+      const response = await fetch('/api/admin-users', {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ id }),
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || 'ลบผู้ใช้ไม่สำเร็จ')
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['user-profiles'] }); toast.success('ลบผู้ใช้แล้ว') },
     onError: (e: Error) => toast.error('ลบไม่สำเร็จ', { description: e.message }),
@@ -107,17 +110,17 @@ export default function UserManagement() {
                 <div>
                   <div style={{ fontWeight: 600, fontSize: 14 }}>{p.full_name || '—'}</div>
                   <div style={{ fontFamily: 'var(--vk-sans)', fontSize: 12, color: 'var(--vk-ink-3)', marginTop: 1 }}>
-                    {(p.factory as any)?.name || 'ไม่ระบุโรงงาน'}
+                    {p.role === 'admin' ? 'ทุกโรงงาน' : (p.factory as any)?.name || 'ไม่ระบุโรงงาน'}
                   </div>
                 </div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span className="vk-pill">User</span>
-                <button className="vk-btn vk-btn--ghost" style={{ width: 30, height: 30, padding: 0 }}
+                <span className="vk-pill">{p.role === 'admin' ? 'ผู้ดูแลระบบ' : p.role === 'normalUser' ? 'ผู้ใช้ทั่วไป' : 'รอปรับบทบาทเดิม'}</span>
+                {p.role === 'normalUser' && <button aria-label={`ลบผู้ใช้ ${p.full_name || ''}`} className="vk-btn vk-btn--ghost" style={{ width: 30, height: 30, padding: 0 }}
                   onClick={() => { if (window.confirm(`ยืนยันการลบ "${p.full_name}"?`)) deleteMutation.mutate(p.id) }}
                   disabled={deleteMutation.isPending}>
                   <Trash2 style={{ width: 13, height: 13, color: 'var(--vk-crimson)' }} />
-                </button>
+                </button>}
               </div>
             </div>
           ))}
@@ -137,7 +140,7 @@ export default function UserManagement() {
               {[
                 { label: 'ชื่อ-นามสกุล', key: 'full_name', placeholder: 'เช่น สมชาย ใจดี', type: 'text' },
                 { label: 'อีเมล', key: 'email', placeholder: 'email@example.com', type: 'email' },
-                { label: 'รหัสผ่าน', key: 'password', placeholder: 'อย่างน้อย 6 ตัวอักษร', type: 'password' },
+                { label: 'รหัสผ่าน', key: 'password', placeholder: 'อย่างน้อย 8 ตัวอักษร', type: 'password' },
               ].map(f => (
                 <div key={f.key}>
                   <label className="vk-eyebrow" style={{ display: 'block', marginBottom: 5 }}>{f.label} <span style={{ color: 'var(--vk-crimson)' }}>*</span></label>

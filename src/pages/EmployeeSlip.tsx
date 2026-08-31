@@ -14,6 +14,7 @@ import { CheckCircle2, AlertCircle, Clock, Loader2, ShieldAlert, Eye } from 'luc
 import '../styles/tokens.css'
 
 interface PayslipRPCResponse {
+  shifts?: ShiftAssignment[]
   token_data: {
     employee_id: string
     period_id: string
@@ -22,6 +23,7 @@ interface PayslipRPCResponse {
     expires_at: string
   }
   employee: {
+    position?: string
     employee_code: string
     first_name: string
     last_name: string
@@ -90,32 +92,12 @@ export default function EmployeeSlip() {
     return typeof rawData === 'string' ? JSON.parse(rawData)?.token_data : rawData?.token_data
   }, [rawData])
 
-  // Fetch shifts for day counts
-  const { data: slipShifts = [] } = useQuery<ShiftAssignment[]>({
-    queryKey: ['shifts-for-slip-public', tokenData?.employee_id, tokenData?.period_id],
-    queryFn: async () => {
-      if (!tokenData?.employee_id || !tokenData?.period_id) return []
-      const { data, error } = await supabase
-        .from('shift_assignments')
-        .select('is_holiday_ot, is_half_shift, ot_hours, work_date')
-        .eq('employee_id', tokenData.employee_id)
-        .eq('period_id', tokenData.period_id)
-      if (error) throw error
-      return data as ShiftAssignment[]
-    },
-    enabled: !!tokenData?.employee_id && !!tokenData?.period_id
-  })
-
-  // Fetch position just to be safe if RPC didn't include it
-  const { data: empPosition = 'worker' } = useQuery({
-    queryKey: ['emp-pos', tokenData?.employee_id],
-    queryFn: async () => {
-      if (!tokenData?.employee_id) return 'worker'
-      const { data } = await supabase.from('employees').select('position').eq('id', tokenData.employee_id).single()
-      return data?.position || 'worker'
-    },
-    enabled: !!tokenData?.employee_id
-  })
+  // Anonymous viewers receive only the data authorized by their payslip token.
+  // Never read employee/shift tables directly from this public page.
+  const authorizedData: PayslipRPCResponse | null = !rawData ? null
+    : typeof rawData === 'string' ? JSON.parse(rawData) : rawData
+  const slipShifts = authorizedData?.shifts ?? []
+  const empPosition = authorizedData?.employee?.position ?? 'worker'
 
   const isClerkSlip = empPosition === 'clerk'
   const normalShiftsForSlip = slipShifts.filter((s: ShiftAssignment) => !s.is_holiday_ot)

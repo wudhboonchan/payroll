@@ -249,7 +249,7 @@ export default function ShareLinks() {
     a.click(); URL.revokeObjectURL(url)
   }
 
-  const isAdminOrSuper = user?.role === 'admin' || user?.role === 'superUser'
+  const isAdmin = user?.role === 'admin'
 
   return (
     <>
@@ -273,7 +273,7 @@ export default function ShareLinks() {
                 {periods.map(p => <option key={p.id} value={p.id}>{p.label}{p.status === 'approved' ? ' ✓' : ' (ร่าง)'}</option>)}
               </select>
             )}
-            {isAdminOrSuper && (
+            {isAdmin && (
               <button className="vk-btn vk-btn--primary" onClick={() => generateMutation.mutate()}
                 disabled={!isApproved || generateMutation.isPending}
                 style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
@@ -434,7 +434,7 @@ export default function ShareLinks() {
                       <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', flexWrap: 'nowrap' }}>
                         <CopyButton text={slipUrl} label="ลิงก์" icon={<Link2 style={{ width: 11, height: 11 }} />} />
                         <CopyButton text={messageText} label="ข้อความ" />
-                        {isAdminOrSuper && (
+                        {isAdmin && (
                           <button className="vk-btn vk-btn--ghost" onClick={() => setShowResetConfirm(t.id)}
                             style={{ height: 28, padding: '0 10px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}
                             title="สร้างลิงก์ใหม่ (ลิงก์เก่าจะถูกยกเลิก)">

@@ -1,4 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { useEffect } from 'react'
+import { useAppStore } from './store/useAppStore'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Toaster } from './components/ui/sonner'
 import { useAuth } from './hooks/useAuth'
@@ -12,7 +14,7 @@ import PaySlip from './pages/PaySlip'
 import Export from './pages/Export'
 import ShareLinks from './pages/ShareLinks'
 import EmployeeSlipPage from './pages/EmployeeSlip'
-import LiffSlip from './pages/LiffSlip'
+import LiffUnavailable from './pages/LiffUnavailable'
 import UserManagement from './pages/UserManagement'
 import EmployeeSummary from './pages/EmployeeSummary'
 import { AppLayout, RequireAuth } from './components/layout/AppLayout'
@@ -30,6 +32,10 @@ const queryClient = new QueryClient({
 })
 
 function App() {
+  useEffect(() => useAppStore.subscribe((state, previous) => {
+    if (state.user?.id !== previous.user?.id || state.user?.role !== previous.user?.role
+      || state.user?.factory_id !== previous.user?.factory_id) queryClient.clear()
+  }), [])
   const { loading } = useAuth()
 
   return (
@@ -49,7 +55,7 @@ function App() {
               {/* ── Main App ─────────────────────────────────────── */}
               <Route path="/login" element={<Login />} />
               <Route element={<AppLayout />}>
-                <Route element={<RequireAuth allowedRoles={['admin', 'superUser']} />}>
+                <Route element={<RequireAuth allowedRoles={['admin']} />}>
                   <Route path="/"           element={<Navigate to="/dashboard" replace />} />
                   <Route path="/dashboard"  element={<Dashboard />} />
                   <Route path="/employees"  element={<Employees />} />
@@ -57,7 +63,7 @@ function App() {
                   <Route path="/payroll"    element={<PayrollEntry />} />
                   <Route path="/advances"   element={<Advances />} />
                 </Route>
-                <Route element={<RequireAuth allowedRoles={['admin', 'superUser', 'normalUser']} />}>
+                <Route element={<RequireAuth allowedRoles={['admin', 'normalUser']} />}>
                   <Route path="/payslip"    element={<PaySlip />} />
                   <Route path="/employee-summary" element={<EmployeeSummary />} />
                   <Route path="/share-links" element={<ShareLinks />} />
@@ -70,7 +76,7 @@ function App() {
 
               {/* ── Public pages ─────────────────────────────────── */}
               <Route path="/slip/:token" element={<EmployeeSlipPage />} />
-              <Route path="/liff-slip"  element={<LiffSlip />} />
+              <Route path="/liff-slip"  element={<LiffUnavailable />} />
 
               <Route path="*" element={<Navigate to="/login" replace />} />
             </Routes>
