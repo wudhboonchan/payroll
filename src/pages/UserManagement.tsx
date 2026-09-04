@@ -127,7 +127,7 @@ export default function UserManagement() {
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <span className="vk-pill">{p.role === 'superUser' ? 'ผู้ดูแลระบบสูงสุด' : p.role === 'admin' ? 'ผู้ดูแลโรงงาน' : p.role === 'normalUser' ? 'ผู้ใช้ทั่วไป' : 'บทบาทไม่ถูกต้อง'}</span>
-                {p.role === 'normalUser' && <button aria-label={`ลบผู้ใช้ ${p.full_name || ''}`} className="vk-btn vk-btn--ghost" style={{ width: 30, height: 30, padding: 0 }}
+                {(p.role === 'normalUser' || (user?.role === 'superUser' && p.role === 'admin')) && p.id !== user?.id && <button aria-label={`ลบผู้ใช้ ${p.full_name || ''}`} className="vk-btn vk-btn--ghost" style={{ width: 30, height: 30, padding: 0 }}
                   onClick={() => { if (window.confirm(`ยืนยันการลบ "${p.full_name}"?`)) deleteMutation.mutate(p.id) }}
                   disabled={deleteMutation.isPending}>
                   <Trash2 style={{ width: 13, height: 13, color: 'var(--vk-crimson)' }} />

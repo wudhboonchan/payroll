@@ -133,8 +133,10 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
   if (caller.role === 'admin' && target.factory_id !== caller.factory_id) {
     return send(res, 403, { error: 'Administrators can only manage their own factory' })
   }
-  if (target.role !== 'normalUser') {
-    return send(res, 403, { error: 'Administrators cannot be deleted from this screen' })
+  const callerCanDeleteTarget = target.role === 'normalUser'
+    || (caller.role === 'superUser' && target.role === 'admin')
+  if (!callerCanDeleteTarget) {
+    return send(res, 403, { error: 'You are not allowed to delete this account' })
   }
   const { error: deleteError } = await admin.auth.admin.deleteUser(targetUserId)
   if (deleteError) return send(res, 400, { error: deleteError.message })
