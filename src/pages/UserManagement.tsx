@@ -19,7 +19,7 @@ export default function UserManagement() {
   const { user } = useAppStore()
   const queryClient = useQueryClient()
   const [isModalOpen, setIsModalOpen] = useState(false)
-  const [form, setForm] = useState({ email: '', password: '', full_name: '', factory_id: '' })
+  const [form, setForm] = useState({ email: '', password: '', full_name: '', factory_id: '', role: 'normalUser' })
   const [formError, setFormError] = useState('')
 
   const { data: profiles = [] } = useQuery<any[]>({
@@ -57,7 +57,7 @@ export default function UserManagement() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ ...form, role: 'normalUser' }),
+        body: JSON.stringify(form),
       })
       const result = await response.json()
       if (!response.ok) throw new Error(result.error || 'ไม่สามารถสร้างบัญชีได้')
@@ -66,7 +66,7 @@ export default function UserManagement() {
       queryClient.refetchQueries({ queryKey: ['user-profiles'] })
       toast.success('สร้างผู้ใช้เรียบร้อยแล้ว')
       setIsModalOpen(false)
-      setForm({ email: '', password: '', full_name: '', factory_id: '' })
+      setForm({ email: '', password: '', full_name: '', factory_id: '', role: 'normalUser' })
     },
     onError: (e: Error) => setFormError(e.message),
   })
@@ -165,6 +165,15 @@ export default function UserManagement() {
                   {factories.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
                 </select>
               </div>
+              {user?.role === 'superUser' && (
+                <div>
+                  <label className="vk-eyebrow" style={{ display: 'block', marginBottom: 5 }}>ระดับผู้ใช้งาน <span style={{ color: 'var(--vk-crimson)' }}>*</span></label>
+                  <select className="vk-input" value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}>
+                    <option value="normalUser">ผู้ใช้ทั่วไป</option>
+                    <option value="admin">ผู้ดูแลโรงงาน</option>
+                  </select>
+                </div>
+              )}
             </div>
             {formError && <div style={{ marginTop: 12, padding: '10px 14px', background: 'var(--vk-crimson-tint)', border: '1px solid var(--vk-crimson)', fontSize: 13, color: 'var(--vk-crimson)' }}>{formError}</div>}
             <div style={{ display: 'flex', gap: 8, marginTop: 20 }}>
