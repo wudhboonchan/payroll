@@ -8,6 +8,12 @@ import { Plus, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import '../styles/tokens.css'
 
+const ROLE_PRIORITY: Record<string, number> = {
+  superUser: 0,
+  admin: 1,
+  normalUser: 2,
+}
+
 export default function UserManagement() {
   const { onMenuClick } = useOutletContext<{ onMenuClick: () => void }>()
   const { user } = useAppStore()
@@ -20,7 +26,12 @@ export default function UserManagement() {
     queryKey: ['user-profiles'],
     queryFn: async () => {
       const { data, error } = await supabase.from('profiles').select('id,full_name,role,factory_id,factory:factories(name)').order('full_name')
-      if (error) throw error; return data
+      if (error) throw error
+      return [...(data ?? [])].sort((a, b) => {
+        const roleDifference = (ROLE_PRIORITY[a.role ?? ''] ?? 99) - (ROLE_PRIORITY[b.role ?? ''] ?? 99)
+        if (roleDifference !== 0) return roleDifference
+        return (a.full_name ?? '').localeCompare(b.full_name ?? '', 'th')
+      })
     },
     staleTime: 0,
   })
