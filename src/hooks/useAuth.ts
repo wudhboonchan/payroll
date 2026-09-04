@@ -53,7 +53,7 @@ export function useAuth() {
         setCompanyContext(null);
       } else if (data) {
         const profile = data as unknown as Profile;
-        if (!['admin', 'normalUser'].includes(profile.role)) {
+        if (!['superUser', 'admin', 'normalUser'].includes(profile.role)) {
           setUser(null);
           setCompanyContext(null);
           return;

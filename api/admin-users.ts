@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import process from 'node:process'
 
-type Role = 'admin' | 'normalUser'
+type Role = 'superUser' | 'admin' | 'normalUser'
 
 interface ApiRequest {
   method?: string
@@ -51,11 +51,11 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
 
   const { data: caller, error: callerError } = await admin
     .from('profiles')
-    .select('id, role')
+    .select('id, role, factory_id')
     .eq('id', authData.user.id)
     .single()
 
-  if (callerError || !caller || caller.role !== 'admin') {
+  if (callerError || !caller || !['superUser', 'admin'].includes(caller.role)) {
     return send(res, 403, { error: 'You are not allowed to manage users' })
   }
 
@@ -79,11 +79,14 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     if (password.length < 8) {
       return send(res, 400, { error: 'รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร' })
     }
-    if (!['admin', 'normalUser'].includes(requestedRole)) {
+    if (!['superUser', 'admin', 'normalUser'].includes(requestedRole)) {
       return send(res, 400, { error: 'Invalid role' })
     }
-    if (requestedRole !== 'normalUser') {
-      return send(res, 403, { error: 'New administrators must be provisioned manually' })
+    if (requestedRole === 'superUser' || (requestedRole === 'admin' && caller.role !== 'superUser')) {
+      return send(res, 403, { error: 'Only a SuperUser can create an administrator' })
+    }
+    if (caller.role === 'admin' && factory_id !== caller.factory_id) {
+      return send(res, 403, { error: 'Administrators can only manage their own factory' })
     }
     if (!(await factoryExists(factory_id))) {
       return send(res, 400, { error: 'Factory not found' })
@@ -122,11 +125,14 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
 
   const { data: target, error: targetError } = await admin
     .from('profiles')
-    .select('id, role')
+    .select('id, role, factory_id')
     .eq('id', targetUserId)
     .single()
 
   if (targetError || !target) return send(res, 404, { error: 'User not found' })
+  if (caller.role === 'admin' && target.factory_id !== caller.factory_id) {
+    return send(res, 403, { error: 'Administrators can only manage their own factory' })
+  }
   if (target.role !== 'normalUser') {
     return send(res, 403, { error: 'Administrators cannot be deleted from this screen' })
   }

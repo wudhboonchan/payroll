@@ -55,7 +55,7 @@ function App() {
               {/* ── Main App ─────────────────────────────────────── */}
               <Route path="/login" element={<Login />} />
               <Route element={<AppLayout />}>
-                <Route element={<RequireAuth allowedRoles={['admin']} />}>
+                <Route element={<RequireAuth allowedRoles={['superUser', 'admin']} />}>
                   <Route path="/"           element={<Navigate to="/dashboard" replace />} />
                   <Route path="/dashboard"  element={<Dashboard />} />
                   <Route path="/employees"  element={<Employees />} />
@@ -63,13 +63,13 @@ function App() {
                   <Route path="/payroll"    element={<PayrollEntry />} />
                   <Route path="/advances"   element={<Advances />} />
                 </Route>
-                <Route element={<RequireAuth allowedRoles={['admin', 'normalUser']} />}>
+                <Route element={<RequireAuth allowedRoles={['superUser', 'admin', 'normalUser']} />}>
                   <Route path="/payslip"    element={<PaySlip />} />
                   <Route path="/employee-summary" element={<EmployeeSummary />} />
                   <Route path="/share-links" element={<ShareLinks />} />
                   <Route path="/export"     element={<Export />} />
                 </Route>
-                <Route element={<RequireAuth allowedRoles={['admin']} />}>
+                <Route element={<RequireAuth allowedRoles={['superUser', 'admin']} />}>
                   <Route path="/users"      element={<UserManagement />} />
                 </Route>
               </Route>

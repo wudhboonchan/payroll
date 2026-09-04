@@ -249,7 +249,7 @@ export default function ShareLinks() {
     a.click(); URL.revokeObjectURL(url)
   }
 
-  const isAdmin = user?.role === 'admin'
+  const isAdmin = user?.role === 'admin' || user?.role === 'superUser'
 
   return (
     <>

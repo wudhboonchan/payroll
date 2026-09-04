@@ -79,7 +79,7 @@ export default function UserManagement() {
     onError: (e: Error) => toast.error('ลบไม่สำเร็จ', { description: e.message }),
   })
 
-  if (user?.role !== 'admin') return null
+  if (user?.role !== 'admin' && user?.role !== 'superUser') return null
 
   return (
     <>
@@ -110,12 +110,12 @@ export default function UserManagement() {
                 <div>
                   <div style={{ fontWeight: 600, fontSize: 14 }}>{p.full_name || '—'}</div>
                   <div style={{ fontFamily: 'var(--vk-sans)', fontSize: 12, color: 'var(--vk-ink-3)', marginTop: 1 }}>
-                    {p.role === 'admin' ? 'ทุกโรงงาน' : (p.factory as any)?.name || 'ไม่ระบุโรงงาน'}
+                    {p.role === 'superUser' ? 'ทุกโรงงาน' : (p.factory as any)?.name || 'ไม่ระบุโรงงาน'}
                   </div>
                 </div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span className="vk-pill">{p.role === 'admin' ? 'ผู้ดูแลระบบ' : p.role === 'normalUser' ? 'ผู้ใช้ทั่วไป' : 'รอปรับบทบาทเดิม'}</span>
+                <span className="vk-pill">{p.role === 'superUser' ? 'ผู้ดูแลระบบสูงสุด' : p.role === 'admin' ? 'ผู้ดูแลโรงงาน' : p.role === 'normalUser' ? 'ผู้ใช้ทั่วไป' : 'บทบาทไม่ถูกต้อง'}</span>
                 {p.role === 'normalUser' && <button aria-label={`ลบผู้ใช้ ${p.full_name || ''}`} className="vk-btn vk-btn--ghost" style={{ width: 30, height: 30, padding: 0 }}
                   onClick={() => { if (window.confirm(`ยืนยันการลบ "${p.full_name}"?`)) deleteMutation.mutate(p.id) }}
                   disabled={deleteMutation.isPending}>
