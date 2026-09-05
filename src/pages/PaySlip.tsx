@@ -61,6 +61,7 @@ const POSITIONS: Record<string, string> = {
 export default function PaySlip() {
   const { onMenuClick } = useOutletContext<{ onMenuClick: () => void }>()
   const { user } = useAppStore()
+  const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(null)
   const [selectedEmpId, setSelectedEmpId] = useState<string | null>(null)
   const [empSearch, setEmpSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'has_slip' | 'no_slip' | null>(null)
@@ -94,6 +95,24 @@ export default function PaySlip() {
     window.addEventListener('resize', applyScale)
     return () => { ro.disconnect(); window.removeEventListener('resize', applyScale) }
   }, [applyScale, selectedEmpId])
+
+  const { data: periods = [] } = useQuery<any[]>({
+    queryKey: ['periods', user?.factory_id],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('payroll_periods').select('*')
+        .eq('factory_id', user?.factory_id ?? '').order('period_start', { ascending: false })
+      if (error) throw error; return data
+    }, enabled: !!user?.factory_id, staleTime: 0,
+  })
+
+  // Auto-select initial period (latest) once periods are loaded
+  useEffect(() => {
+    if (periods.length > 0 && !selectedPeriodId) {
+      setSelectedPeriodId(periods[0].id)
+    }
+  }, [periods, selectedPeriodId])
+
+  const currentPeriod = periods.find(p => p.id === selectedPeriodId) || periods[0]
 
   const handlePrint = () => {
     const el = slipRef.current
@@ -135,22 +154,12 @@ export default function PaySlip() {
     setTimeout(() => { win.print(); win.close() }, 400)
   }
 
-  const { data: periods = [] } = useQuery<any[]>({
-    queryKey: ['periods', user?.factory_id],
-    queryFn: async () => {
-      const { data, error } = await supabase.from('payroll_periods').select('*')
-        .eq('factory_id', user?.factory_id ?? '').order('period_start', { ascending: false })
-      if (error) throw error; return data
-    }, enabled: !!user?.factory_id, staleTime: 0,
-  })
-  const currentPeriod = periods[0]
-
   const { data: employees = [] } = useQuery<any[]>({
     queryKey: ['employees-payslip', user?.factory_id],
     queryFn: async () => {
       const { data, error } = await supabase.from('employees')
-        .select('id,employee_code,first_name,last_name,nationality,position,job_title,wage_type,rate_per_12h,payment_method,bank_name,bank_account,exempt_social_security')
-        .eq('factory_id', user?.factory_id ?? '').eq('status', 'active').order('employee_code')
+        .select('id,employee_code,first_name,last_name,nationality,position,job_title,wage_type,rate_per_12h,payment_method,bank_name,bank_account,exempt_social_security,status')
+        .eq('factory_id', user?.factory_id ?? '').order('employee_code')
       if (error) throw error; return data
     }, enabled: !!user?.factory_id, staleTime: 0,
   })
@@ -355,6 +364,42 @@ export default function PaySlip() {
 
           {/* Sticky header — does not scroll */}
           <div style={{ flexShrink: 0, padding: '16px 12px 0' }}>
+            {/* Period Selector */}
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                <span className="vk-eyebrow" style={{ fontSize: 10 }}>งวดการจ่ายเงิน</span>
+                {currentPeriod && (
+                  <span style={{ fontSize: 10, color: currentPeriod.status === 'approved' ? 'var(--vk-jade)' : 'var(--vk-ink-3)', fontWeight: 600 }}>
+                    {currentPeriod.status === 'approved' ? 'อนุมัติแล้ว' : 'ฉบับร่าง'}
+                  </span>
+                )}
+              </div>
+              <select
+                value={selectedPeriodId ?? ''}
+                onChange={e => setSelectedPeriodId(e.target.value)}
+                style={{
+                  width: '100%',
+                  height: 32,
+                  fontFamily: 'var(--vk-sans)',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  border: '1px solid var(--vk-rule)',
+                  padding: '0 8px',
+                  background: 'var(--vk-bone)',
+                  color: 'var(--vk-ink)',
+                  outline: 'none',
+                  cursor: 'pointer',
+                  boxSizing: 'border-box'
+                }}
+              >
+                {periods.map(p => (
+                  <option key={p.id} value={p.id}>
+                    {p.label} {p.status === 'approved' ? '✓' : '(ร่าง)'}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <div className="vk-eyebrow" style={{ marginBottom: 8 }}>พนักงาน ({employees.length})</div>
             <div style={{ display: 'flex', gap: 6, fontSize: 10, marginBottom: 10, flexWrap: 'wrap' }}>
               {([
@@ -401,6 +446,7 @@ export default function PaySlip() {
             const hasSaved = savedIds.has(emp.id)
             const active = emp.id === selectedEmpId
             const n = fmtNationality(emp.nationality)
+            const isInactive = emp.status === 'inactive'
             return (
               <div key={emp.id} onClick={() => setSelectedEmpId(emp.id)}
                 className="vk-employee-card"
@@ -415,6 +461,9 @@ export default function PaySlip() {
                       </span>
                       {emp.position === 'clerk' && (
                         <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 999, background: 'rgba(177,71,41,0.12)', color: 'var(--vk-persimmon)', letterSpacing: '0.04em', flexShrink: 0 }}>เสมียน</span>
+                      )}
+                      {isInactive && (
+                        <span style={{ fontSize: 9, fontWeight: 600, padding: '1px 5px', borderRadius: 4, background: '#fee2e2', color: '#991b1b', flexShrink: 0 }}>ไม่ใช้งาน</span>
                       )}
                     </div>
                     <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 10, color: 'var(--vk-ink-3)', marginTop: 1 }}>{emp.employee_code}</div>
@@ -435,56 +484,88 @@ export default function PaySlip() {
           {!selectedEmp ? (
             <div style={{ paddingTop: 60, textAlign: 'center' }}>
               <div className="vk-eyebrow" style={{ marginBottom: 8 }}>เลือกพนักงานจากรายการทางซ้าย</div>
-              <div className="vk-small" style={{ color: 'var(--vk-ink-3)' }}>จุดสีเขียวหมายถึงมีสลิปพร้อมพิมพ์</div>
-            </div>
-          ) : !entry ? (
-            <div style={{ padding: 40, textAlign: 'center', border: '1px solid var(--vk-rule)', background: 'var(--vk-paper)' }}>
-              <div className="vk-eyebrow" style={{ marginBottom: 6 }}>ยังไม่มีข้อมูลค่าจ้าง</div>
-              <div className="vk-small" style={{ color: 'var(--vk-ink-3)' }}>กรุณาบันทึกค่าจ้างที่หน้า "กรอกค่าจ้าง" ก่อน</div>
+              <div className="vk-small" style={{ color: 'var(--vk-ink-3)' }}>จุดสีเขียวหมายถึงมีสลิปในงวดที่เลือก พร้อมพิมพ์</div>
             </div>
           ) : (
             <>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
-                <button className="vk-btn vk-btn--primary" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={handlePrint}>
-                  <Printer style={{ width: 14, height: 14 }} />พิมพ์สลิป
-                </button>
+              {/* Header bar with Period selector & Print button */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span className="vk-eyebrow" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>งวด:</span>
+                  <select
+                    value={selectedPeriodId ?? ''}
+                    onChange={e => setSelectedPeriodId(e.target.value)}
+                    style={{
+                      height: 32,
+                      fontFamily: 'var(--vk-sans)',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      border: '1px solid var(--vk-rule)',
+                      padding: '0 8px',
+                      background: 'var(--vk-paper)',
+                      color: 'var(--vk-ink)',
+                      outline: 'none',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {periods.map(p => (
+                      <option key={p.id} value={p.id}>
+                        {p.label} {p.status === 'approved' ? '✓' : '(ร่าง)'}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {entry && (
+                  <button className="vk-btn vk-btn--primary" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={handlePrint}>
+                    <Printer style={{ width: 14, height: 14 }} />พิมพ์สลิป
+                  </button>
+                )}
               </div>
 
-              {/* OUTDATED warning */}
-              {isOutdated && (
-                <div style={{ marginBottom: 12, background: '#fff3cd', border: '1px solid #f5c842', borderRadius: 6, padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span style={{ fontSize: 16 }}>⚠️</span>
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: 13, color: '#7a5c00' }}>ข้อมูลค่าจ้างไม่ตรงกับอัตราปัจจุบัน</div>
-                    <div style={{ fontSize: 11, color: '#9a7500', marginTop: 2 }}>อัตราค่าจ้างถูกแก้ไขหลังจากบันทึก กรุณาไปที่หน้า "กรอกค่าจ้าง" แล้วบันทึกใหม่อีกครั้งก่อนพิมพ์สลิป</div>
+              {!entry ? (
+                <div style={{ padding: 40, textAlign: 'center', border: '1px solid var(--vk-rule)', background: 'var(--vk-paper)' }}>
+                  <div className="vk-eyebrow" style={{ marginBottom: 6 }}>ยังไม่มีข้อมูลค่าจ้างใน{currentPeriod?.label || 'งวดนี้'}</div>
+                  <div className="vk-small" style={{ color: 'var(--vk-ink-3)' }}>พนักงานท่านนี้ยังไม่มีข้อมูลค่าจ้างในงวดที่เลือก หรือกรุณาบันทึกค่าจ้างที่หน้า "กรอกค่าจ้าง" ก่อน</div>
+                </div>
+              ) : (
+                <>
+                  {/* OUTDATED warning */}
+                  {isOutdated && (
+                    <div style={{ marginBottom: 12, background: '#fff3cd', border: '1px solid #f5c842', borderRadius: 6, padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ fontSize: 16 }}>⚠️</span>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: 13, color: '#7a5c00' }}>ข้อมูลค่าจ้างไม่ตรงกับอัตราปัจจุบัน</div>
+                        <div style={{ fontSize: 11, color: '#9a7500', marginTop: 2 }}>อัตราค่าจ้างถูกแก้ไขหลังจากบันทึก กรุณาไปที่หน้า "กรอกค่าจ้าง" แล้วบันทึกใหม่อีกครั้งก่อนพิมพ์สลิป</div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ══ SLIP ══════════════════════════════════════════════════════ */}
+                  {/* On mobile: scale the slip to fit viewport width */}
+                  <div className="vk-slip-scaler" ref={scalerRef}>
+                    <div id="slip-print" ref={(el) => { (slipRef as any).current = el; (innerRef as any).current = el }} style={{ width: 680, minWidth: 680 }}>
+                    <VKSlipDocument
+                      branchName={branchName ? fullCompanyName(branchName) : undefined}
+                      employeeName={`${selectedEmp.first_name} ${selectedEmp.last_name}`}
+                      employeeCode={selectedEmp.employee_code}
+                      positionLabel={posLabel}
+                      jobTitle={selectedEmp.job_title}
+                      periodLabel={currentPeriod ? thaiPeriod(currentPeriod.period_start, currentPeriod.period_end) : '—'}
+                      paymentMethod={selectedEmp.payment_method === 'bank_transfer' ? 'bank_transfer' : 'cash'}
+                      bankName={selectedEmp.bank_name}
+                      bankAccount={maskBank(selectedEmp.bank_account)}
+                      income={income}
+                      deductions={deductions}
+                      totalIncome={totalIncome}
+                      totalDeduct={totalDeduct}
+                      netPay={netPay}
+                      workingDays={workingDays}
+                      isOutdated={isOutdated}
+                    />
+                    </div>
                   </div>
-                </div>
+                </>
               )}
-
-              {/* ══ SLIP ══════════════════════════════════════════════════════ */}
-              {/* On mobile: scale the slip to fit viewport width */}
-              <div className="vk-slip-scaler" ref={scalerRef}>
-                <div id="slip-print" ref={(el) => { (slipRef as any).current = el; (innerRef as any).current = el }} style={{ width: 680, minWidth: 680 }}>
-                <VKSlipDocument
-                  branchName={branchName ? fullCompanyName(branchName) : undefined}
-                  employeeName={`${selectedEmp.first_name} ${selectedEmp.last_name}`}
-                  employeeCode={selectedEmp.employee_code}
-                  positionLabel={posLabel}
-                  jobTitle={selectedEmp.job_title}
-                  periodLabel={currentPeriod ? thaiPeriod(currentPeriod.period_start, currentPeriod.period_end) : '—'}
-                  paymentMethod={selectedEmp.payment_method === 'bank_transfer' ? 'bank_transfer' : 'cash'}
-                  bankName={selectedEmp.bank_name}
-                  bankAccount={maskBank(selectedEmp.bank_account)}
-                  income={income}
-                  deductions={deductions}
-                  totalIncome={totalIncome}
-                  totalDeduct={totalDeduct}
-                  netPay={netPay}
-                  workingDays={workingDays}
-                  isOutdated={isOutdated}
-                />
-                </div>
-              </div>
             </>
           )}
         </div>

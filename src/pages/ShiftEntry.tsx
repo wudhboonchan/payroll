@@ -330,6 +330,8 @@ export default function ShiftEntry() {
       queryClient.invalidateQueries({ queryKey: ['shifts-v2'] })
       queryClient.invalidateQueries({ queryKey: ['all-period-shifts'] })
       queryClient.invalidateQueries({ queryKey: ['summary-all-shifts'] })
+      queryClient.invalidateQueries({ queryKey: ['v2-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['payment-channel-stats'] })
       toast.success(`บันทึกข้อมูล ${fmtDisplay(activeDateStr)} สำเร็จ`)
     },
     onError: (e: Error) => toast.error('บันทึกไม่สำเร็จ', { description: e.message }),

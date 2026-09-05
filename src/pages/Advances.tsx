@@ -139,6 +139,8 @@ export default function Advances() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['advances-v2'] })
       queryClient.invalidateQueries({ queryKey: ['advances'] })
+      queryClient.invalidateQueries({ queryKey: ['v2-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['payment-channel-stats'] })
       toast.success(isEdit ? 'อัปเดตรายการแล้ว' : 'บันทึกการเบิกล่วงหน้าแล้ว')
       closeModal()
     },
@@ -161,6 +163,8 @@ export default function Advances() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['advances-v2'] })
       queryClient.invalidateQueries({ queryKey: ['advances'] })
+      queryClient.invalidateQueries({ queryKey: ['v2-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['payment-channel-stats'] })
       toast.success(`บันทึกยอดตกค้าง ${pendingCarryovers.length} รายการแล้ว`)
     },
     onError: (e: Error) => toast.error('บันทึกไม่สำเร็จ', { description: e.message }),
@@ -171,7 +175,13 @@ export default function Advances() {
       const { error } = await supabase.from('advance_payments').delete().eq('id', id)
       if (error) throw error
     },
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['advances-v2'] }); toast.success('ลบรายการแล้ว') },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['advances-v2'] })
+      queryClient.invalidateQueries({ queryKey: ['advances'] })
+      queryClient.invalidateQueries({ queryKey: ['v2-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['payment-channel-stats'] })
+      toast.success('ลบรายการแล้ว')
+    },
   })
 
   return (

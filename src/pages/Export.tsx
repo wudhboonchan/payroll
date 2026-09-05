@@ -621,8 +621,8 @@ export default function Export() {
     try {
       const XLSX = await import('xlsx')
       const { data, error } = await supabase.from('payroll_entries').select(`
-        amount_normal,amount_shift,amount_ot,amount_wood_excess,amount_film,
-        amount_special,amount_diligence,amount_position,
+        amount_normal,override_normal,amount_shift,amount_ot,amount_wood_excess,amount_film,
+        amount_special,override_special,amount_diligence,amount_position,
         deduct_social_security,deduct_advance,deduct_safety_equipment,deduct_uniform,
         employee:employees(employee_code,first_name,last_name,payment_method,bank_name,bank_account,status)
       `).in('period_id', ids).limit(10000)
@@ -630,14 +630,23 @@ export default function Export() {
       if (!data?.length) { toast.error('ไม่พบข้อมูลในช่วงเวลานี้'); return }
 
       const map: Record<string, any> = {}
-      ;(data as any[]).filter(r => r.employee && r.employee.status !== 'inactive').forEach(r => {
+      ;(data as any[]).filter(r => !!r.employee).forEach(r => {
         const k = r.employee.employee_code
         if (!map[k]) map[k] = { emp: r.employee, n:0,s:0,ot:0,w:0,f:0,sp:0,d:0,p:0,ss:0,adv:0,safe:0,uni:0 }
-        map[k].n+=r.amount_normal||0; map[k].s+=r.amount_shift||0; map[k].ot+=r.amount_ot||0
-        map[k].w+=r.amount_wood_excess||0; map[k].f+=r.amount_film||0; map[k].sp+=r.amount_special||0
-        map[k].d+=r.amount_diligence||0; map[k].p+=r.amount_position||0
-        map[k].ss+=Math.abs(r.deduct_social_security||0); map[k].adv+=Math.abs(r.deduct_advance||0)
-        map[k].safe+=Math.abs(r.deduct_safety_equipment||0); map[k].uni+=Math.abs(r.deduct_uniform||0)
+        const normalVal = r.override_normal != null ? Number(r.override_normal) : (r.amount_normal || 0)
+        const specialVal = Number(r.amount_special || 0) + Number(r.override_special || 0)
+        map[k].n += normalVal
+        map[k].s += r.amount_shift || 0
+        map[k].ot += r.amount_ot || 0
+        map[k].w += r.amount_wood_excess || 0
+        map[k].f += r.amount_film || 0
+        map[k].sp += specialVal
+        map[k].d += r.amount_diligence || 0
+        map[k].p += r.amount_position || 0
+        map[k].ss += Math.abs(r.deduct_social_security || 0)
+        map[k].adv += Math.abs(r.deduct_advance || 0)
+        map[k].safe += Math.abs(r.deduct_safety_equipment || 0)
+        map[k].uni += Math.abs(r.deduct_uniform || 0)
       })
       const rows = Object.values(map).map((x: any) => {
         const income = x.n+x.s+x.ot+x.w+x.f+x.sp+x.d+x.p; const deduct = x.ss+x.adv+x.safe+x.uni
@@ -683,15 +692,17 @@ export default function Export() {
     try {
       const XLSX = await import('xlsx')
       const { data, error } = await supabase.from('payroll_entries').select(`
-        amount_normal,deduct_social_security,
+        amount_normal,override_normal,deduct_social_security,
         employee:employees(national_id,prefix,first_name,last_name,nationality,status)
       `).in('period_id', ids).limit(10000)
       if (error) throw error; if (!data?.length) { toast.error('ไม่พบข้อมูล'); return }
       const map: Record<string,any> = {}
-      ;(data as any[]).filter(r=>r.employee&&r.employee.status!=='inactive'&&(r.employee.nationality||'ไทย')==='ไทย').forEach(r=>{
-        const k=r.employee.national_id||r.employee.first_name
-        if(!map[k]) map[k]={emp:r.employee,n:0,ss:0}
-        map[k].n+=r.amount_normal||0; map[k].ss+=r.deduct_social_security||0
+      ;(data as any[]).filter(r => r.employee && (r.employee.nationality || 'ไทย') === 'ไทย').forEach(r => {
+        const k = r.employee.national_id || r.employee.first_name
+        if (!map[k]) map[k] = { emp: r.employee, n: 0, ss: 0 }
+        const normalVal = r.override_normal != null ? Number(r.override_normal) : (r.amount_normal || 0)
+        map[k].n += normalVal
+        map[k].ss += r.deduct_social_security || 0
       })
       const rows=Object.values(map).map((x:any)=>({'เลขบัตรประชาชน':x.emp.national_id||'','คำนำหน้า':x.emp.prefix||'','ชื่อ':x.emp.first_name||'','สกุล':x.emp.last_name||'','ค่าจ้าง':x.n,'เงินสมทบ':Math.abs(x.ss)}))
       if(!rows.length){toast.error('ไม่พบพนักงานสัญชาติไทย');return}
@@ -748,7 +759,7 @@ export default function Export() {
       const { data: rawEntries, error } = await q
       if (error) throw error
       if (!rawEntries?.length) { toast.error('ไม่พบข้อมูลสลิปในช่วงที่เลือก'); return }
-      const entries = (rawEntries as any[]).filter(e => e.employee?.status !== 'inactive')
+      const entries = (rawEntries as any[]).filter(e => !!e.employee)
 
       // Fetch factory name and map to full legal name
       const { data: factoryData } = await supabase.from('factories')
@@ -843,7 +854,7 @@ body>div>div{border:none!important;box-shadow:none!important;border-bottom:1px s
       const { data: rawEntries, error: errEntries } = await q
       if (errEntries) throw errEntries
       if (!rawEntries?.length) { toast.error('ไม่พบข้อมูลในช่วงที่เลือก'); return }
-      const entries = (rawEntries as any[]).filter(e => e.employee?.status !== 'inactive')
+      const entries = (rawEntries as any[]).filter(e => !!e.employee)
       if (!entries.length) { toast.error('ไม่พบข้อมูลพนักงานในช่วงที่เลือก'); return }
 
       const empIds = [...new Set(entries.map(e => e.employee_id))]

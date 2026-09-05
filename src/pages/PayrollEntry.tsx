@@ -312,6 +312,8 @@ export default function PayrollEntry() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['all-payroll-entries', currentPeriod?.id] })
+      queryClient.invalidateQueries({ queryKey: ['v2-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['payment-channel-stats'] })
       toast.success('บันทึกข้อมูลค่าจ้างสำเร็จ')
     },
     onError: (e: Error) => toast.error('บันทึกไม่สำเร็จ', { description: e.message }),

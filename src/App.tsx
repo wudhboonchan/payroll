@@ -7,7 +7,8 @@ import { useAuth } from './hooks/useAuth'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Employees from './pages/Employees'
-import ShiftEntry from './pages/ShiftEntry'
+import CompanyShiftEntry from './pages/CompanyShiftEntry'
+import TpiShiftEntry from './pages/TpiShiftEntry'
 import PayrollEntry from './pages/PayrollEntry'
 import Advances from './pages/Advances'
 import PaySlip from './pages/PaySlip'
@@ -53,13 +54,14 @@ function App() {
           ) : (
             <Routes>
               {/* ── Main App ─────────────────────────────────────── */}
+              {import.meta.env.DEV && <Route path="/preview/tpi-shifts" element={<TpiShiftEntry preview />} />}
               <Route path="/login" element={<Login />} />
               <Route element={<AppLayout />}>
                 <Route element={<RequireAuth allowedRoles={['superUser', 'admin']} />}>
                   <Route path="/"           element={<Navigate to="/dashboard" replace />} />
                   <Route path="/dashboard"  element={<Dashboard />} />
                   <Route path="/employees"  element={<Employees />} />
-                  <Route path="/shifts"     element={<ShiftEntry />} />
+                  <Route path="/shifts"     element={<CompanyShiftEntry />} />
                   <Route path="/payroll"    element={<PayrollEntry />} />
                   <Route path="/advances"   element={<Advances />} />
                 </Route>
