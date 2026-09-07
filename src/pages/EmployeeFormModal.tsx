@@ -237,36 +237,29 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
 
   useEffect(() => {
     if (!isTpi) return
-    // If editing an existing employee, wait until the wage profile query has settled
-    // (either loaded data or confirmed null) before initializing state.
-    // This prevents the brief flash of 'normal' while the profile is fetching.
-    if (employeeId && isLoadingWageProfile) return
+    // If editing an existing employee, wait until the wage profile query has returned
+    // something (either data or null). While tpiWageProfile is `undefined`, the query
+    // hasn't resolved yet — don't reset state prematurely.
+    if (employeeId && tpiWageProfile === undefined) return
 
     if (tpiWageProfile) {
+      // Existing profile found → restore all TPI settings
       setTpiRateTier((tpiWageProfile.rate_tier as any) || 'normal')
       setTpiSkilledFrom(tpiWageProfile.skilled_from || '')
       const foundCode = (tpiWageProfile as any).job_code || employeeData?.job_title || ''
       setTpiJobCode(foundCode)
       const matched = activeTpiJobs.find((j) => j.code.trim().toLowerCase() === foundCode.trim().toLowerCase() || j.id === (tpiWageProfile as any).job_id)
       setTpiJobId(matched?.id || (tpiWageProfile as any).job_id || '')
-    } else if (employeeData && !employeeId) {
-      // New employee form — safe to initialize from employeeData
+    } else if (!employeeId) {
+      // New employee (no existing profile) — initialize to defaults
       setTpiRateTier('normal')
       setTpiSkilledFrom('')
-      const foundCode = employeeData.job_title || ''
+      const foundCode = employeeData?.job_title || ''
       setTpiJobCode(foundCode)
       const matched = activeTpiJobs.find((j) => j.code.trim().toLowerCase() === foundCode.trim().toLowerCase())
       setTpiJobId(matched?.id || '')
-    } else if (!employeeId) {
-      // New employee, no prior data
-      setTpiRateTier('normal')
-      setTpiSkilledFrom('')
-      setTpiJobCode('')
-      setTpiJobId('')
-    }
-    // If employeeId exists but tpiWageProfile is null (confirmed no profile in DB),
-    // still initialize to normal — just don't touch state while loading
-    else if (employeeId && tpiWageProfile === null) {
+    } else {
+      // Existing employee but no wage profile in DB yet — default to normal
       setTpiRateTier('normal')
       setTpiSkilledFrom('')
       const foundCode = employeeData?.job_title || ''
@@ -274,7 +267,7 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
       const matched = activeTpiJobs.find((j) => j.code.trim().toLowerCase() === foundCode.trim().toLowerCase())
       setTpiJobId(matched?.id || '')
     }
-  }, [tpiWageProfile, isLoadingWageProfile, employeeData, employeeId, isOpen, isTpi, activeTpiJobs])
+  }, [tpiWageProfile, employeeData, employeeId, isOpen, isTpi, activeTpiJobs])
 
   useEffect(() => {
     if (employeeData && isOpen) {
