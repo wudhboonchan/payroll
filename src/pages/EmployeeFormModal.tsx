@@ -195,7 +195,7 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
   })
 
   // Query TPI Wage Profile for existing employee
-  const { data: tpiWageProfile } = useQuery({
+  const { data: tpiWageProfile, isLoading: isLoadingWageProfile } = useQuery({
     queryKey: ['tpi-employee-wage', user?.factory_id, employeeId],
     enabled: !!user?.factory_id && !!employeeId && isOpen && isTpi,
     queryFn: async () => {
@@ -208,6 +208,7 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
       if (error) return null
       return data
     },
+    staleTime: 0,
   })
 
   // Pre-fetch shift count so handleSave can check synchronously (no async freeze)
@@ -235,29 +236,45 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
   }, [position, setValue, isTpi])
 
   useEffect(() => {
-    if (isTpi) {
-      if (tpiWageProfile) {
-        setTpiRateTier((tpiWageProfile.rate_tier as any) || 'normal')
-        setTpiSkilledFrom(tpiWageProfile.skilled_from || '')
-        const foundCode = (tpiWageProfile as any).job_code || employeeData?.job_title || ''
-        setTpiJobCode(foundCode)
-        const matched = activeTpiJobs.find((j) => j.code.trim().toLowerCase() === foundCode.trim().toLowerCase() || j.id === (tpiWageProfile as any).job_id)
-        setTpiJobId(matched?.id || (tpiWageProfile as any).job_id || '')
-      } else if (employeeData) {
-        setTpiRateTier('normal')
-        setTpiSkilledFrom('')
-        const foundCode = employeeData.job_title || ''
-        setTpiJobCode(foundCode)
-        const matched = activeTpiJobs.find((j) => j.code.trim().toLowerCase() === foundCode.trim().toLowerCase())
-        setTpiJobId(matched?.id || '')
-      } else {
-        setTpiRateTier('normal')
-        setTpiSkilledFrom('')
-        setTpiJobCode('')
-        setTpiJobId('')
-      }
+    if (!isTpi) return
+    // If editing an existing employee, wait until the wage profile query has settled
+    // (either loaded data or confirmed null) before initializing state.
+    // This prevents the brief flash of 'normal' while the profile is fetching.
+    if (employeeId && isLoadingWageProfile) return
+
+    if (tpiWageProfile) {
+      setTpiRateTier((tpiWageProfile.rate_tier as any) || 'normal')
+      setTpiSkilledFrom(tpiWageProfile.skilled_from || '')
+      const foundCode = (tpiWageProfile as any).job_code || employeeData?.job_title || ''
+      setTpiJobCode(foundCode)
+      const matched = activeTpiJobs.find((j) => j.code.trim().toLowerCase() === foundCode.trim().toLowerCase() || j.id === (tpiWageProfile as any).job_id)
+      setTpiJobId(matched?.id || (tpiWageProfile as any).job_id || '')
+    } else if (employeeData && !employeeId) {
+      // New employee form — safe to initialize from employeeData
+      setTpiRateTier('normal')
+      setTpiSkilledFrom('')
+      const foundCode = employeeData.job_title || ''
+      setTpiJobCode(foundCode)
+      const matched = activeTpiJobs.find((j) => j.code.trim().toLowerCase() === foundCode.trim().toLowerCase())
+      setTpiJobId(matched?.id || '')
+    } else if (!employeeId) {
+      // New employee, no prior data
+      setTpiRateTier('normal')
+      setTpiSkilledFrom('')
+      setTpiJobCode('')
+      setTpiJobId('')
     }
-  }, [tpiWageProfile, employeeData, employeeId, isOpen, isTpi, activeTpiJobs])
+    // If employeeId exists but tpiWageProfile is null (confirmed no profile in DB),
+    // still initialize to normal — just don't touch state while loading
+    else if (employeeId && tpiWageProfile === null) {
+      setTpiRateTier('normal')
+      setTpiSkilledFrom('')
+      const foundCode = employeeData?.job_title || ''
+      setTpiJobCode(foundCode)
+      const matched = activeTpiJobs.find((j) => j.code.trim().toLowerCase() === foundCode.trim().toLowerCase())
+      setTpiJobId(matched?.id || '')
+    }
+  }, [tpiWageProfile, isLoadingWageProfile, employeeData, employeeId, isOpen, isTpi, activeTpiJobs])
 
   useEffect(() => {
     if (employeeData && isOpen) {
