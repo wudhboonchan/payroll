@@ -108,11 +108,24 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
 
   const isTpi = isTpiCompany(currentFactoryName)
 
-  // TPI specific wage tier state ('normal' | 'skilled')
-  const [tpiRateTier, setTpiRateTier] = useState<'normal' | 'skilled'>('normal')
-  const [tpiSkilledFrom, setTpiSkilledFrom] = useState<string>('')
-  const [tpiJobCode, setTpiJobCode] = useState<string>('')
-  const [tpiJobId, setTpiJobId] = useState<string>('')
+  // TPI specific wage tier state — seed from QueryClient cache if available
+  // so the correct value is shown immediately on mount (component re-mounts every open)
+  const cachedWageProfile = employeeId
+    ? queryClient.getQueryData<any>(['tpi-employee-wage', user?.factory_id, employeeId])
+    : undefined
+
+  const [tpiRateTier, setTpiRateTier] = useState<'normal' | 'skilled'>(
+    () => (cachedWageProfile?.rate_tier as 'normal' | 'skilled') || 'normal'
+  )
+  const [tpiSkilledFrom, setTpiSkilledFrom] = useState<string>(
+    () => cachedWageProfile?.skilled_from || ''
+  )
+  const [tpiJobCode, setTpiJobCode] = useState<string>(
+    () => (cachedWageProfile as any)?.job_code || ''
+  )
+  const [tpiJobId, setTpiJobId] = useState<string>(
+    () => (cachedWageProfile as any)?.job_id || ''
+  )
 
   // Query TPI Job Codes for selection
   const { data: dbTpiJobs = [] } = useQuery<Job[]>({
@@ -584,7 +597,13 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
                       name="tpi_rate_tier"
                       value="normal"
                       checked={tpiRateTier === 'normal'}
-                      onChange={() => setTpiRateTier('normal')}
+                      onChange={() => {
+                        setTpiRateTier('normal')
+                        setTpiJobCode('')
+                        setTpiJobId('')
+                        // Clear the job_title form field so it doesn't carry over
+                        setValue('job_title', '')
+                      }}
                       style={{ width: 18, height: 18, accentColor: 'var(--vk-persimmon)', marginTop: 2, cursor: 'pointer' }}
                     />
                     <div>
