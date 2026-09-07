@@ -1,10 +1,10 @@
 import { useAppStore } from '../store/useAppStore'
 import { isTpiCompany } from '../features/tpi/model'
-import ShiftEntry from './ShiftEntry'
-import TpiShiftEntry from './TpiShiftEntry'
+import PayrollEntry from './PayrollEntry'
+import TpiPayrollEntry from './TpiPayrollEntry'
 
-export default function CompanyShiftEntry() {
+export default function CompanyPayrollEntry() {
   const { user, companyContext } = useAppStore()
   const isTpi = isTpiCompany(companyContext?.factoryName) || isTpiCompany(companyContext?.name)
-  return isTpi ? <TpiShiftEntry key={user?.factory_id} /> : <ShiftEntry />
+  return isTpi ? <TpiPayrollEntry key={user?.factory_id} /> : <PayrollEntry />
 }

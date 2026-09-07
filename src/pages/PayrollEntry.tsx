@@ -6,9 +6,10 @@ import { useAppStore } from '../store/useAppStore'
 import { TopBar } from '../components/layout/TopBar'
 import { useState, useMemo, useEffect } from 'react'
 import { toast } from 'sonner'
-import { Save, CheckCircle2, AlertCircle, Search, X } from 'lucide-react'
+import { Save, CheckCircle2, AlertCircle, Search, X, AlertTriangle } from 'lucide-react'
 import { calculatePayroll } from '../lib/payrollCalc'
 import type { PayrollCalculationInput } from '../lib/payrollCalc'
+import { compareEmployeeCode } from '../lib/formatters'
 import '../styles/tokens.css'
 
 interface Employee {
@@ -43,7 +44,7 @@ function getPeriodDays(start: string, end: string): number {
 }
 function fmtNationality(nationality: string | null) {
   if (!nationality || nationality === 'ไทย') return null
-  if (nationality === 'เมียนมา' || nationality.toLowerCase().includes('myanmar') || nationality.toLowerCase().includes('burma')) return 'เมียนมา/กะเหรี่ยง'
+  if (nationality === 'เมียนมา' || nationality.toLowerCase().includes('myanmar') || nationality.toLowerCase().includes('burma')) return 'เมียนมา'
   return nationality
 }
 
@@ -71,7 +72,8 @@ export default function PayrollEntry() {
       const { data, error } = await supabase.from('employees')
         .select('id,employee_code,first_name,last_name,prefix,nationality,position,job_title,wage_type,rate_per_12h,exempt_social_security')
         .eq('factory_id', user?.factory_id ?? '').eq('status','active').order('employee_code')
-      if (error) throw error; return data
+      if (error) throw error
+      return (data || []).sort((a: any, b: any) => compareEmployeeCode(a.employee_code, b.employee_code))
     }, enabled: !!user?.factory_id, staleTime: 0,
   })
 
@@ -250,7 +252,7 @@ export default function PayrollEntry() {
         holiday_ot_full_days: holFull, holiday_ot_half_days: holHalf,
         partial_hours_total: isEmpClerk ? 0 : partialHrs,
         clerk_ot_hours: clerkOt, clerk_ot_1x_hours: clerkOt1x,
-        override_normal: null, override_special: null,
+        override_normal: entry.override_normal != null ? Number(entry.override_normal) : null, override_special: null,
         amount_wood_excess: isEmpClerk ? 0 : autoW,
         amount_film: isEmpClerk ? 0 : autoF,
         amount_special: autoSp,
@@ -314,6 +316,7 @@ export default function PayrollEntry() {
       queryClient.invalidateQueries({ queryKey: ['all-payroll-entries', currentPeriod?.id] })
       queryClient.invalidateQueries({ queryKey: ['v2-stats'] })
       queryClient.invalidateQueries({ queryKey: ['payment-channel-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['superuser-overrides'] })
       toast.success('บันทึกข้อมูลค่าจ้างสำเร็จ')
     },
     onError: (e: Error) => toast.error('บันทึกไม่สำเร็จ', { description: e.message }),
@@ -440,20 +443,65 @@ export default function PayrollEntry() {
             <>
               {/* Header */}
               <div style={{ marginBottom: 20 }}>
-                <div className="vk-eyebrow" style={{ marginBottom: 2 }}>PAYROLL ENTRY · {currentPeriod?.label}</div>
-                <div style={{ fontFamily: 'var(--vk-sans)', fontWeight: 700, fontSize: 18, letterSpacing: '-0.02em', wordBreak: 'break-word' }}>
-                  {selectedEmp.first_name} <span style={{ fontWeight: 400, color: 'var(--vk-ink-3)' }}>{selectedEmp.last_name}</span>
-                  {fmtNationality(selectedEmp.nationality) && (
-                    <span style={{ fontWeight: 400, fontSize: 13, color: 'var(--vk-ink-3)', marginLeft: 6 }}>({fmtNationality(selectedEmp.nationality)})</span>
-                  )}
-                </div>
-                <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 11, color: 'var(--vk-ink-3)', marginTop: 2 }}>
-                  {selectedEmp.employee_code}
-                  {' · '}
-                  {selectedEmp.position === 'clerk' ? 'เสมียน' : selectedEmp.position === 'foreman' ? 'โฟร์แมน' : selectedEmp.position === 'office' ? 'พนักงานออฟฟิศ' : selectedEmp.position === 'manager' ? 'ผู้จัดการ' : 'พนักงานทั่วไป'}
-                  {selectedEmp.job_title ? ` – ${selectedEmp.job_title}` : ''}
-                  {' · '}฿{(Number(selectedEmp.rate_per_12h) || 0).toLocaleString()}/{selectedEmp.wage_type === 'monthly' ? 'เดือน' : 'วัน'}
-                </div>
+                {(() => {
+                  const hasOvr = overrideNormal !== null || existingEntry?.override_normal != null
+                  const norm = overrideNormal !== null ? overrideNormal : (existingEntry?.override_normal != null ? Number(existingEntry.override_normal) : null)
+
+                  return (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div className="vk-eyebrow" style={{ marginBottom: 2 }}>PAYROLL ENTRY · {currentPeriod?.label}</div>
+                        <div style={{ fontFamily: 'var(--vk-sans)', fontWeight: 700, fontSize: 18, letterSpacing: '-0.02em', wordBreak: 'break-word' }}>
+                          {selectedEmp.first_name} <span style={{ fontWeight: 400, color: 'var(--vk-ink-3)' }}>{selectedEmp.last_name}</span>
+                          {fmtNationality(selectedEmp.nationality) && (
+                            <span style={{ fontWeight: 400, fontSize: 13, color: 'var(--vk-ink-3)', marginLeft: 6 }}>({fmtNationality(selectedEmp.nationality)})</span>
+                          )}
+                        </div>
+                        <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 11, color: 'var(--vk-ink-3)', marginTop: 2 }}>
+                          {selectedEmp.employee_code}
+                          {' · '}
+                          {selectedEmp.position === 'clerk' ? 'เสมียน' : selectedEmp.position === 'foreman' ? 'โฟร์แมน' : selectedEmp.position === 'office' ? 'พนักงานออฟฟิศ' : selectedEmp.position === 'manager' ? 'ผู้จัดการ' : 'พนักงานทั่วไป'}
+                          {selectedEmp.job_title ? ` – ${selectedEmp.job_title}` : ''}
+                          {' · '}฿{(Number(selectedEmp.rate_per_12h) || 0).toLocaleString()}/{selectedEmp.wage_type === 'monthly' ? 'เดือน' : 'วัน'}
+                        </div>
+                      </div>
+
+                      {/* ── TOP RIGHT CORNER (มุมขวาบนที่ว่างอยู่) ── */}
+                      {hasOvr && (
+                        <div style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'flex-end',
+                          gap: 4,
+                          flexShrink: 0,
+                        }}>
+                          <div style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 6,
+                            padding: '6px 14px',
+                            background: '#fffbeb',
+                            border: '1px solid #f59e0b',
+                            borderRadius: 6,
+                            color: '#b45309',
+                            fontSize: 12,
+                            fontWeight: 700,
+                            boxShadow: '0 1px 3px rgba(245, 158, 11, 0.12)',
+                          }}>
+                            <AlertTriangle style={{ width: 15, height: 15, color: '#d97706', flexShrink: 0 }} />
+                            <span>มีการปรับแก้ตัวเลขค่าจ้างด้วยตนเอง (Override)</span>
+                          </div>
+                          {norm !== null && (
+                            <span style={{ fontSize: 11, color: '#92400e', fontWeight: 600 }}>
+                              (ค่าจ้างปกติ: ฿{norm.toLocaleString()})
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })()}
+
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12, alignItems: 'center' }}>
                   {existingEntry && !isOutdated && <span className="vk-pill" data-tone="approved"><CheckCircle2 style={{ width: 11, height: 11, display: 'inline', marginRight: 4 }} />บันทึกแล้ว</span>}
                   {existingEntry && isOutdated && (

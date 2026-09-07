@@ -3,15 +3,48 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import { useAppStore } from '../store/useAppStore'
 import { TopBar } from '../components/layout/TopBar'
-import { useState } from 'react'
-import { Plus, Trash2, Pencil, AlertTriangle, Search, X } from 'lucide-react'
+import { useState, useMemo } from 'react'
+import { Plus, Trash2, Pencil, AlertTriangle, Search, X, Camera, ShieldAlert } from 'lucide-react'
 import { toast } from 'sonner'
+import type { Job, WageProfile } from '../features/tpi/model'
+import { wageTier, localDate } from '../features/tpi/model'
+import { demoJobs } from '../features/tpi/demoData'
+import { compareEmployeeCode } from '../lib/formatters'
 import '../styles/tokens.css'
 
 function fmtNationality(nationality: string | null) {
   if (!nationality || nationality === 'ไทย') return null
-  if (nationality === 'เมียนมา' || nationality.toLowerCase().includes('myanmar') || nationality.toLowerCase().includes('burma')) return 'เมียนมา/กะเหรี่ยง'
+  if (nationality === 'เมียนมา' || nationality.toLowerCase().includes('myanmar') || nationality.toLowerCase().includes('burma')) return 'เมียนมา'
   return nationality
+}
+
+function renderNotes(notes: string | null) {
+  if (!notes) return '—'
+  if (notes.includes('[สแกนหน้าไม่สำเร็จ]') || notes.includes('สแกนหน้าไม่สำเร็จ')) {
+    const cleanNote = notes.replace('[สแกนหน้าไม่สำเร็จ]', '').trim()
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        <span
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 4,
+            background: '#fee2e2',
+            color: '#b91c1c',
+            border: '1px solid #fca5a5',
+            padding: '2px 8px',
+            borderRadius: 4,
+            fontSize: 11,
+            fontWeight: 700,
+          }}
+        >
+          <Camera style={{ width: 11, height: 11 }} /> สแกนหน้าไม่สำเร็จ
+        </span>
+        {cleanNote && <span style={{ fontSize: 13 }}>{cleanNote}</span>}
+      </div>
+    )
+  }
+  return notes
 }
 
 export default function Advances() {
@@ -25,6 +58,19 @@ export default function Advances() {
   const [editingEmp, setEditingEmp] = useState<{ employee_code: string; first_name: string; last_name: string; nationality?: string | null } | null>(null)
   const [form, setForm] = useState({ employee_id: '', amount: '', notes: '' })
   const [empSearch, setEmpSearch] = useState('')
+
+  // ── Face scan failure deduction state ──
+  const [isScanModalOpen, setIsScanModalOpen] = useState(false)
+  const [scanEmpSearch, setScanEmpSearch] = useState('')
+  const [scanForm, setScanForm] = useState({
+    employee_id: '',
+    work_date: localDate(),
+    job_id: '',
+    rate_tier: 'normal' as 'normal' | 'skilled' | 'custom',
+    base_rate: 357,
+    amount: '178.50',
+    custom_notes: '',
+  })
 
   const isEdit = !!editingId
 
@@ -67,7 +113,8 @@ export default function Advances() {
     queryKey: ['employees', user?.factory_id],
     queryFn: async () => {
       const { data, error } = await supabase.from('employees').select('id,employee_code,first_name,last_name,nationality').eq('factory_id', user?.factory_id ?? '').eq('status','active').order('employee_code')
-      if (error) throw error; return data
+      if (error) throw error
+      return (data || []).sort((a: any, b: any) => compareEmployeeCode(a.employee_code, b.employee_code))
     }, enabled: !!user?.factory_id,
   })
 
@@ -113,6 +160,162 @@ export default function Advances() {
   // Pending = auto-carryovers not yet recorded for this period
   const savedCarryoverEmpIds = new Set(carryovers.map(a => a.employee_id))
   const pendingCarryovers = autoCarryovers.filter(e => !savedCarryoverEmpIds.has(e.employee_id))
+
+  // ── Fetch TPI job codes & employee wage profiles ──────────────────
+  const { data: dbJobs = [] } = useQuery<Job[]>({
+    queryKey: ['tpi-jobs-for-scan', user?.factory_id],
+    queryFn: async () => {
+      if (!user?.factory_id) return []
+      const { data, error } = await supabase
+        .from('tpi_job_codes')
+        .select('*')
+        .eq('factory_id', user.factory_id)
+        .order('code')
+      if (error) return []
+      return data || []
+    },
+    enabled: !!user?.factory_id,
+  })
+
+  const jobs: Job[] = useMemo(() => {
+    const dbMap = new Map(dbJobs.map((j) => [j.code.trim().toLowerCase(), j]))
+    const merged: Job[] = demoJobs.map((refJob) => {
+      const key = refJob.code.trim().toLowerCase()
+      const dbMatch = dbMap.get(key)
+      if (dbMatch) {
+        dbMap.delete(key)
+        return dbMatch
+      }
+      return refJob
+    })
+    for (const customDbJob of dbMap.values()) {
+      merged.push(customDbJob)
+    }
+    return merged
+  }, [dbJobs])
+
+  const { data: wageProfiles = [] } = useQuery<WageProfile[]>({
+    queryKey: ['tpi-profiles-for-scan', user?.factory_id],
+    queryFn: async () => {
+      if (!user?.factory_id) return []
+      const { data, error } = await supabase
+        .from('tpi_employee_wage_profiles')
+        .select('*')
+        .eq('factory_id', user.factory_id)
+      if (error) return []
+      return data || []
+    },
+    enabled: !!user?.factory_id,
+  })
+
+  const openScanModal = () => {
+    const defaultJob = jobs[0]
+    const defaultRate = defaultJob?.normal_rate || 357
+    setScanForm({
+      employee_id: '',
+      work_date: localDate(),
+      job_id: defaultJob?.id || '',
+      rate_tier: 'normal',
+      base_rate: defaultRate,
+      amount: (defaultRate / 2).toFixed(2),
+      custom_notes: '',
+    })
+    setScanEmpSearch('')
+    setIsScanModalOpen(true)
+  }
+
+  const closeScanModal = () => {
+    setIsScanModalOpen(false)
+    setScanEmpSearch('')
+  }
+
+  const handleSelectScanEmployee = (empId: string) => {
+    const prof = wageProfiles.find((p) => p.employee_id === empId)
+    const tier = wageTier(prof, scanForm.work_date)
+    const job = jobs.find((j) => j.id === scanForm.job_id) || jobs[0]
+    let base = 357
+    if (tier === 'skilled' && job?.skilled_rate) {
+      base = job.skilled_rate
+    } else if (job) {
+      base = job.normal_rate
+    }
+    setScanForm((prev) => ({
+      ...prev,
+      employee_id: empId,
+      rate_tier: tier,
+      base_rate: base,
+      amount: (base / 2).toFixed(2),
+    }))
+  }
+
+  const handleScanJobChange = (jobId: string) => {
+    const job = jobs.find((j) => j.id === jobId)
+    if (!job) return
+    let base = job.normal_rate
+    if (scanForm.rate_tier === 'skilled' && job.skilled_rate) {
+      base = job.skilled_rate
+    } else if (scanForm.rate_tier === 'custom') {
+      base = scanForm.base_rate
+    }
+    setScanForm((prev) => ({
+      ...prev,
+      job_id: jobId,
+      base_rate: base,
+      amount: (base / 2).toFixed(2),
+    }))
+  }
+
+  const handleScanTierChange = (tier: 'normal' | 'skilled' | 'custom') => {
+    const job = jobs.find((j) => j.id === scanForm.job_id) || jobs[0]
+    let base = scanForm.base_rate
+    if (tier === 'normal') {
+      base = job?.normal_rate || 357
+    } else if (tier === 'skilled') {
+      base = job?.skilled_rate || 400
+    }
+    setScanForm((prev) => ({
+      ...prev,
+      rate_tier: tier,
+      base_rate: base,
+      amount: (base / 2).toFixed(2),
+    }))
+  }
+
+  const handleScanBaseRateChange = (newBase: number) => {
+    setScanForm((prev) => ({
+      ...prev,
+      base_rate: newBase,
+      amount: (newBase / 2).toFixed(2),
+    }))
+  }
+
+  const saveScanMutation = useMutation({
+    mutationFn: async () => {
+      if (!scanForm.employee_id) throw new Error('กรุณาเลือกพนักงาน')
+      if (!scanForm.amount || parseFloat(scanForm.amount) <= 0) throw new Error('กรุณาระบุจำนวนเงินที่ถูกต้อง')
+      const job = jobs.find((j) => j.id === scanForm.job_id)
+      const jobInfo = job ? `รหัสงาน: ${job.code} ${job.description}` : ''
+      const noteStr = `[สแกนหน้าไม่สำเร็จ] วันที่: ${scanForm.work_date} | ${jobInfo} (หัก 50% = ฿${scanForm.amount})${scanForm.custom_notes ? ` | ${scanForm.custom_notes}` : ''}`
+
+      const { error } = await supabase.from('advance_payments').insert({
+        period_id: currentPeriod.id,
+        employee_id: scanForm.employee_id,
+        amount: parseFloat(scanForm.amount),
+        notes: noteStr,
+        is_carryover: false,
+      })
+      if (error) throw error
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['advances-v2'] })
+      queryClient.invalidateQueries({ queryKey: ['advances'] })
+      queryClient.invalidateQueries({ queryKey: ['v2-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['payment-channel-stats'] })
+      toast.success('บันทึกรายการหักเงินสแกนหน้าไม่สำเร็จแล้ว')
+      closeScanModal()
+    },
+    onError: (e: Error) => toast.error('บันทึกไม่สำเร็จ', { description: e.message }),
+  })
 
   const totalCarryover = carryovers.reduce((s, a) => s + Number(a.amount), 0)
   const totalRegular = regularAdvances.reduce((s, a) => s + Number(a.amount), 0)
@@ -203,7 +406,7 @@ export default function Advances() {
               </div>
             )}
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {pendingCarryovers.length > 0 && (
               <button className="vk-btn vk-btn--ghost" onClick={() => bulkCarryoverMutation.mutate()} disabled={bulkCarryoverMutation.isPending}
                 style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, borderColor: '#d97706', color: '#92400e' }}>
@@ -214,6 +417,22 @@ export default function Advances() {
             <button className="vk-btn vk-btn--ghost" onClick={() => openCreate('carryover')} disabled={!currentPeriod}
               style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, borderColor: '#d97706', color: '#92400e' }}>
               <AlertTriangle style={{ width: 13, height: 13 }} /> บันทึกยอดค้างจากงวดก่อน
+            </button>
+            <button
+              className="vk-btn vk-btn--ghost"
+              onClick={openScanModal}
+              disabled={!currentPeriod}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: 12,
+                borderColor: '#ef4444',
+                color: '#b91c1c',
+                background: '#fef2f2',
+              }}
+            >
+              <Camera style={{ width: 13, height: 13 }} /> หักเงินสแกนหน้าไม่สำเร็จ
             </button>
             <button className="vk-btn vk-btn--primary" onClick={() => openCreate('advance')} disabled={!currentPeriod}>
               <Plus style={{ width: 15, height: 15 }} /> เพิ่มรายการเบิก
@@ -306,7 +525,7 @@ export default function Advances() {
                   <td style={{ padding: '13px 14px', fontWeight: 600, fontSize: 14, color: '#78350f' }}>
                     {emp?.first_name} {emp?.last_name}{fmtNationality(emp?.nationality) ? ` (${fmtNationality(emp?.nationality)})` : ''}
                   </td>
-                  <td style={{ padding: '13px 14px', fontSize: 13, color: '#92400e' }}>{a.notes || '—'}</td>
+                  <td style={{ padding: '13px 14px', fontSize: 13, color: '#92400e' }}>{renderNotes(a.notes)}</td>
                   <td style={{ padding: '13px 14px', textAlign: 'right', fontFamily: 'var(--vk-mono)', fontSize: 14, fontVariantNumeric: 'tabular-nums', color: '#b45309', fontWeight: 700 }}>
                     – {Number(a.amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                   </td>
@@ -350,7 +569,7 @@ export default function Advances() {
                   <td style={{ padding: '13px 14px', fontWeight: 600, fontSize: 14 }}>
                     {emp?.first_name} {emp?.last_name}{fmtNationality(emp?.nationality) ? ` (${fmtNationality(emp?.nationality)})` : ''}
                   </td>
-                  <td style={{ padding: '13px 14px', fontSize: 13, color: 'var(--vk-ink-3)' }}>{a.notes || '—'}</td>
+                  <td style={{ padding: '13px 14px', fontSize: 13, color: 'var(--vk-ink-3)' }}>{renderNotes(a.notes)}</td>
                   <td style={{ padding: '13px 14px', textAlign: 'right', fontFamily: 'var(--vk-mono)', fontSize: 14, fontVariantNumeric: 'tabular-nums', color: 'var(--vk-crimson)' }}>
                     – {Number(a.amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                   </td>
@@ -490,6 +709,451 @@ export default function Advances() {
                 {saveMutation.isPending ? 'กำลังบันทึก...' : isEdit ? 'อัปเดตรายการ' : 'บันทึก'}
               </button>
               <button className="vk-btn" onClick={closeModal}>ยกเลิก</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal หักเงินสแกนหน้าไม่สำเร็จ (TPI) ─────────────────────── */}
+      {isScanModalOpen && (
+        <div
+          className="vk-root"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 50,
+            background: 'rgba(22,19,17,0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
+          }}
+          onClick={closeScanModal}
+        >
+          <div
+            style={{
+              background: 'var(--vk-paper)',
+              border: '1px solid var(--vk-rule)',
+              width: '100%',
+              maxWidth: 480,
+              maxHeight: '92vh',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              borderRadius: 6,
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.1)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal header */}
+            <div style={{ background: '#b91c1c', color: '#fff', padding: '16px 20px', flexShrink: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Camera style={{ width: 18, height: 18, flexShrink: 0 }} />
+                  <div style={{ fontWeight: 700, fontSize: 16 }}>
+                    บันทึกหักเงินสแกนหน้าไม่สำเร็จ
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeScanModal}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: '#fff',
+                    cursor: 'pointer',
+                    padding: 4,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    opacity: 0.8,
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
+                  onMouseLeave={(e) => (e.currentTarget.style.opacity = '0.8')}
+                >
+                  <X style={{ width: 18, height: 18 }} />
+                </button>
+              </div>
+              <div style={{ fontSize: 12, opacity: 0.9, marginTop: 4 }}>
+                ระบบจะคำนวณหักเงิน 50% ของค่าแรงในวันนั้น และนำไปหักในงวดปัจจุบัน ({currentPeriod?.label})
+              </div>
+            </div>
+
+            {/* Modal Body */}
+            <div
+              style={{
+                padding: '20px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 14,
+                background: 'var(--vk-bone)',
+                overflowY: 'auto',
+                flex: 1,
+              }}
+            >
+              {/* 1. Employee selection */}
+              <div>
+                <label className="vk-eyebrow" style={{ display: 'block', marginBottom: 5 }}>
+                  1. เลือกพนักงานที่ถูกหักเงิน <span style={{ color: '#b91c1c' }}>*</span>
+                </label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                    <Search
+                      style={{
+                        position: 'absolute',
+                        left: 9,
+                        width: 13,
+                        height: 13,
+                        color: 'var(--vk-ink-3)',
+                        pointerEvents: 'none',
+                      }}
+                    />
+                    <input
+                      className="vk-input"
+                      placeholder="พิมพ์ชื่อหรือรหัสพนักงานเพื่อค้นหา..."
+                      value={scanEmpSearch}
+                      onChange={(e) => setScanEmpSearch(e.target.value)}
+                      style={{ paddingLeft: 30, paddingRight: scanEmpSearch ? 28 : 10 }}
+                    />
+                    {scanEmpSearch && (
+                      <button
+                        onClick={() => setScanEmpSearch('')}
+                        style={{
+                          position: 'absolute',
+                          right: 6,
+                          background: 'none',
+                          border: 'none',
+                          cursor: 'pointer',
+                          padding: 2,
+                          color: 'var(--vk-ink-3)',
+                        }}
+                      >
+                        <X style={{ width: 12, height: 12 }} />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* List */}
+                  <div
+                    style={{
+                      border: '1px solid var(--vk-rule)',
+                      background: 'var(--vk-paper)',
+                      maxHeight: 140,
+                      overflowY: 'auto',
+                    }}
+                  >
+                    {employees
+                      .filter((e) => {
+                        const q = scanEmpSearch.toLowerCase()
+                        return (
+                          !q ||
+                          e.employee_code.toLowerCase().includes(q) ||
+                          e.first_name.toLowerCase().includes(q) ||
+                          (e.last_name || '').toLowerCase().includes(q)
+                        )
+                      })
+                      .map((e) => {
+                        const selected = scanForm.employee_id === e.id
+                        const prof = wageProfiles.find((p) => p.employee_id === e.id)
+                        const isSkilled = prof?.rate_tier === 'skilled'
+                        return (
+                          <div
+                            key={e.id}
+                            onClick={() => handleSelectScanEmployee(e.id)}
+                            style={{
+                              padding: '8px 12px',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 8,
+                              background: selected ? '#fee2e2' : 'transparent',
+                              borderBottom: '1px solid var(--vk-rule-soft)',
+                            }}
+                            onMouseEnter={(el) => {
+                              if (!selected) el.currentTarget.style.background = 'var(--vk-bone)'
+                            }}
+                            onMouseLeave={(el) => {
+                              if (!selected) el.currentTarget.style.background = 'transparent'
+                            }}
+                          >
+                            <span
+                              style={{
+                                fontFamily: 'var(--vk-mono)',
+                                fontSize: 11,
+                                color: selected ? '#b91c1c' : 'var(--vk-ink-3)',
+                                flexShrink: 0,
+                              }}
+                            >
+                              {e.employee_code}
+                            </span>
+                            <span
+                              style={{
+                                fontSize: 13,
+                                fontWeight: selected ? 700 : 400,
+                                color: selected ? '#b91c1c' : 'var(--vk-ink)',
+                                flex: 1,
+                              }}
+                            >
+                              {e.first_name} {e.last_name}
+                              {fmtNationality(e.nationality) ? ` (${fmtNationality(e.nationality)})` : ''}
+                            </span>
+                            {isSkilled && (
+                              <span
+                                style={{
+                                  fontSize: 10,
+                                  fontWeight: 700,
+                                  color: '#0369a1',
+                                  background: '#e0f2fe',
+                                  padding: '1px 6px',
+                                  borderRadius: 4,
+                                }}
+                              >
+                                ช่างฝีมือ
+                              </span>
+                            )}
+                            {selected && <span style={{ fontSize: 12, color: '#b91c1c', fontWeight: 700 }}>✓</span>}
+                          </div>
+                        )
+                      })}
+                  </div>
+
+                  {scanForm.employee_id && (() => {
+                    const sel = employees.find((e) => e.id === scanForm.employee_id)
+                    return sel ? (
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: '#b91c1c',
+                          fontWeight: 600,
+                          background: '#fff',
+                          padding: '6px 10px',
+                          borderRadius: 4,
+                          border: '1px solid #fca5a5',
+                        }}
+                      >
+                        ✓ พนักงานที่เลือก: {sel.employee_code} — {sel.first_name} {sel.last_name}
+                      </div>
+                    ) : null
+                  })()}
+                </div>
+              </div>
+
+              {/* 2. Date of incident */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <div>
+                  <label className="vk-eyebrow" style={{ display: 'block', marginBottom: 5 }}>
+                    2. วันที่เกิดเหตุ <span style={{ color: '#b91c1c' }}>*</span>
+                  </label>
+                  <input
+                    type="date"
+                    className="vk-input"
+                    value={scanForm.work_date}
+                    onChange={(e) => setScanForm((prev) => ({ ...prev, work_date: e.target.value }))}
+                  />
+                </div>
+
+                {/* 3. Job code selection */}
+                <div>
+                  <label className="vk-eyebrow" style={{ display: 'block', marginBottom: 5 }}>
+                    3. รหัสงานที่ทำในวันนั้น <span style={{ color: '#b91c1c' }}>*</span>
+                  </label>
+                  <select
+                    className="vk-input"
+                    value={scanForm.job_id}
+                    onChange={(e) => handleScanJobChange(e.target.value)}
+                  >
+                    {jobs.map((j) => (
+                      <option key={j.id} value={j.id}>
+                        {j.code} {j.description ? `— ${j.description}` : ''} (ปกติ ฿{j.normal_rate}{j.skilled_rate ? `/ฝีมือ ฿${j.skilled_rate}` : ''})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* 4. Wage Tier */}
+              <div>
+                <label className="vk-eyebrow" style={{ display: 'block', marginBottom: 5 }}>
+                  4. อัตราค่าแรงในวันนั้น
+                </label>
+                {(() => {
+                  const job = jobs.find((j) => j.id === scanForm.job_id)
+                  return (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                      <label
+                        style={{
+                          padding: '8px 10px',
+                          borderRadius: 4,
+                          border: scanForm.rate_tier === 'normal' ? '2px solid #b91c1c' : '1px solid var(--vk-rule)',
+                          background: scanForm.rate_tier === 'normal' ? '#fee2e2' : 'var(--vk-paper)',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 2,
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <input
+                            type="radio"
+                            name="scan_tier"
+                            checked={scanForm.rate_tier === 'normal'}
+                            onChange={() => handleScanTierChange('normal')}
+                          />
+                          <span style={{ fontSize: 12, fontWeight: 700 }}>ค่าแรงปกติ</span>
+                        </div>
+                        <span style={{ fontSize: 11, color: 'var(--vk-ink-3)', paddingLeft: 18 }}>
+                          ฿ {job?.normal_rate ?? 357}
+                        </span>
+                      </label>
+
+                      <label
+                        style={{
+                          padding: '8px 10px',
+                          borderRadius: 4,
+                          border: scanForm.rate_tier === 'skilled' ? '2px solid #b91c1c' : '1px solid var(--vk-rule)',
+                          background: scanForm.rate_tier === 'skilled' ? '#fee2e2' : 'var(--vk-paper)',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 2,
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <input
+                            type="radio"
+                            name="scan_tier"
+                            checked={scanForm.rate_tier === 'skilled'}
+                            onChange={() => handleScanTierChange('skilled')}
+                          />
+                          <span style={{ fontSize: 12, fontWeight: 700 }}>ค่าแรงฝีมือ</span>
+                        </div>
+                        <span style={{ fontSize: 11, color: 'var(--vk-ink-3)', paddingLeft: 18 }}>
+                          ฿ {job?.skilled_rate ?? 400}
+                        </span>
+                      </label>
+
+                      <label
+                        style={{
+                          padding: '8px 10px',
+                          borderRadius: 4,
+                          border: scanForm.rate_tier === 'custom' ? '2px solid #b91c1c' : '1px solid var(--vk-rule)',
+                          background: scanForm.rate_tier === 'custom' ? '#fee2e2' : 'var(--vk-paper)',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 2,
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <input
+                            type="radio"
+                            name="scan_tier"
+                            checked={scanForm.rate_tier === 'custom'}
+                            onChange={() => handleScanTierChange('custom')}
+                          />
+                          <span style={{ fontSize: 12, fontWeight: 700 }}>กำหนดเอง</span>
+                        </div>
+                        <span style={{ fontSize: 11, color: 'var(--vk-ink-3)', paddingLeft: 18 }}>ระบุยอด</span>
+                      </label>
+                    </div>
+                  )
+                })()}
+              </div>
+
+              {/* 5. Base Rate & 50% Deduction Calculation Box */}
+              <div
+                style={{
+                  background: '#fef2f2',
+                  border: '1px solid #fca5a5',
+                  borderRadius: 6,
+                  padding: '14px 16px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 10,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                  <div>
+                    <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#991b1b', fontWeight: 700 }}>
+                      อัตราค่าแรงเต็มวัน
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                      <span style={{ fontSize: 13, color: '#7f1d1d' }}>฿</span>
+                      <input
+                        type="number"
+                        className="vk-input vk-input--mono"
+                        style={{ width: 100, padding: '4px 8px', height: 32, fontSize: 14, fontWeight: 700 }}
+                        value={scanForm.base_rate}
+                        onChange={(e) => handleScanBaseRateChange(parseFloat(e.target.value) || 0)}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#991b1b', fontWeight: 700 }}>
+                      ยอดหัก 50% (บันทึกในงวดนี้)
+                    </div>
+                    <div
+                      style={{
+                        fontFamily: 'var(--vk-mono)',
+                        fontSize: 22,
+                        fontWeight: 700,
+                        color: '#b91c1c',
+                        marginTop: 2,
+                      }}
+                    >
+                      – ฿ {scanForm.amount}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ fontSize: 11, color: '#991b1b', borderTop: '1px dashed #fca5a5', paddingTop: 8 }}>
+                  💡 หากสแกนหน้าไม่สำเร็จ จะถูกหัก 50% ของค่าแรงในวันนั้น ({scanForm.base_rate} ÷ 2 = ฿{scanForm.amount})
+                </div>
+              </div>
+
+              {/* 6. Custom Notes */}
+              <div>
+                <label className="vk-eyebrow" style={{ display: 'block', marginBottom: 5 }}>
+                  5. หมายเหตุเพิ่มเติม (ระบุหรือไม่ก็ได้)
+                </label>
+                <input
+                  className="vk-input"
+                  placeholder="เช่น HR แจ้งทาง LINE เมื่อ 5 พ.ค."
+                  value={scanForm.custom_notes}
+                  onChange={(e) => setScanForm((prev) => ({ ...prev, custom_notes: e.target.value }))}
+                />
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div
+              style={{
+                display: 'flex',
+                gap: 8,
+                padding: '14px 20px',
+                borderTop: '1px solid var(--vk-rule)',
+                background: 'var(--vk-paper)',
+                flexShrink: 0,
+              }}
+            >
+              <button
+                className="vk-btn"
+                style={{
+                  flex: 1,
+                  background: '#b91c1c',
+                  color: '#fff',
+                  border: 'none',
+                  fontWeight: 700,
+                }}
+                disabled={saveScanMutation.isPending || !scanForm.employee_id || parseFloat(scanForm.amount) <= 0}
+                onClick={() => saveScanMutation.mutate()}
+              >
+                {saveScanMutation.isPending ? 'กำลังบันทึก...' : `บันทึกหักเงิน ฿ ${scanForm.amount}`}
+              </button>
+              <button className="vk-btn" onClick={closeScanModal}>
+                ยกเลิก
+              </button>
             </div>
           </div>
         </div>

@@ -7,7 +7,8 @@ import { TopBar } from '../components/layout/TopBar'
 import { useState, useEffect, useMemo } from 'react'
 import { Search, X, CreditCard, FileSpreadsheet, Printer, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { formatPeriodLabel } from '../lib/formatters'
+import { formatPeriodLabel, formatEmployeeFullName, compareEmployeeCode } from '../lib/formatters'
+import { isTpiCompany } from '../features/tpi/model'
 import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
 import { calculatePayroll } from '../lib/payrollCalc'
@@ -16,7 +17,7 @@ import '../styles/tokens.css'
 // ── helpers ──────────────────────────────────────────────────────────────────
 function fmtNationality(n: string | null) {
   if (!n || n === 'ไทย') return null
-  if (n === 'เมียนมา' || n.toLowerCase().includes('myanmar') || n.toLowerCase().includes('burma')) return 'เมียนมา/กะเหรี่ยง'
+  if (n === 'เมียนมา' || n.toLowerCase().includes('myanmar') || n.toLowerCase().includes('burma')) return 'เมียนมา'
   return n
 }
 
@@ -79,7 +80,8 @@ function buildEmployeeSummaryPdfHtml(
   dailyEstimates: any[],
   empAdvances: any[],
   clerkPeriodBase: number,
-  generatedAt: string
+  generatedAt: string,
+  isTpi: boolean = true
 ): string {
   const posLabel = POSITIONS[emp.position] || emp.position || ''
   const payMethodLabel = emp.payment_method === 'bank_transfer' ? 'โอนผ่านธนาคาร' : 'เงินสด'
@@ -169,7 +171,7 @@ function buildEmployeeSummaryPdfHtml(
 
   <div class="emp-box">
     <div>
-      <div><strong>ชื่อ-นามสกุล:</strong> ${emp.first_name} ${emp.last_name} ${fmtNationality(emp.nationality) ? `(${fmtNationality(emp.nationality)})` : ''}</div>
+      <div><strong>ชื่อ-นามสกุล:</strong> ${formatEmployeeFullName(emp, isTpi)} ${fmtNationality(emp.nationality) ? `(${fmtNationality(emp.nationality)})` : ''}</div>
       <div><strong>รหัสพนักงาน:</strong> <span style="font-family:monospace">${emp.employee_code}</span></div>
       <div><strong>ตำแหน่ง:</strong> ${posLabel}${emp.job_title ? ' - ' + emp.job_title : ''}</div>
     </div>
@@ -255,7 +257,20 @@ export default function EmployeeSummary() {
   const [selectedEmpId, setSelectedEmpId] = useState<string | null>(null)
   const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(null)
   const [empSearch, setEmpSearch] = useState('')
-  const [onlyWorkedFilter, setOnlyWorkedFilter] = useState(false)
+  const [statusFilter, setStatusFilter] = useState<'worked' | 'not_worked' | null>(null)
+
+  const { data: factoryData } = useQuery<any>({
+    queryKey: ['factory-info', user?.factory_id],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('factories')
+        .select('id, name, company_id, companies(name)').eq('id', user?.factory_id ?? '').single()
+      if (error) throw error; return data
+    }, enabled: !!user?.factory_id,
+  })
+  const companiesJoin = factoryData?.companies
+  const companyName = (Array.isArray(companiesJoin) ? companiesJoin[0]?.name : companiesJoin?.name) || ''
+  const branchName  = factoryData?.name || ''
+  const isTpi = isTpiCompany(companyName || branchName)
 
   // ── 1. Fetch periods ──
   const { data: periods = [] } = useQuery<any[]>({
@@ -283,10 +298,10 @@ export default function EmployeeSummary() {
     queryKey: ['employees-summary', user?.factory_id],
     queryFn: async () => {
       const { data, error } = await supabase.from('employees')
-        .select('id,employee_code,first_name,last_name,nationality,position,job_title,wage_type,rate_per_12h,payment_method,bank_name,bank_account,exempt_social_security')
+        .select('id,employee_code,prefix,first_name,last_name,nationality,position,job_title,wage_type,rate_per_12h,payment_method,bank_name,bank_account,exempt_social_security')
         .eq('factory_id', user?.factory_id ?? '').eq('status', 'active').order('employee_code')
       if (error) throw error
-      return data
+      return (data || []).sort((a: any, b: any) => compareEmployeeCode(a.employee_code, b.employee_code))
     },
     enabled: !!user?.factory_id,
   })
@@ -579,15 +594,21 @@ export default function EmployeeSummary() {
 
   // Filtered employees for left pane search
   const filteredEmployees = useMemo(() => {
+    let list = employees
+    if (statusFilter === 'worked') {
+      list = list.filter(emp => activeIdsThisPeriod.has(emp.id))
+    } else if (statusFilter === 'not_worked') {
+      list = list.filter(emp => !activeIdsThisPeriod.has(emp.id))
+    }
     const term = empSearch.trim().toLowerCase()
-    if (!term) return employees
-    return employees.filter(emp => {
+    if (!term) return list
+    return list.filter(emp => {
       const code = emp.employee_code.toLowerCase()
       const fullName = `${emp.first_name} ${emp.last_name}`.toLowerCase()
       const nat = (emp.nationality || '').toLowerCase()
       return code.includes(term) || fullName.includes(term) || nat.includes(term)
     })
-  }, [employees, empSearch])
+  }, [employees, empSearch, statusFilter, activeIdsThisPeriod])
 
   // Period label formatter helper
   const thaiPeriodLabel = (start: string, end: string) => {
@@ -613,7 +634,8 @@ export default function EmployeeSummary() {
         dailyEstimates,
         empAdvances,
         clerkPeriodBase,
-        generatedAt
+        generatedAt,
+        isTpi
       )
 
       const win = window.open('', '_blank', 'width=900,height=750')
@@ -655,7 +677,7 @@ export default function EmployeeSummary() {
       rows.push([])
 
       // Employee Profile
-      rows.push(['รหัสพนักงาน', selectedEmp.employee_code, 'ชื่อ-นามสกุล', `${selectedEmp.first_name} ${selectedEmp.last_name}`.trim()])
+      rows.push(['รหัสพนักงาน', selectedEmp.employee_code, 'ชื่อ-นามสกุล', formatEmployeeFullName(selectedEmp, isTpi)])
       rows.push(['ตำแหน่ง', posLabel, 'อัตราค่าจ้าง', selectedEmp.rate_per_12h])
       rows.push(['วิธีการรับเงิน', payMethodLabel, 'ธนาคาร', bankName, 'เลขที่บัญชี', bankAccount])
       rows.push([])
@@ -745,7 +767,61 @@ export default function EmployeeSummary() {
 
           {/* Sticky header + search — does not scroll */}
           <div style={{ flexShrink: 0, padding: '16px 12px 0' }}>
+            {/* Period Selector */}
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                <span className="vk-eyebrow" style={{ fontSize: 10 }}>งวดการจ่ายเงิน</span>
+                {currentPeriod && (
+                  <span style={{ fontSize: 10, color: currentPeriod.status === 'approved' ? 'var(--vk-jade)' : 'var(--vk-ink-3)', fontWeight: 600 }}>
+                    {currentPeriod.status === 'approved' ? 'อนุมัติแล้ว' : 'ฉบับร่าง'}
+                  </span>
+                )}
+              </div>
+              <select
+                value={selectedPeriodId ?? ''}
+                onChange={e => setSelectedPeriodId(e.target.value)}
+                style={{
+                  width: '100%',
+                  height: 32,
+                  fontFamily: 'var(--vk-sans)',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  border: '1px solid var(--vk-rule)',
+                  padding: '0 8px',
+                  background: 'var(--vk-bone)',
+                  color: 'var(--vk-ink)',
+                  outline: 'none',
+                  cursor: 'pointer',
+                  boxSizing: 'border-box'
+                }}
+              >
+                {periods.map(p => (
+                  <option key={p.id} value={p.id}>
+                    {p.label} {p.status === 'approved' ? '✓' : '(ร่าง)'}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <div className="vk-eyebrow" style={{ marginBottom: 8 }}>พนักงาน ({employees.length})</div>
+
+            {/* Filter chips */}
+            <div style={{ display: 'flex', gap: 6, fontSize: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+              {([
+                { key: 'worked',     color: 'var(--vk-jade)', label: `มีกะทำงาน (${allShifts.length > 0 ? activeIdsThisPeriod.size : 0})` },
+                { key: 'not_worked', color: '#d4cfc9',        label: 'ไม่มีกะ' },
+              ] as const).map(s => {
+                const active = statusFilter === s.key
+                return (
+                  <button key={s.key} onClick={() => setStatusFilter(active ? null : s.key)}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', border: `1px solid ${active ? s.color : 'var(--vk-rule-soft)'}`, borderRadius: 999, cursor: 'pointer', background: active ? `${s.color}22` : 'transparent', color: active ? 'var(--vk-ink)' : 'var(--vk-ink-3)', fontFamily: 'var(--vk-sans)', fontWeight: active ? 700 : 400, fontSize: 10, transition: 'all 120ms' }}>
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: s.color, display: 'inline-block', flexShrink: 0 }} />
+                    {s.label}
+                  </button>
+                )
+              })}
+            </div>
+
             <div style={{ position: 'relative', marginBottom: 8 }}>
               <Search style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', width: 12, height: 12, color: 'var(--vk-ink-3)', pointerEvents: 'none' }} />
               <input
@@ -786,7 +862,7 @@ export default function EmployeeSummary() {
                     <div style={{ minWidth: 0, flex: 1 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
                         <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--vk-ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {emp.first_name} {emp.last_name}{natLabel ? ` (${natLabel})` : ''}
+                          {formatEmployeeFullName(emp, isTpi)}{natLabel ? ` (${natLabel})` : ''}
                         </span>
                         {emp.position === 'clerk' && (
                           <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 999, background: 'rgba(177,71,41,0.12)', color: 'var(--vk-persimmon)', letterSpacing: '0.04em', flexShrink: 0 }}>เสมียน</span>
@@ -828,7 +904,7 @@ export default function EmployeeSummary() {
                 <div>
                   <div className="vk-eyebrow" style={{ marginBottom: 3 }}>EMPLOYEE LEDGER · บัญชีรายการพนักงาน</div>
                   <div style={{ fontFamily: 'var(--vk-sans)', fontWeight: 800, fontSize: 20, letterSpacing: '-0.02em', color: 'var(--vk-ink)', lineHeight: 1.2 }}>
-                    {selectedEmp.first_name} {selectedEmp.last_name}
+                    {formatEmployeeFullName(selectedEmp, isTpi)}
                     {fmtNationality(selectedEmp.nationality) && (
                       <span style={{ fontWeight: 400, fontSize: 13, color: 'var(--vk-ink-3)', marginLeft: 8 }}>({fmtNationality(selectedEmp.nationality)})</span>
                     )}

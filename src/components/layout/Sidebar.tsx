@@ -1,4 +1,4 @@
-import { Link, useLocation } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { useAppStore } from '../../store/useAppStore'
 import { supabase } from '../../lib/supabase'
@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Users, CalendarClock, Calculator,
   CreditCard, FileText, Download, LogOut,
   Link2, UserCog, ChevronDown, X, Menu, KeyRound, Eye, EyeOff,
-  ClipboardList
+  ClipboardList, Briefcase
 } from 'lucide-react'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
@@ -16,24 +16,12 @@ import {
 
 interface Factory { id: string; name: string; companies: any }
 
-const NAV = [
-  { href: '/dashboard',  label: 'Dashboard',         icon: LayoutDashboard, roles: ['superUser','admin'] },
-  { href: '/employees',  label: 'ฐานข้อมูลพนักงาน', icon: Users,           roles: ['superUser','admin'] },
-  { href: '/shifts',     label: 'กรอกกะรายวัน',      icon: CalendarClock,   roles: ['superUser','admin'] },
-  { href: '/advances',   label: 'เบิกล่วงหน้า',      icon: CreditCard,      roles: ['superUser','admin'] },
-  { href: '/payroll',    label: 'กรอกค่าจ้าง',       icon: Calculator,      roles: ['superUser','admin'] },
-  { href: '/payslip',    label: 'ดูสลิปเงินเดือน',   icon: FileText,        roles: ['superUser','admin','normalUser'] },
-  { href: '/employee-summary', label: 'สรุปภาพรวมพนักงาน', icon: ClipboardList, roles: ['superUser','admin','normalUser'] },
-  { href: '/share-links',label: 'ลิงก์สลิปพนักงาน',  icon: Link2,           roles: ['superUser','admin','normalUser'] },
-  { href: '/export',     label: 'ส่งออกข้อมูล',      icon: Download,        roles: ['superUser','admin','normalUser'] },
-  { href: '/users',      label: 'จัดการผู้ใช้งาน',   icon: UserCog,         roles: ['superUser','admin'] },
-]
-
 interface SidebarProps { isOpen: boolean; setIsOpen: (v: boolean) => void }
 
 export function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
   const { user, companyContext, setUser, setCompanyContext } = useAppStore()
   const location = useLocation()
+  const navigate = useNavigate()
   const [factories, setFactories] = useState<Factory[]>([])
   const [showPwModal, setShowPwModal] = useState(false)
   const [pwForm, setPwForm] = useState({ current: '', next: '', confirm: '' })
@@ -51,13 +39,16 @@ export function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
   const handleFactoryChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const f = factories.find(f => f.id === e.target.value)
     if (f && user) {
+      localStorage.setItem('virankorn_active_factory_id', f.id)
       const company = Array.isArray(f.companies) ? f.companies[0] : f.companies
       setUser({ ...user, factory_id: f.id })
       setCompanyContext({ id: company?.id || companyContext?.id, name: company?.name || companyContext?.name, type: company?.company_type || companyContext?.type, factoryName: f.name })
+      navigate('/dashboard')
     }
   }
 
   const handleSignOut = async () => {
+    localStorage.removeItem('virankorn_active_factory_id')
     await supabase.auth.signOut()
     setUser(null)
     setCompanyContext(null)
@@ -79,7 +70,6 @@ export function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
       if (error) throw error
       toast.success('เปลี่ยนรหัสผ่านเรียบร้อยแล้ว')
       setShowPwModal(false)
-      setPwForm({ current: '', next: '', confirm: '' })
     } catch (e: any) {
       setPwError(e.message)
     } finally {
@@ -87,7 +77,27 @@ export function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     }
   }
 
-  const filtered = NAV.filter(n => !user || n.roles.includes(user.role))
+  const activeFactory = factories.find(f => f.id === user?.factory_id)
+  const currentFactoryName = activeFactory?.name || companyContext?.factoryName || companyContext?.name || ''
+
+  const isTpi = (/ทีพีไอ|\btpi\b/i.test(currentFactoryName)) &&
+                !(/ตราเพชร|\bdrt\b|diamond/i.test(currentFactoryName))
+
+  const navItems = [
+    { href: '/dashboard',        label: 'Dashboard',             icon: LayoutDashboard, roles: ['superUser','admin'] },
+    { href: '/employees',        label: 'ฐานข้อมูลพนักงาน',     icon: Users,           roles: ['superUser','admin'] },
+    ...(isTpi ? [{ href: '/tpi-jobs', label: 'จัดการรหัสงาน', icon: Briefcase, roles: ['superUser','admin'] }] : []),
+    { href: '/shifts',           label: 'กรอกกะรายวัน',          icon: CalendarClock,   roles: ['superUser','admin'] },
+    { href: '/advances',         label: 'เบิกล่วงหน้า',          icon: CreditCard,      roles: ['superUser','admin'] },
+    { href: '/payroll',          label: 'กรอกค่าจ้าง',           icon: Calculator,      roles: ['superUser','admin'] },
+    { href: '/payslip',          label: 'ดูสลิปเงินเดือน',       icon: FileText,        roles: ['superUser','admin','normalUser'] },
+    { href: '/employee-summary', label: 'สรุปภาพรวมพนักงาน',     icon: ClipboardList,   roles: ['superUser','admin','normalUser'] },
+    { href: '/share-links',      label: 'ลิงก์สลิปพนักงาน',      icon: Link2,           roles: ['superUser','admin','normalUser'] },
+    { href: '/export',           label: 'ส่งออกข้อมูล',          icon: Download,        roles: ['superUser','admin','normalUser'] },
+    { href: '/users',            label: 'จัดการผู้ใช้งาน',       icon: UserCog,         roles: ['superUser','admin'] },
+  ]
+
+  const filtered = navItems.filter(n => !user || n.roles.includes(user.role))
 
   return (
     <>
@@ -156,7 +166,15 @@ export function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
                   textDecoration: 'none', transition: 'background 160ms', marginBottom: 2,
                 }}>
                 <Icon style={{ width: 17, height: 17, flexShrink: 0, opacity: active ? 1 : 0.6 }} />
-                {item.label}
+                <span style={{ flex: 1, minWidth: 0 }}>{item.label}</span>
+                {(item as any).tag && (
+                  <span style={{
+                    fontSize: 9, fontWeight: 700, padding: '2px 5px', borderRadius: 4,
+                    background: 'var(--vk-persimmon)', color: '#fff', letterSpacing: '0.04em'
+                  }}>
+                    {(item as any).tag}
+                  </span>
+                )}
               </Link>
             )
           })}

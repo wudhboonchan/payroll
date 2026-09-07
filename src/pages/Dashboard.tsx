@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useOutletContext } from 'react-router-dom'
+import { useOutletContext, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAppStore } from '../store/useAppStore'
 import { TopBar } from '../components/layout/TopBar'
 import { toast } from 'sonner'
-import { Plus, CheckCircle, XCircle, Pencil, Check, X, Trash2, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
+import { Plus, CheckCircle, XCircle, Pencil, Check, X, Trash2, ArrowUpDown, ArrowUp, ArrowDown, ShieldAlert, ShieldCheck, AlertTriangle, ExternalLink } from 'lucide-react'
 import '../styles/tokens.css'
 
 interface PayrollPeriod { id: string; label: string; period_start: string; period_end: string; status: string; social_security_rate: number; approved_by: string | null; approver?: { full_name: string | null } | null }
@@ -20,9 +20,44 @@ function formatPeriodLabel(start: string, end: string) {
   return `${s.getDate()} – ${e.getDate()} ${months[e.getMonth()]} ${e.getFullYear() + 543}`
 }
 
+function formatOverrideSummary(row: any) {
+  const parts: string[] = []
+  if (row.override_normal != null) {
+    parts.push(`ค่าจ้างปกติ ฿${Number(row.override_normal).toLocaleString()}`)
+  }
+  if (row.override_shift != null) {
+    parts.push(`ค่ากะ ฿${Number(row.override_shift).toLocaleString()}`)
+  }
+  if (row.override_ot != null) {
+    parts.push(`ค่า OT ฿${Number(row.override_ot).toLocaleString()}`)
+  }
+  if (row.override_special != null && row.amount_special != null && Number(row.override_special) !== Number(row.amount_special)) {
+    parts.push(`เงินพิเศษ ฿${Number(row.override_special).toLocaleString()}`)
+  }
+  if (row.override_reason && String(row.override_reason).trim() !== '') {
+    const reasonParts = String(row.override_reason).split(',').map((s: string) => s.trim()).filter(Boolean)
+    for (const p of reasonParts) {
+      if (p.startsWith('ค่าตำแหน่ง:') || p.startsWith('ค่า จป.:') || p.startsWith('ค่าจ้างปกติกะแรก:') || p.startsWith('ค่ากะ:') || p.startsWith('เบี้ยขยัน:')) {
+        const itemLabel = p.split(':')[0].trim()
+        if (!parts.some(existing => existing.includes(itemLabel))) {
+          parts.push(p)
+        }
+      } else if (!parts.some(existing => existing.includes(p))) {
+        parts.push(`เหตุผล: "${p}"`)
+      }
+    }
+  }
+  return parts.length > 0 ? parts.join(' · ') : 'มีการแก้ไขยอดเงิน'
+}
+
 export default function Dashboard() {
   const { onMenuClick } = useOutletContext<{ onMenuClick: () => void }>()
-  const { user } = useAppStore()
+  const navigate = useNavigate()
+  const { user, companyContext } = useAppStore()
+  const currentFactoryName = companyContext?.factoryName || companyContext?.name || ''
+  const isTpi = (/ทีพีไอ|\btpi\b/i.test(currentFactoryName)) &&
+                !(/ตราเพชร|\bdrt\b|diamond/i.test(currentFactoryName))
+  const isSuperUser = String(user?.role || '').toLowerCase() === 'superuser'
   const queryClient = useQueryClient()
   const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(null)
   const [showCancelConfirm, setShowCancelConfirm] = useState(false)
@@ -106,15 +141,85 @@ export default function Dashboard() {
     refetchInterval: 30_000,
   })
 
+  const { data: superUserOverrides = [] } = useQuery({
+    queryKey: ['superuser-overrides', activePeriod?.id],
+    queryFn: async () => {
+      if (!activePeriod?.id) return []
+      const { data, error } = await supabase
+        .from('payroll_entries')
+        .select(`
+          id,
+          employee_id,
+          amount_normal,
+          override_normal,
+          amount_shift,
+          override_shift,
+          amount_ot,
+          override_ot,
+          amount_special,
+          override_special,
+          override_reason,
+          updated_at,
+          entered_by,
+          employee:employees(id, employee_code, first_name, last_name, position)
+        `)
+        .eq('period_id', activePeriod.id)
+      if (error) {
+        console.error('SuperUser Overrides query error:', error)
+        throw error
+      }
+
+      return (data || []).filter((e: any) => {
+        return (
+          e.override_normal != null ||
+          e.override_shift != null ||
+          e.override_ot != null ||
+          (e.override_special != null && e.amount_special != null && Number(e.override_special) !== Number(e.amount_special)) ||
+          (e.override_reason && String(e.override_reason).trim() !== '')
+        )
+      })
+    },
+    enabled: isSuperUser && !!activePeriod?.id,
+    staleTime: 0,
+  })
+
   const { data: stats } = useQuery({
-    queryKey: ['v2-stats', activePeriod?.id],
+    queryKey: ['v2-stats', activePeriod?.id, isTpi],
     queryFn: async () => {
       if (!activePeriod) return null
-      const [payroll, shifts, advances] = await Promise.all([
+      const [payroll, advances] = await Promise.all([
         supabase.from('payroll_entries').select('employee_id,amount_normal,amount_shift,amount_ot,amount_wood_excess,amount_film,amount_special,amount_diligence,amount_position,deduct_social_security,deduct_advance,deduct_safety_equipment,deduct_uniform,override_special,employee:employees(employee_code,first_name,last_name)').eq('period_id', activePeriod.id).limit(10000),
-        supabase.from('shift_assignments').select('work_date').eq('period_id', activePeriod.id).limit(10000),
         supabase.from('advance_payments').select('amount').eq('period_id', activePeriod.id),
       ])
+
+      let allShiftDates: string[] = []
+      let shiftFrom = 0
+      const SHIFT_PAGE = 1000
+      while (true) {
+        if (isTpi) {
+          const { data, error } = await supabase
+            .from('tpi_shift_entries' as any)
+            .select('work_date')
+            .eq('factory_id', user?.factory_id ?? '')
+            .gte('work_date', activePeriod.period_start)
+            .lte('work_date', activePeriod.period_end)
+            .range(shiftFrom, shiftFrom + SHIFT_PAGE - 1)
+          if (error || !data) break
+          allShiftDates = allShiftDates.concat(data.map((d: any) => d.work_date))
+          if (data.length < SHIFT_PAGE) break
+        } else {
+          const { data, error } = await supabase
+            .from('shift_assignments')
+            .select('work_date')
+            .eq('period_id', activePeriod.id)
+            .range(shiftFrom, shiftFrom + SHIFT_PAGE - 1)
+          if (error || !data) break
+          allShiftDates = allShiftDates.concat(data.map((d: any) => d.work_date))
+          if (data.length < SHIFT_PAGE) break
+        }
+        shiftFrom += SHIFT_PAGE
+      }
+
       const entries = payroll.data ?? []
       const gross = entries.reduce((s, e) => {
         const income = Number(e.amount_normal||0) + Number(e.amount_shift||0) + Number(e.amount_ot||0)
@@ -146,7 +251,7 @@ export default function Dashboard() {
       void rawNet
       const adv = advances.data?.reduce((s, a) => s + Number(a.amount), 0) ?? 0
       const advCount = advances.data?.length ?? 0
-      const uniqueDays = new Set(shifts.data?.map(d => d.work_date)).size
+      const uniqueDays = new Set(allShiftDates.filter(Boolean)).size
       const start = parseLocal(activePeriod.period_start), end = parseLocal(activePeriod.period_end)
       const totalDays = Math.ceil((end.getTime()-start.getTime())/86400000)+1
       return { gross, ss, ssCount, net, carryOver, carryOverDetails, adv, advCount, uniqueDays, totalDays }
@@ -199,7 +304,13 @@ export default function Dashboard() {
       const { error } = await supabase.from('payroll_periods').update({ social_security_rate: rate }).eq('id', activePeriod!.id)
       if (error) throw error
     },
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['periods'] }); toast.success('อัปเดตอัตราประกันสังคมแล้ว') },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['periods'] })
+      queryClient.invalidateQueries({ queryKey: ['all-payroll-entries'] })
+      queryClient.invalidateQueries({ queryKey: ['v2-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['payment-channel-stats'] })
+      toast.success('อัปเดตอัตราประกันสังคมแล้ว')
+    },
     onError: (e: Error) => toast.error('อัปเดตไม่สำเร็จ', { description: e.message }),
   })
 
@@ -244,9 +355,13 @@ export default function Dashboard() {
           : new Date(nextStart.getFullYear(), nextStart.getMonth()+1, 0)
       }
       const startStr = fmt(nextStart), endStr = fmt(nextEnd)
+      const currentRate = periods[0]?.social_security_rate != null
+        ? Number(periods[0].social_security_rate)
+        : (activePeriod?.social_security_rate != null ? Number(activePeriod.social_security_rate) : 0.05)
+
       const { error } = await supabase.from('payroll_periods').insert({
         factory_id: user.factory_id, label: formatPeriodLabel(startStr, endStr),
-        period_start: startStr, period_end: endStr, status: 'draft', social_security_rate: 0.05,
+        period_start: startStr, period_end: endStr, status: 'draft', social_security_rate: currentRate,
       })
       if (error) throw error
     },
@@ -481,6 +596,191 @@ export default function Dashboard() {
                 <hr className="vk-rule" />
               </div>
             </div>
+
+            {/* SuperUser Override Audit Notification — ONLY for superUser */}
+            {isSuperUser && (
+              <div style={{ marginTop: 36 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <ShieldAlert style={{ width: 16, height: 16, color: '#b45309' }} />
+                    <span className="vk-eyebrow" style={{ color: '#b45309', marginBottom: 0 }}>
+                      SUPERUSER AUDIT · รายการที่มีการแก้ไขเงิน (Manual Override)
+                    </span>
+                  </div>
+                  <span style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    padding: '2px 8px',
+                    borderRadius: 999,
+                    background: '#4c1d95',
+                    color: '#f5f3ff',
+                    letterSpacing: '0.04em',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4
+                  }}>
+                    🔒 เฉพาะ SuperUser (Admin ไม่เห็นส่วนนี้)
+                  </span>
+                </div>
+                <hr className="vk-rule" />
+
+                {superUserOverrides.length === 0 ? (
+                  <div style={{
+                    padding: '16px 20px',
+                    background: '#f0fdf4',
+                    border: '1px solid #bbf7d0',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <ShieldCheck style={{ width: 20, height: 20, color: '#16a34a', flexShrink: 0 }} />
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: '#166534' }}>
+                          ไม่พบรายการแก้ไขเงิน (Override) ใน{activePeriod?.label || 'งวดนี้'}
+                        </div>
+                        <div style={{ fontSize: 11, color: '#15803d', marginTop: 2 }}>
+                          ข้อมูลค่าจ้างของพนักงานทุกคนคำนวณตามเกณฑ์และกะทำงานปกติ 100% ปราศจากการระบุยอดแทรกแซง
+                        </div>
+                      </div>
+                    </div>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: '#166534', fontFamily: 'var(--vk-mono)' }}>
+                      0 OVERRIDES
+                    </span>
+                  </div>
+                ) : (
+                  <div>
+                    <div style={{
+                      padding: '12px 18px',
+                      background: '#fffbeb',
+                      border: '1px solid #f59e0b',
+                      borderBottom: 'none',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 10,
+                      flexWrap: 'wrap',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <AlertTriangle style={{ width: 18, height: 18, color: '#d97706', flexShrink: 0 }} />
+                        <span style={{ fontSize: 13, fontWeight: 700, color: '#92400e' }}>
+                          พบพนักงานที่มีการแก้ไขยอดเงิน (Override) ใน{activePeriod?.label || 'งวดนี้'} จำนวน {superUserOverrides.length} คน
+                        </span>
+                      </div>
+                      <span style={{ fontSize: 11, color: '#b45309', fontWeight: 600 }}>
+                        กรุณาตรวจสอบความถูกต้องของสลิปและการอนุมัติ
+                      </span>
+                    </div>
+
+                    {/* Table */}
+                    <div style={{ border: '1px solid var(--vk-rule)', background: 'var(--vk-paper)', overflowX: 'auto' }}>
+                      <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: '180px 1fr 140px 120px',
+                        background: 'var(--vk-bone)',
+                        borderBottom: '1px solid var(--vk-rule)',
+                        padding: '8px 16px',
+                        fontSize: 10,
+                        fontWeight: 700,
+                        letterSpacing: '0.07em',
+                        color: 'var(--vk-ink-3)',
+                        textTransform: 'uppercase'
+                      }}>
+                        <div>พนักงาน</div>
+                        <div>รายการและยอดเงินที่ Override</div>
+                        <div style={{ textAlign: 'center' }}>บันทึกล่าสุด</div>
+                        <div style={{ textAlign: 'right' }}>ดำเนินการ</div>
+                      </div>
+
+                      {superUserOverrides.map((row: any) => {
+                        const emp = row.employee
+                        const fullName = emp ? `${emp.first_name} ${emp.last_name || ''}`.trim() : 'ไม่พบข้อมูล'
+                        const summary = formatOverrideSummary(row)
+                        const updateDate = row.updated_at ? new Date(row.updated_at).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' }) : '—'
+
+                        return (
+                          <div
+                            key={row.id}
+                            style={{
+                              display: 'grid',
+                              gridTemplateColumns: '180px 1fr 140px 120px',
+                              padding: '12px 16px',
+                              borderBottom: '1px solid var(--vk-rule-soft)',
+                              alignItems: 'center',
+                              gap: 8,
+                            }}
+                          >
+                            {/* Employee */}
+                            <div>
+                              <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--vk-ink)' }}>
+                                {fullName}
+                              </div>
+                              <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 10, color: 'var(--vk-ink-3)', marginTop: 1 }}>
+                                {emp?.employee_code || row.employee_id} {emp?.position === 'clerk' ? '· เสมียน' : ''}
+                              </div>
+                            </div>
+
+                            {/* Overridden Details */}
+                            <div>
+                              <span style={{
+                                display: 'inline-block',
+                                fontSize: 12,
+                                fontWeight: 600,
+                                color: '#b45309',
+                                background: '#fffbeb',
+                                border: '1px solid #fde68a',
+                                padding: '3px 8px',
+                                borderRadius: 4,
+                              }}>
+                                {summary}
+                              </span>
+                            </div>
+
+                            {/* Timestamp */}
+                            <div style={{ textAlign: 'center', fontFamily: 'var(--vk-mono)', fontSize: 11, color: 'var(--vk-ink-3)' }}>
+                              {updateDate}
+                            </div>
+
+                            {/* Action Link */}
+                            <div style={{ textAlign: 'right' }}>
+                              <button
+                                onClick={() => navigate(`/payslip?emp=${row.employee_id}&period=${activePeriod.id}`)}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 4,
+                                  padding: '4px 10px',
+                                  borderRadius: 4,
+                                  background: 'var(--vk-paper)',
+                                  border: '1px solid var(--vk-rule)',
+                                  color: 'var(--vk-ink)',
+                                  fontSize: 11,
+                                  fontWeight: 600,
+                                  cursor: 'pointer',
+                                  transition: 'all 120ms',
+                                }}
+                                onMouseEnter={e => {
+                                  e.currentTarget.style.borderColor = 'var(--vk-persimmon)'
+                                  e.currentTarget.style.color = 'var(--vk-persimmon)'
+                                }}
+                                onMouseLeave={e => {
+                                  e.currentTarget.style.borderColor = 'var(--vk-rule)'
+                                  e.currentTarget.style.color = 'var(--vk-ink)'
+                                }}
+                              >
+                                ตรวจสอบสลิป
+                                <ExternalLink style={{ width: 11, height: 11 }} />
+                              </button>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Payment channel breakdown */}
             {(paymentChannelStats ?? []).length > 0 && (() => {

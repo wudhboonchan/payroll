@@ -226,10 +226,27 @@ html, body, #root {
   border-radius: var(--vk-r1);
   transition: border-color var(--vk-dur) var(--vk-ease);
   outline: none;
+  box-sizing: border-box;
+}
+select.vk-input {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  padding-right: 32px;
+  background-color: var(--vk-bone);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%237a6f60' stroke-width='2'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 15px 15px;
+  cursor: pointer;
 }
 .vk-input:focus {
   border-color: var(--vk-persimmon);
   box-shadow: 0 0 0 2px var(--vk-persimmon-tint);
+}
+.vk-input::placeholder {
+  font-family: var(--vk-font);
+  color: var(--vk-ink-3);
 }
 .vk-input--mono {
   font-family: var(--vk-mono);

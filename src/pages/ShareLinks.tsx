@@ -6,6 +6,7 @@ import { useAppStore } from '../store/useAppStore'
 import { TopBar } from '../components/layout/TopBar'
 import { toast } from 'sonner'
 import { Copy, Check, RefreshCw, Link2, Search, FileDown, RotateCcw, AlertCircle, Smartphone, Eye, EyeOff } from 'lucide-react'
+import { compareEmployeeCode } from '../lib/formatters'
 import '../styles/tokens.css'
 
 type SlipStatus = 'pending' | 'confirmed' | 'disputed' | 'auto_confirmed'
@@ -214,7 +215,7 @@ export default function ShareLinks() {
       )
     }
     return list.sort((a, b) => {
-      if (sortBy === 'code') return (a.employees?.employee_code ?? '').localeCompare(b.employees?.employee_code ?? '')
+      if (sortBy === 'code') return compareEmployeeCode(a.employees?.employee_code, b.employees?.employee_code)
       if (sortBy === 'name') return (a.employees?.first_name ?? '').localeCompare(b.employees?.first_name ?? '')
       return a.employee_status.localeCompare(b.employee_status)
     })

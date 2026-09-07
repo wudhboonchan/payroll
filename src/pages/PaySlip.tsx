@@ -1,19 +1,22 @@
-import React from 'react'
-import { useOutletContext } from 'react-router-dom'
+import React, { useMemo } from 'react'
+import { useOutletContext, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import { useAppStore } from '../store/useAppStore'
 import { TopBar } from '../components/layout/TopBar'
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Printer, Search, X } from 'lucide-react'
+import { Printer, Search, X, AlertTriangle } from 'lucide-react'
 import { calculatePayroll } from '../lib/payrollCalc'
+import { calculateTpiPayroll, type TpiShiftRow, type TpiPayrollCalculationResult } from '../features/tpi/payrollCalc'
 import { VKSlipDocument } from '../components/VKSlipDocument'
+import { formatEmployeeFullName, compareEmployeeCode } from '../lib/formatters'
+import { isTpiCompany } from '../features/tpi/model'
 import '../styles/tokens.css'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 function fmtNationality(n: string | null) {
   if (!n || n === 'ไทย') return null
-  if (n === 'เมียนมา' || n.toLowerCase().includes('myanmar') || n.toLowerCase().includes('burma')) return 'เมียนมา/กะเหรี่ยง'
+  if (n === 'เมียนมา' || n.toLowerCase().includes('myanmar') || n.toLowerCase().includes('burma')) return 'เมียนมา'
   return n
 }
 function maskBank(account: string | null) {
@@ -60,14 +63,22 @@ const POSITIONS: Record<string, string> = {
 
 export default function PaySlip() {
   const { onMenuClick } = useOutletContext<{ onMenuClick: () => void }>()
-  const { user } = useAppStore()
+  const { user, companyContext } = useAppStore()
+  const [searchParams] = useSearchParams()
   const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(null)
   const [selectedEmpId, setSelectedEmpId] = useState<string | null>(null)
   const [empSearch, setEmpSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState<'has_slip' | 'no_slip' | null>(null)
+  const [statusFilter, setStatusFilter] = useState<'has_slip' | 'no_slip' | 'override' | null>(null)
   const slipRef = useRef<HTMLDivElement>(null)
   const scalerRef = useRef<HTMLDivElement>(null)
   const innerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const empParam = searchParams.get('emp') || searchParams.get('employee_id')
+    const periodParam = searchParams.get('period') || searchParams.get('period_id')
+    if (empParam) setSelectedEmpId(empParam)
+    if (periodParam) setSelectedPeriodId(periodParam)
+  }, [searchParams])
 
   const applyScale = useCallback(() => {
     const scaler = scalerRef.current
@@ -158,9 +169,10 @@ export default function PaySlip() {
     queryKey: ['employees-payslip', user?.factory_id],
     queryFn: async () => {
       const { data, error } = await supabase.from('employees')
-        .select('id,employee_code,first_name,last_name,nationality,position,job_title,wage_type,rate_per_12h,payment_method,bank_name,bank_account,exempt_social_security,status')
+        .select('id,employee_code,prefix,first_name,last_name,nationality,position,job_title,wage_type,rate_per_12h,payment_method,bank_name,bank_account,exempt_social_security,status')
         .eq('factory_id', user?.factory_id ?? '').order('employee_code')
-      if (error) throw error; return data
+      if (error) throw error
+      return (data || []).sort((a: any, b: any) => compareEmployeeCode(a.employee_code, b.employee_code))
     }, enabled: !!user?.factory_id, staleTime: 0,
   })
 
@@ -168,7 +180,7 @@ export default function PaySlip() {
     queryKey: ['all-payroll-entries', currentPeriod?.id],
     queryFn: async () => {
       const { data, error } = await supabase.from('payroll_entries' as any)
-        .select('employee_id').eq('period_id', currentPeriod.id)
+        .select('employee_id, override_normal, override_shift, override_ot, override_special, amount_special, override_reason').eq('period_id', currentPeriod.id)
       if (error) throw error; return data
     }, enabled: !!currentPeriod?.id, staleTime: 0,
   })
@@ -186,6 +198,10 @@ export default function PaySlip() {
   const companiesJoin = factoryData?.companies
   const companyName = (Array.isArray(companiesJoin) ? companiesJoin[0]?.name : companiesJoin?.name) || ''
   const branchName  = factoryData?.name || ''
+  const isTpi = isTpiCompany(companyContext?.factoryName) ||
+                isTpiCompany(companyContext?.name) ||
+                isTpiCompany(companyName) ||
+                isTpiCompany(branchName)
 
   const { data: entry } = useQuery<any>({
     queryKey: ['payslip-entry', currentPeriod?.id, selectedEmpId],
@@ -197,7 +213,7 @@ export default function PaySlip() {
     }, enabled: !!currentPeriod?.id && !!selectedEmpId, staleTime: 0,
   })
 
-  // Fetch ALL shifts for period (same as PayrollEntry), filter by employee in JS
+  // Fetch ALL shifts for period (Diamond), filter by employee in JS
   const { data: allShifts = [] } = useQuery<any[]>({
     queryKey: ['payslip-all-shifts', currentPeriod?.id],
     queryFn: async () => {
@@ -215,12 +231,110 @@ export default function PaySlip() {
         from += PAGE
       }
       return all
-    }, enabled: !!currentPeriod?.id, staleTime: 0,
+    }, enabled: !!currentPeriod?.id && !isTpi, staleTime: 0,
   })
   const empShifts = allShifts.filter((s: any) => s.employee_id === selectedEmpId)
 
+  // Fetch ALL shifts for period (TPI)
+  const { data: allTpiShifts = [] } = useQuery<TpiShiftRow[]>({
+    queryKey: ['payslip-all-tpi-shifts', currentPeriod?.id, user?.factory_id],
+    queryFn: async () => {
+      if (!currentPeriod?.period_start || !currentPeriod?.period_end) return []
+      const PAGE = 1000
+      let all: any[] = []
+      let from = 0
+      while (true) {
+        try {
+          const { data, error } = await supabase
+            .from('tpi_shift_entries' as any)
+            .select('id,work_date,employee_id,shift_index,job_id,job_code_snapshot,rate_tier,rate_snapshot,is_half_shift,actual_hours,ot_hours,ot_pay,is_holiday_ot')
+            .eq('factory_id', user?.factory_id ?? '')
+            .gte('work_date', currentPeriod.period_start)
+            .lte('work_date', currentPeriod.period_end)
+            .range(from, from + PAGE - 1)
+
+          if (error) {
+            const fallback = await supabase
+              .from('tpi_shift_entries' as any)
+              .select('id,work_date,employee_id,shift_index,job_id,job_code_snapshot,rate_tier,rate_snapshot')
+              .eq('factory_id', user?.factory_id ?? '')
+              .gte('work_date', currentPeriod.period_start)
+              .lte('work_date', currentPeriod.period_end)
+              .range(from, from + PAGE - 1)
+            if (fallback.error) break
+            all = all.concat(fallback.data ?? [])
+            if (!fallback.data || fallback.data.length < PAGE) break
+          } else {
+            all = all.concat(data ?? [])
+            if (!data || data.length < PAGE) break
+          }
+        } catch {
+          break
+        }
+        from += PAGE
+      }
+      return all as TpiShiftRow[]
+    },
+    enabled: !!currentPeriod?.id && !!user?.factory_id && isTpi,
+    staleTime: 0,
+  })
+  const empTpiShifts = allTpiShifts.filter((s: any) => s.employee_id === selectedEmpId)
+
   const selectedEmp = employees.find(e => e.id === selectedEmpId) ?? null
   const savedIds = new Set(allEntries.map((e: any) => e.employee_id))
+
+  const checkIsOverridden = (e: any) => {
+    if (!e) return false
+    return (
+      e.override_normal != null ||
+      e.override_shift != null ||
+      e.override_ot != null ||
+      (e.override_special != null && e.amount_special != null && Number(e.override_special) !== Number(e.amount_special)) ||
+      (e.override_reason && String(e.override_reason).trim() !== '')
+    )
+  }
+
+  const overriddenIds = useMemo(() => {
+    const set = new Set<string>()
+    for (const e of allEntries) {
+      if (checkIsOverridden(e)) set.add(e.employee_id)
+    }
+    return set
+  }, [allEntries])
+
+  const overrideInfo = useMemo(() => {
+    if (!entry) return { isOverridden: false, details: [] as string[] }
+    const details: string[] = []
+    if (entry.override_normal != null) {
+      details.push(`ค่าจ้างปกติ (฿${Number(entry.override_normal).toLocaleString()})`)
+    }
+    if (entry.override_shift != null) {
+      details.push(`ค่ากะ (฿${Number(entry.override_shift).toLocaleString()})`)
+    }
+    if (entry.override_ot != null) {
+      details.push(`ค่า OT (฿${Number(entry.override_ot).toLocaleString()})`)
+    }
+    if (entry.override_special != null && entry.amount_special != null && Number(entry.override_special) !== Number(entry.amount_special)) {
+      details.push(`เงินพิเศษ (฿${Number(entry.override_special).toLocaleString()})`)
+    }
+    if (entry.override_reason && String(entry.override_reason).trim() !== '') {
+      const reasonParts = String(entry.override_reason).split(',').map((s: string) => s.trim()).filter(Boolean)
+      for (const p of reasonParts) {
+        if (p.startsWith('ค่าตำแหน่ง:') || p.startsWith('ค่า จป.:') || p.startsWith('ค่าจ้างปกติกะแรก:') || p.startsWith('ค่ากะ:') || p.startsWith('เบี้ยขยัน:')) {
+          const [lbl, val] = p.split(':')
+          if (!details.some(d => d.includes(lbl.trim()))) {
+            details.push(`${lbl.trim()} (${val?.trim() || ''})`)
+          }
+        } else if (!details.some(d => d.includes(p))) {
+          details.push(`เหตุผล: ${p}`)
+        }
+      }
+    }
+    return {
+      isOverridden: details.length > 0,
+      details
+    }
+  }, [entry])
 
   // ── shift breakdown (mirrors PayrollEntry logic exactly) ──
   const isWeekend = (d: string) => { const day = new Date(d).getDay(); return day === 0 || day === 6 }
@@ -249,40 +363,70 @@ export default function PaySlip() {
   const clerkHourly = clerkDaily / 8
   const isThai      = !selectedEmp?.nationality || selectedEmp.nationality === 'ไทย'
 
-  // ── outdated detection: same logic as PayrollEntry ──
-  // Recalculate from current rate+shifts and compare to saved amounts
+  // ── outdated detection ──
   let isOutdated = false
-  if (entry && selectedEmp && empShifts.length > 0) {
-    const periodDays = currentPeriod ? (() => {
-      const s = new Date(currentPeriod.period_start + 'T00:00:00')
-      const e = new Date(currentPeriod.period_end + 'T00:00:00')
-      return Math.round((e.getTime() - s.getTime()) / 86400000) + 1
-    })() : undefined
-    const c = calculatePayroll({
-      position: selectedEmp.position as 'worker' | 'clerk',
-      wage_type: selectedEmp.wage_type as 'daily' | 'monthly',
-      rate_per_12h: empRate,
-      normal_days: empIsClerk ? clerkNorm : normDays,
-      period_days: empIsClerk ? periodDays : undefined,
-      half_shift_days: empIsClerk ? 0 : halfDays,
-      holiday_ot_full_days: holFull, holiday_ot_half_days: holHalf,
-      partial_hours_total: empIsClerk ? 0 : partialHrs,
-      clerk_ot_hours: clerkOt, clerk_ot_1x_hours: clerkOt1x,
-      override_normal: entry.override_normal != null ? Number(entry.override_normal) : null,
-      override_special: null,
-      amount_wood_excess: 0, amount_film: 0, amount_special: 0,
-      amount_diligence: 0, amount_position: 0,
-      social_security_rate: (isThai && !selectedEmp?.exempt_social_security) ? (currentPeriod?.social_security_rate ?? 0.05) : 0,
-      deduct_advance: 0, deduct_safety_equipment: 0, deduct_uniform: 0,
-    })
-    const eps = 0.5
-    const checks: [number, number][] = [
-      [c.amount_normal,              Number(entry.amount_normal)],
-      [c.amount_shift,               Number(entry.amount_shift)],
-      [c.amount_ot + c.amount_ot_1x, Number(entry.amount_ot)],
-      [c.deduct_social_security,     Number(entry.deduct_social_security)],
-    ]
-    isOutdated = checks.some(([a, b]) => Math.abs(a - b) > eps)
+  if (entry && selectedEmp) {
+    if (isTpi) {
+      if (empTpiShifts.length > 0 && currentPeriod) {
+        const c = calculateTpiPayroll({
+          employee: selectedEmp,
+          shifts: empTpiShifts,
+          advances: entry.deduct_advance ? [{ amount: Number(entry.deduct_advance) }] : [],
+          period: currentPeriod,
+          overrides: {
+            override_normal: entry.override_normal != null ? Number(entry.override_normal) : null,
+            override_shift: entry.override_shift != null ? Number(entry.override_shift) : null,
+          },
+          extras: {
+            amount_diligence: Number(entry.amount_diligence || 0),
+            amount_position: Number(entry.amount_position || 0),
+            amount_special: Number(entry.amount_special || 0),
+            special_note: entry.special_note || '',
+            deduct_safety_equipment: Number(entry.deduct_safety_equipment || 0),
+            deduct_uniform: Number(entry.deduct_uniform || 0),
+          },
+        })
+        const eps = 0.5
+        const checks: [number, number][] = [
+          [c.effectiveNormal, Number(entry.amount_normal || 0)],
+          [c.effectiveShift,  Number(entry.amount_shift || 0)],
+          [c.totalOtPay,     Number(entry.amount_ot || 0)],
+          [c.deductSocialSecurity, Number(entry.deduct_social_security || 0)],
+        ]
+        isOutdated = checks.some(([a, b]) => Math.abs(a - b) > eps)
+      }
+    } else if (empShifts.length > 0) {
+      const periodDays = currentPeriod ? (() => {
+        const s = new Date(currentPeriod.period_start + 'T00:00:00')
+        const e = new Date(currentPeriod.period_end + 'T00:00:00')
+        return Math.round((e.getTime() - s.getTime()) / 86400000) + 1
+      })() : undefined
+      const c = calculatePayroll({
+        position: selectedEmp.position as 'worker' | 'clerk',
+        wage_type: selectedEmp.wage_type as 'daily' | 'monthly',
+        rate_per_12h: empRate,
+        normal_days: empIsClerk ? clerkNorm : normDays,
+        period_days: empIsClerk ? periodDays : undefined,
+        half_shift_days: empIsClerk ? 0 : halfDays,
+        holiday_ot_full_days: holFull, holiday_ot_half_days: holHalf,
+        partial_hours_total: empIsClerk ? 0 : partialHrs,
+        clerk_ot_hours: clerkOt, clerk_ot_1x_hours: clerkOt1x,
+        override_normal: entry.override_normal != null ? Number(entry.override_normal) : null,
+        override_special: null,
+        amount_wood_excess: 0, amount_film: 0, amount_special: 0,
+        amount_diligence: 0, amount_position: 0,
+        social_security_rate: (isThai && !selectedEmp?.exempt_social_security) ? Number(currentPeriod?.social_security_rate ?? 0.05) : 0,
+        deduct_advance: 0, deduct_safety_equipment: 0, deduct_uniform: 0,
+      })
+      const eps = 0.5
+      const checks: [number, number][] = [
+        [c.amount_normal,              Number(entry.amount_normal)],
+        [c.amount_shift,               Number(entry.amount_shift)],
+        [c.amount_ot + c.amount_ot_1x, Number(entry.amount_ot)],
+        [c.deduct_social_security,     Number(entry.deduct_social_security)],
+      ]
+      isOutdated = checks.some(([a, b]) => Math.abs(a - b) > eps)
+    }
   }
 
   // ── computed fields ──
@@ -293,6 +437,127 @@ export default function PaySlip() {
     const amtOtRaw   = Number(entry.amount_ot      || 0)  // combined OT in DB for clerks
     const amtOt1xRaw = Number(entry.amount_ot_1x   || 0)
     const amtSpecial = Number(entry.amount_special  || 0) + Number(entry.override_special || 0)
+
+    if (isTpi) {
+      let tpiCalc: TpiPayrollCalculationResult | null = null
+      if (selectedEmp && currentPeriod && empTpiShifts.length > 0) {
+        tpiCalc = calculateTpiPayroll({
+          employee: selectedEmp,
+          shifts: empTpiShifts,
+          advances: entry.deduct_advance ? [{ amount: Number(entry.deduct_advance) }] : [],
+          period: currentPeriod,
+          overrides: {
+            override_normal: entry.override_normal != null ? Number(entry.override_normal) : null,
+            override_shift: entry.override_shift != null ? Number(entry.override_shift) : null,
+          }
+        })
+      }
+
+      // Base rate for TPI
+      const tpiFallbackRate = empRate > 0 ? empRate : 357
+
+      // Normal days
+      const tpiDnDays = tpiCalc ? tpiCalc.workDaysCount : (amtNormal > 0 ? Math.round(amtNormal / tpiFallbackRate) : 0)
+      const tpiNormalRate = tpiDnDays > 0 ? Math.round(amtNormal / tpiDnDays) : tpiFallbackRate
+
+      // Shift (2nd shift / ควบกะ)
+      const tpiDsDays = amtShift > 0
+        ? (tpiCalc
+            ? Math.max(0, tpiCalc.totalShiftsCount - tpiCalc.workDaysCount)
+            : Math.round(amtShift / tpiFallbackRate))
+        : 0
+      const tpiShiftRate = tpiDsDays > 0 ? Math.round(amtShift / tpiDsDays) : tpiFallbackRate
+
+      workingDays = tpiDnDays
+
+      const detailNormal = !isOutdated && tpiDnDays > 0
+        ? `฿${tpiNormalRate} × ${tpiDnDays} วัน`
+        : null
+
+      const detailShift = !isOutdated && tpiDsDays > 0
+        ? `฿${tpiShiftRate} × ${tpiDsDays} วัน`
+        : null
+
+      // ── Separate OT: Holiday OT (2x) vs Regular OT (1.5x for worker, 2x for clerk) ──
+      let amtHolidayOt = 0
+      let amtRegularOt = 0
+      if (tpiCalc) {
+        const calcH = tpiCalc.amountHolidayOt
+        const calcR = tpiCalc.regularOtPay
+        if (entry.override_ot != null) {
+          const ovr = Number(entry.override_ot)
+          if (calcH + calcR > 0) {
+            const ratio = calcH / (calcH + calcR)
+            amtHolidayOt = Math.round(ovr * ratio)
+            amtRegularOt = ovr - amtHolidayOt
+          } else {
+            amtHolidayOt = 0
+            amtRegularOt = ovr
+          }
+        } else {
+          amtHolidayOt = calcH
+          amtRegularOt = calcR
+        }
+      } else {
+        // Fallback when no shift detail rows in DB
+        amtHolidayOt = 0
+        amtRegularOt = amtOtRaw
+      }
+
+      // Holiday OT detail (2x base rate)
+      let detailHolidayOt: string | null = null
+      if (!isOutdated && amtHolidayOt > 0) {
+        const hCount = tpiCalc ? tpiCalc.holidayShiftsCount : (tpiNormalRate > 0 ? Math.round(amtHolidayOt / (tpiNormalRate * 2)) : 0)
+        if (hCount > 0) {
+          detailHolidayOt = `฿${tpiNormalRate} × 2 × ${hCount} วัน`
+        }
+      }
+
+      // Regular OT detail: 1.5x hourly for worker, 2x full 8h shift for clerk
+      let detailRegularOt: string | null = null
+      if (!isOutdated && amtRegularOt > 0) {
+        if (empIsClerk) {
+          const clerkOtShifts = tpiNormalRate > 0 ? Math.round(amtRegularOt / (tpiNormalRate * 2)) : 0
+          if (clerkOtShifts > 0) {
+            detailRegularOt = `฿${tpiNormalRate} × 2 × ${clerkOtShifts} วัน (กะ 8 ชม.)`
+          }
+        } else {
+          const otHrs = tpiCalc ? tpiCalc.totalOtHours : (tpiNormalRate > 0 ? Math.round(amtRegularOt / ((tpiNormalRate / 8) * 1.5)) : 0)
+          if (otHrs > 0) {
+            detailRegularOt = `(฿${tpiNormalRate} ÷ 8) × 1.5 × ${otHrs} ชม.`
+          }
+        }
+      }
+
+      // ── Special Allowance Category (เงินพิเศษ) & Sub-categories (ค่าตำแหน่ง, ค่า จป., เงินพิเศษอื่นๆ) ──
+      const amtPos = Number(entry.amount_position || 0)
+      const amtSpec = Number(entry.amount_special || 0)
+      const totalSpecial = amtPos + amtSpec
+
+      const specialSubs: string[] = []
+      if (amtPos > 0) {
+        specialSubs.push(`ค่าตำแหน่ง ฿${amtPos.toLocaleString()}`)
+      }
+      if (entry.special_note) {
+        const notes = (entry.special_note as string).split(',').map(s => s.trim()).filter(Boolean)
+        notes.forEach(n => {
+          if (!n.includes('ค่าตำแหน่ง') && !specialSubs.includes(n)) {
+            specialSubs.push(n)
+          }
+        })
+      } else if (amtSpec > 0) {
+        specialSubs.push(`ค่า จป. ฿${amtSpec.toLocaleString()}`)
+      }
+
+      return [
+        { label: 'ค่าจ้างปกติ (8 ชม.)',                   value: amtNormal,    detail: detailNormal,    subs: [] as string[] },
+        { label: 'ค่ากะ',                                 value: amtShift,     detail: detailShift,     subs: [] },
+        { label: 'OT วันหยุดนักขัตฤกษ์ (×2)',              value: amtHolidayOt, detail: detailHolidayOt, subs: [] },
+        { label: empIsClerk ? 'OT ล่วงเวลา (×2)' : 'OT ล่วงเวลา (×1.5)', value: amtRegularOt, detail: detailRegularOt, subs: [] },
+        { label: 'เบี้ยขยัน',                             value: Number(entry.amount_diligence || 0),   detail: null, subs: [] },
+        { label: 'เงินพิเศษ',                             value: totalSpecial,                          detail: null, subs: specialSubs },
+      ].filter(r => r.value > 0 && r.label !== '')
+    }
 
     // For clerks: DB stores combined OT (1.5x weekday + 1x weekend) in amount_ot.
     // Split it back using shift hour counts when not outdated.
@@ -327,10 +592,10 @@ export default function PaySlip() {
       ? (entry.special_note as string).split(',').map((s: string) => s.trim()).filter(Boolean)
       : []
     return [
-      { label: empIsClerk ? 'ค่าจ้างปกติ (วันธรรมดา)' : 'ค่าจ้างปกติ (8 ชม.)',         value: Number(entry.amount_normal || 0), detail: detailNormal, subs: [] as string[] },
-      { label: 'ค่ากะ (4 ชม.)',                                                           value: !empIsClerk ? amtShift  : 0,      detail: detailShift,  subs: [] },
-      { label: empIsClerk ? 'OT ล่วงเวลา (×1.5)'  : 'OT วันหยุดนักขัตฤกษ์ (×2)',       value: amtOt,                            detail: detailOt,     subs: [] },
-      { label: empIsClerk ? 'OT วันหยุดสัปดาห์ (×1)' : '',                               value: empIsClerk ? amtOt1x : 0,         detail: detailOt1x,   subs: [] },
+      { label: empIsClerk ? 'ค่าจ้างปกติ (วันธรรมดา)' : 'ค่าจ้างปกติ (8 ชม.)', value: Number(entry.amount_normal || 0), detail: detailNormal, subs: [] as string[] },
+      { label: 'ค่ากะ (4 ชม.)',                                             value: !empIsClerk ? amtShift : 0,           detail: detailShift,  subs: [] },
+      { label: empIsClerk ? 'OT ล่วงเวลา (×1.5)' : 'OT วันหยุดนักขัตฤกษ์ (×2)', value: amtOt,                           detail: detailOt,     subs: [] },
+      { label: empIsClerk && !isTpi ? 'OT วันหยุดสัปดาห์ (×1)' : '',        value: (empIsClerk && !isTpi) ? amtOt1x : 0, detail: detailOt1x,   subs: [] },
       { label: 'ค่าไม้ส่วนเกิน',  value: Number(entry.amount_wood_excess || 0), detail: null, subs: [] },
       { label: 'ค่าฟิล์ม',        value: Number(entry.amount_film || 0),        detail: null, subs: [] },
       { label: 'เงินพิเศษ',       value: amtSpecial,                            detail: null, subs: specialSubs },
@@ -404,6 +669,7 @@ export default function PaySlip() {
             <div style={{ display: 'flex', gap: 6, fontSize: 10, marginBottom: 10, flexWrap: 'wrap' }}>
               {([
                 { key: 'has_slip', color: 'var(--vk-jade)', label: 'มีสลิป' },
+                { key: 'override', color: '#d97706',        label: `มี Override (${overriddenIds.size})` },
                 { key: 'no_slip',  color: '#d4cfc9',        label: 'ยังไม่มี' },
               ] as const).map(s => {
                 const active = statusFilter === s.key
@@ -440,10 +706,18 @@ export default function PaySlip() {
             const q = empSearch.toLowerCase()
             const matchSearch = !q || emp.employee_code.toLowerCase().includes(q) || emp.first_name.toLowerCase().includes(q) || (emp.last_name || '').toLowerCase().includes(q)
             const hasSaved = savedIds.has(emp.id)
-            const matchStatus = !statusFilter || (statusFilter === 'has_slip' ? hasSaved : !hasSaved)
+            const hasOvr = overriddenIds.has(emp.id)
+            const matchStatus = !statusFilter
+              ? true
+              : statusFilter === 'has_slip'
+              ? hasSaved
+              : statusFilter === 'override'
+              ? hasOvr
+              : !hasSaved
             return matchSearch && matchStatus
           }).map(emp => {
             const hasSaved = savedIds.has(emp.id)
+            const hasOvr = overriddenIds.has(emp.id)
             const active = emp.id === selectedEmpId
             const n = fmtNationality(emp.nationality)
             const isInactive = emp.status === 'inactive'
@@ -453,12 +727,17 @@ export default function PaySlip() {
                 data-selected={active}>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, background: hasSaved ? 'var(--vk-jade)' : '#d4cfc9' }} />
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, background: hasOvr ? '#f59e0b' : (hasSaved ? 'var(--vk-jade)' : '#d4cfc9') }} />
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
                       <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--vk-ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {emp.first_name} {emp.last_name}{n ? ` (${n})` : ''}
+                        {formatEmployeeFullName(emp, isTpi)}{n ? ` (${n})` : ''}
                       </span>
+                      {hasOvr && (
+                        <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 4, background: '#fffbeb', color: '#b45309', border: '1px solid #fcd34d', flexShrink: 0 }}>
+                          Override
+                        </span>
+                      )}
                       {emp.position === 'clerk' && (
                         <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 999, background: 'rgba(177,71,41,0.12)', color: 'var(--vk-persimmon)', letterSpacing: '0.04em', flexShrink: 0 }}>เสมียน</span>
                       )}
@@ -515,11 +794,13 @@ export default function PaySlip() {
                     ))}
                   </select>
                 </div>
-                {entry && (
-                  <button className="vk-btn vk-btn--primary" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={handlePrint}>
-                    <Printer style={{ width: 14, height: 14 }} />พิมพ์สลิป
-                  </button>
-                )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  {entry && (
+                    <button className="vk-btn vk-btn--primary" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={handlePrint}>
+                      <Printer style={{ width: 14, height: 14 }} />พิมพ์สลิป
+                    </button>
+                  )}
+                </div>
               </div>
 
               {!entry ? (
@@ -529,6 +810,24 @@ export default function PaySlip() {
                 </div>
               ) : (
                 <>
+                  {/* OVERRIDE warning banner */}
+                  {overrideInfo.isOverridden && (
+                    <div style={{ marginBottom: 12, background: '#fffbeb', border: '1px solid #f59e0b', borderRadius: 6, padding: '10px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <span style={{ fontSize: 18 }}>⚠️</span>
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: 13, color: '#92400e' }}>สลิปนี้มีการปรับแก้ตัวเลขค่าจ้างด้วยตนเอง (Manual Override)</div>
+                          <div style={{ fontSize: 11, color: '#b45309', marginTop: 2 }}>
+                            รายการที่ปรับแก้: {overrideInfo.details.join(' · ')}
+                          </div>
+                        </div>
+                      </div>
+                      <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d', letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>
+                        MANUAL OVERRIDE
+                      </span>
+                    </div>
+                  )}
+
                   {/* OUTDATED warning */}
                   {isOutdated && (
                     <div style={{ marginBottom: 12, background: '#fff3cd', border: '1px solid #f5c842', borderRadius: 6, padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -546,7 +845,7 @@ export default function PaySlip() {
                     <div id="slip-print" ref={(el) => { (slipRef as any).current = el; (innerRef as any).current = el }} style={{ width: 680, minWidth: 680 }}>
                     <VKSlipDocument
                       branchName={branchName ? fullCompanyName(branchName) : undefined}
-                      employeeName={`${selectedEmp.first_name} ${selectedEmp.last_name}`}
+                      employeeName={formatEmployeeFullName(selectedEmp, isTpi)}
                       employeeCode={selectedEmp.employee_code}
                       positionLabel={posLabel}
                       jobTitle={selectedEmp.job_title}

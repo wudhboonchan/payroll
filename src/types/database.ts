@@ -118,6 +118,10 @@ export type Database = {
           status: string | null
           updated_at: string | null
           wage_type: string | null
+          exempt_social_security: boolean | null
+          is_safety_officer: boolean | null
+          has_position_allowance: boolean | null
+          social_security_number: string | null
         }
         Insert: {
           bank_account?: string | null
@@ -140,6 +144,10 @@ export type Database = {
           status?: string | null
           updated_at?: string | null
           wage_type?: string | null
+          exempt_social_security?: boolean | null
+          is_safety_officer?: boolean | null
+          has_position_allowance?: boolean | null
+          social_security_number?: string | null
         }
         Update: {
           bank_account?: string | null
@@ -162,6 +170,10 @@ export type Database = {
           status?: string | null
           updated_at?: string | null
           wage_type?: string | null
+          exempt_social_security?: boolean | null
+          is_safety_officer?: boolean | null
+          has_position_allowance?: boolean | null
+          social_security_number?: string | null
         }
         Relationships: [
           {

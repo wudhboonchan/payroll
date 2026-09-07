@@ -6,6 +6,7 @@ import { useAppStore } from '../store/useAppStore'
 import { TopBar } from '../components/layout/TopBar'
 import { toast } from 'sonner'
 import { ChevronLeft, ChevronRight, Save, X, Clock, Clock4, CheckSquare, Search } from 'lucide-react'
+import { compareEmployeeCode } from '../lib/formatters'
 import '../styles/tokens.css'
 
 // ── helpers ────────────────────────────────────────────────────────────
@@ -47,7 +48,7 @@ function isNonThai(nationality: string | null) {
 }
 function fmtNationality(nationality: string | null) {
   if (!nationality || nationality === 'ไทย') return null
-  if (nationality === 'เมียนมา' || nationality.toLowerCase().includes('myanmar') || nationality.toLowerCase().includes('burma')) return 'เมียนมา/กะเหรี่ยง'
+  if (nationality === 'เมียนมา' || nationality.toLowerCase().includes('myanmar') || nationality.toLowerCase().includes('burma')) return 'เมียนมา'
   return nationality
 }
 
@@ -113,7 +114,8 @@ export default function ShiftEntry() {
       const { data, error } = await supabase.from('employees')
         .select('id,employee_code,first_name,last_name,prefix,position,nationality')
         .eq('factory_id', user?.factory_id ?? '').eq('status','active').order('employee_code')
-      if (error) throw error; return data
+      if (error) throw error
+      return (data || []).sort((a: any, b: any) => compareEmployeeCode(a.employee_code, b.employee_code))
     }, enabled: !!user?.factory_id,
   })
 

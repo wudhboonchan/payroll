@@ -1,109 +1,2883 @@
-import { useEffect, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { ChevronLeft, ChevronRight, GripVertical, Plus, Search, X, Pencil, Trash2 } from 'lucide-react'
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
+import { useOutletContext, useNavigate } from 'react-router-dom'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import { useAppStore } from '../store/useAppStore'
+import { TopBar } from '../components/layout/TopBar'
+import { toast } from 'sonner'
+import {
+  ChevronLeft,
+  ChevronRight,
+  Save,
+  CheckSquare,
+  Search,
+  X,
+  Plus,
+  Trash2,
+  Briefcase,
+  UserX,
+} from 'lucide-react'
+import type { Job, Employee, Entry, QuotaStatus } from '../features/tpi/model'
+import { AttendanceModal } from '../features/tpi/AttendanceModal'
+import type { AttendanceLog } from '../features/tpi/attendanceApi'
+import { loadDailyAttendance, formatAttendanceSummary } from '../features/tpi/attendanceApi'
+import {
+  SHIFTS,
+  isJobAvailable,
+  wageTier,
+  validateEntries,
+  usage,
+  getJobQuotaStatus,
+  calculateEntryOt,
+} from '../features/tpi/model'
+import { getMainDepartment, cleanJobNotes } from '../features/tpi/referenceJobs'
+import { demoJobs, demoEmployees, demoWageProfiles, demoInitialEntries } from '../features/tpi/demoData'
+import { loadDay, saveDay, errorMessage } from '../features/tpi/api'
+import { formatThaiBuddhistDate, compareEmployeeCode } from '../lib/formatters'
 import '../styles/tokens.css'
 import './TpiShiftEntry.css'
 
-type Employee = { id: string; employee_code: string; first_name: string; last_name: string }
-type Plan = Record<string, number[]>
-const shifts = [
-  { name: 'เช้า', time: '07:40–16:00', note: 'สิ้นสุดวันนี้', tone: 'morning' },
-  { name: 'บ่าย', time: '15:40–00:00', note: 'สิ้นสุดเที่ยงคืน', tone: 'afternoon' },
-  { name: 'ดึก', time: '23:40–08:00', note: 'สิ้นสุดวันถัดไป', tone: 'night' },
-]
-const examples: Employee[] = [
-  { id: 'demo-1', employee_code: 'TPI-001', first_name: 'พนักงานตัวอย่าง', last_name: '01' },
-  { id: 'demo-2', employee_code: 'TPI-002', first_name: 'พนักงานตัวอย่าง', last_name: '02' },
-  { id: 'demo-3', employee_code: 'TPI-003', first_name: 'พนักงานตัวอย่าง', last_name: '03' },
-  { id: 'demo-4', employee_code: 'TPI-004', first_name: 'พนักงานตัวอย่าง', last_name: '04' },
-  { id: 'demo-5', employee_code: 'TPI-005', first_name: 'พนักงานตัวอย่าง', last_name: '05' },
-  { id: 'demo-6', employee_code: 'TPI-006', first_name: 'พนักงานตัวอย่าง', last_name: '06' },
-]
-function today() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
+// ── Date Formatting Helpers ──────────────────────────────────────────
+function parseLocal(s: string) {
+  const [y, m, d] = s.split('-').map(Number)
+  return new Date(y, m - 1, d)
+}
+function fmtDate(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+const MONTHS = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.']
+const DAYS = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัส', 'ศุกร์', 'เสาร์']
+function fmtDisplay(s: string) {
+  const d = parseLocal(s)
+  return `วัน${DAYS[d.getDay()]}ที่ ${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear() + 543}`
+}
+function isWeekend(s: string) {
+  const d = parseLocal(s)
+  return d.getDay() === 0 || d.getDay() === 6
+}
 
-export default function TpiShiftEntry({ preview = false }: { preview?: boolean }) {
-  const { user, companyContext } = useAppStore()
-  const [date, setDate] = useState(today)
-  const [plans, setPlans] = useState<Record<string, Plan>>(() => preview ? { [today()]: { 'demo-1': [0, 1], 'demo-2': [1, 2], 'demo-3': [0], 'demo-4': [2] } } : {})
-  const [selected, setSelected] = useState<string[]>([])
-  const [search, setSearch] = useState('')
-  const [message, setMessage] = useState('')
-  const [editing, setEditing] = useState<Employee | null>(null)
-  const { data: employees = [], isLoading, isError, refetch } = useQuery({
-    queryKey: ['tpi-shift-employees', user?.factory_id],
-    enabled: !preview && !!user?.factory_id,
-    queryFn: async () => {
-      const { data, error } = await supabase.from('employees').select('id,employee_code,first_name,last_name').eq('factory_id', user!.factory_id).eq('status', 'active').order('employee_code')
-      if (error) throw error
-      return data as Employee[]
-    },
-  })
-  const people = preview ? examples : employees
-  const plan = plans[date] || {}
-  const assigned = people.filter(e => plan[e.id]?.length)
-  const doubles = assigned.filter(e => plan[e.id].length === 2).length
-  function assign(ids: string[], shift: number) {
-    const validIds = ids.filter(id => people.some(e => e.id === id))
-    if (!validIds.length) { setMessage('เลือกพนักงานจากรายชื่อด้านซ้ายก่อน'); return }
-    if (validIds.some(id => (plan[id] || []).length >= 2 && !plan[id].includes(shift))) {
-      setMessage('ลงได้สูงสุด 2 กะต่อคนต่อวัน กรุณาถอดกะเดิมก่อนเพิ่มกะใหม่'); return
+interface Period {
+  id: string
+  label: string
+  period_start: string
+  period_end: string
+  status: string
+}
+
+interface TpiShiftEntryProps {
+  preview?: boolean
+  initialDate?: string
+}
+
+const getHolidayStorageKey = (factoryId?: string, dateStr?: string) =>
+  `tpi_holiday_${factoryId || ''}_${dateStr || ''}`
+
+export const getStoredHoliday = (factoryId?: string, dateStr?: string): boolean => {
+  if (!factoryId || !dateStr) return false
+  try {
+    return localStorage.getItem(getHolidayStorageKey(factoryId, dateStr)) === 'true'
+  } catch {
+    return false
+  }
+}
+
+export const setStoredHoliday = (factoryId: string | undefined, dateStr: string | undefined, val: boolean) => {
+  if (!factoryId || !dateStr) return
+  try {
+    if (val) {
+      localStorage.setItem(getHolidayStorageKey(factoryId, dateStr), 'true')
+    } else {
+      localStorage.removeItem(getHolidayStorageKey(factoryId, dateStr))
     }
-    setPlans(previous => {
-      const next = { ...previous[date] }
-      validIds.forEach(id => { next[id] = [...new Set([...(next[id] || []), shift])].sort() })
-      return { ...previous, [date]: next }
-    })
-    setSelected([]); setMessage('จัดกะในแบบร่างแล้ว')
-  }
-  function remove(id: string, shift: number) {
-    setPlans(previous => ({ ...previous, [date]: { ...previous[date], [id]: (previous[date]?.[id] || []).filter(s => s !== shift) } }))
-    setMessage('ถอดกะออกจากแบบร่างแล้ว')
-  }
-  function changeDate(value: string) { if (value) { setDate(value); setEditing(null); setSelected([]); setMessage('') } }
-  function moveDate(offset: number) { const d = new Date(`${date}T12:00:00`); d.setDate(d.getDate() + offset); changeDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`) }
-  const displayDate = new Date(`${date}T12:00:00`).toLocaleDateString('th-TH', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
-  return <main className="tpi-entry">
-    <header className="tpi-heading"><div><div className="tpi-kicker">โรงงาน · บริษัท ทีพีไอ โพลีน</div><h1>กรอกกะรายวัน <span>เฟส 2</span></h1><p>{preview ? 'ตัวอย่างหน้าจอ · ใช้พนักงานสมมติ' : companyContext?.factoryName}</p></div><div className="tpi-draft">แบบร่างทดลอง</div></header>
-    <div className="tpi-notice">ทดลองจัดกะได้ในหน้านี้ ข้อมูลยังไม่บันทึกเข้าระบบเงินเดือน และจะหายเมื่อรีเฟรชหรือออกจากหน้า</div>
-    <section className="tpi-toolbar"><div className="tpi-date"><button aria-label="วันก่อนหน้า" onClick={() => moveDate(-1)}><ChevronLeft size={18}/></button><label><strong>{displayDate}</strong><input aria-label="วันที่ทำงาน" type="date" value={date} onChange={e => changeDate(e.target.value)}/></label><button aria-label="วันถัดไป" onClick={() => moveDate(1)}><ChevronRight size={18}/></button></div><div className="tpi-stats"><span>ลงกะแล้ว <b>{assigned.length}</b> คน</span><span className="tpi-double-text">ทำ 2 กะ <b>{doubles}</b> คน</span><span>ยังไม่ลงกะ <b>{people.length - assigned.length}</b> คน</span></div></section>
-    <div className="tpi-workspace">
-      <aside className="tpi-pool"><div className="tpi-pool-heading"><h2>รายชื่อพนักงาน</h2><span>{people.length} คน</span></div><label className="tpi-search"><Search size={17}/><input placeholder="ค้นหาชื่อ หรือรหัสพนักงาน" value={search} onChange={e => setSearch(e.target.value)} aria-label="ค้นหาพนักงาน"/></label><p className="tpi-help">เลือกชื่อแล้วกดเพิ่มในกะ หรือลากชื่อไปวาง</p>
-        {isLoading && !preview && <p>กำลังโหลดรายชื่อ...</p>}{isError && <p role="alert">โหลดรายชื่อไม่สำเร็จ <button onClick={() => refetch()}>ลองใหม่</button></p>}
-        {!isLoading && !isError && people.length === 0 && <p>ยังไม่มีพนักงานในโรงงานนี้</p>}
-        {people.filter(e => `${e.first_name} ${e.last_name} ${e.employee_code}`.toLowerCase().includes(search.toLowerCase())).map(e => { const count = plan[e.id]?.length || 0; return <label key={e.id} className={`tpi-person ${selected.includes(e.id) ? 'selected' : ''}`} draggable onDragStart={event => { event.dataTransfer.setData('text/plain', e.id); event.dataTransfer.effectAllowed = 'copy' }}><GripVertical size={16}/><input type="checkbox" checked={selected.includes(e.id)} onChange={() => setSelected(previous => previous.includes(e.id) ? previous.filter(id => id !== e.id) : [...previous, e.id])}/><div><strong>{e.first_name} {e.last_name}</strong><small>{e.employee_code}</small></div><span className={count === 2 ? 'tpi-count full' : 'tpi-count'}>{count}/2</span></label> })}
-        {selected.length > 0 && <button className="tpi-clear" onClick={() => setSelected([])}>ยกเลิกที่เลือก ({selected.length} คน)</button>}
-      </aside>
-      <section className="tpi-board-section"><div className="tpi-board-title"><div><h2>จัดกะการทำงาน</h2><p>1 คนต่อแถว · เลือกได้ 1–2 กะต่อวัน</p></div><span className="tpi-legend"><i/> แถบยาว = ทำ 2 กะ</span></div>
-        <div className="tpi-board-scroll"><div className="tpi-board">
-          <div className="tpi-shift-headers">{shifts.map((s, i) => <div key={s.name} className={`tpi-shift-head ${s.tone}`} onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); assign([e.dataTransfer.getData('text/plain')], i) }}><div className="tpi-shift-label"><span>0{i + 1}</span><strong>กะ{s.name}</strong><small>{assigned.filter(e => plan[e.id].includes(i)).length} คน</small></div><h3>{s.time}</h3><p>{s.note}</p><button onClick={() => assign(selected, i)}><Plus size={15}/> เพิ่ม{selected.length ? ` ${selected.length} คน` : 'พนักงาน'}</button></div>)}</div>
-          <div className="tpi-rows">{assigned.length === 0 && <div className="tpi-empty">เริ่มจัดกะวันนี้<p>เลือกพนักงาน แล้วเพิ่มลงในกะเช้า บ่าย หรือดึก</p></div>}
-            {assigned.map(e => { const slots = plan[e.id]; const connected = slots.length === 2 && slots[1] - slots[0] === 1; return <div className="tpi-row" key={e.id}>
-              {shifts.map((s, i) => <button key={s.name} className="tpi-slot" style={{ gridColumn: i + 1, gridRow: 1 }} aria-label={`เพิ่มกะ${s.name}ให้ ${e.first_name} ${e.last_name}`} disabled={slots.includes(i)} onClick={() => assign([e.id], i)} onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); assign([event.dataTransfer.getData('text/plain')], i) }}>{!slots.includes(i) && <Plus size={16}/>}</button>)}
-              {(connected ? [slots[0]] : slots).map(slot => <div className={`tpi-assignment ${slots.length === 2 ? 'double' : shifts[slot].tone}`} key={slot} style={{ gridColumn: `${slot + 1} / span ${connected ? 2 : 1}`, gridRow: 1 }} draggable onDragStart={event => event.dataTransfer.setData('text/plain', e.id)}><div className="tpi-card-top"><strong>{e.first_name} {e.last_name}</strong><span>{slots.length} กะ</span></div><small>{e.employee_code}{connected ? ` · ${shifts[slots[0]].name} + ${shifts[slots[1]].name}` : slots.length === 2 ? ' · เช้า + ดึก (เว้นกะบ่าย)' : ''}</small><div className="tpi-card-actions"><button aria-label={`แก้ไขกะของ ${e.first_name} ${e.last_name}`} onClick={() => setEditing(e)}><Pencil size={12}/>แก้ไข</button><button aria-label={`ลบทุกกะของ ${e.first_name} ${e.last_name}`} onClick={() => { setPlans(previous => ({ ...previous, [date]: { ...previous[date], [e.id]: [] } })); setMessage(`ลบกะของ ${e.first_name} ${e.last_name} แล้ว`) }}><Trash2 size={12}/>ลบ</button>{(connected ? slots : [slot]).map(s => <button key={s} aria-label={`ถอดกะ${shifts[s].name}ของ ${e.first_name} ${e.last_name}`} onClick={() => remove(e.id, s)}>{shifts[s].name}<X size={12}/></button>)}</div></div>)}
-            </div> })}
-          </div>
-        </div></div><div className="tpi-board-foot">วันที่ทำงานอ้างอิงวันเริ่มกะ · กะดึกสิ้นสุดเวลา 08:00 ของวันถัดไป</div>
-      </section>
-    </div><div className="tpi-status" role="status" aria-live="polite">{message || 'ลากการ์ดไปอีกกะเพื่อเพิ่มกะที่สอง หรือกด + ในแถวพนักงาน'}</div>
-    {editing && <ShiftEditor employee={editing} initialSlots={plan[editing.id] || []} onClose={() => setEditing(null)} onSave={slots => {
-      setPlans(previous => ({ ...previous, [date]: { ...previous[date], [editing.id]: slots } }))
-      setMessage(`แก้ไขกะของ ${editing.first_name} ${editing.last_name} แล้ว`)
-      setEditing(null)
-    }}/>}
-  </main>
+  } catch {}
 }
 
-function ShiftEditor({ employee, initialSlots, onClose, onSave }: {
-  employee: Employee; initialSlots: number[]; onClose: () => void; onSave: (slots: number[]) => void
-}) {
-  const dialog = useRef<HTMLDialogElement>(null)
-  const [slots, setSlots] = useState(initialSlots)
-  useEffect(() => { dialog.current?.showModal() }, [])
-  return <dialog ref={dialog} className="tpi-editor" aria-labelledby="tpi-editor-title" onCancel={onClose} onClose={onClose}>
-    <div className="tpi-editor-header"><div><h2 id="tpi-editor-title">แก้ไขกะการทำงาน</h2><p>{employee.first_name} {employee.last_name} · {employee.employee_code}</p></div><button className="vk-btn vk-btn--ghost" aria-label="ปิดหน้าต่างแก้ไข" onClick={onClose}><X size={18}/></button></div>
-    <div className="tpi-editor-body"><p>เลือกกะที่ต้องการทำงาน 1–2 กะ</p>{shifts.map((shift, index) => <label key={shift.name} className={slots.includes(index) ? 'active' : ''}><input type="checkbox" checked={slots.includes(index)} disabled={!slots.includes(index) && slots.length === 2} onChange={() => setSlots(previous => previous.includes(index) ? previous.filter(s => s !== index) : [...previous, index].sort())}/><strong>กะ{shift.name}</strong><span>{shift.time}</span></label>)}<small>หากต้องการเปลี่ยนกะเมื่อครบ 2 กะ ให้เอาเครื่องหมายกะเดิมออกก่อน</small></div>
-    <div className="tpi-editor-footer"><button className="vk-btn" onClick={onClose}>ยกเลิก</button><button className="vk-btn vk-btn--primary" disabled={slots.length === 0} onClick={() => onSave(slots)}>บันทึกการแก้ไข</button></div>
-  </dialog>
+const isValidUuid = (str?: string): boolean =>
+  !!str && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str)
+
+const formatJobForDb = (ref: Job, factoryId: string) => {
+  const quota = ref.quota || 0
+  const pm = ref.planned_morning ?? null
+  const pa = ref.planned_afternoon ?? null
+  const pn = ref.planned_night ?? null
+  const isPlanValid = pm !== null && pa !== null && pn !== null && (pm + pa + pn === quota)
+  const isTemp = ref.job_type === 'temporary'
+  const expiresOn = ref.expires_on || (isTemp ? '2026-12-31' : null)
+
+  return {
+    factory_id: factoryId,
+    code: ref.code.trim(),
+    department: ref.department ? ref.department.trim() : '',
+    description: ref.description ? ref.description.trim() : '',
+    job_type: (isTemp ? 'temporary' : 'regular') as 'temporary' | 'regular',
+    quota,
+    planned_morning: isPlanValid ? pm : null,
+    planned_afternoon: isPlanValid ? pa : null,
+    planned_night: isPlanValid ? pn : null,
+    normal_rate: ref.normal_rate || 357,
+    skilled_rate: ref.skilled_rate ?? null,
+    valid_from: ref.valid_from || null,
+    expires_on: expiresOn,
+    active: ref.active ?? true,
+    notes: cleanJobNotes(ref.notes),
+    updated_at: new Date().toISOString(),
+  }
 }
+
+async function ensureValidJobUuids(
+  entriesToSave: Entry[],
+  factoryId: string,
+  availableJobs: Job[]
+): Promise<Entry[]> {
+  const needsUuid = entriesToSave.some((e) => !isValidUuid(e.job_id))
+  if (!needsUuid) return entriesToSave
+
+  // Fetch DB jobs for this factory
+  const { data: latestDbJobs } = await supabase
+    .from('tpi_job_codes')
+    .select('*')
+    .eq('factory_id', factoryId)
+
+  const codeToDbJob = new Map((latestDbJobs || []).map((j: Job) => [j.code.trim().toLowerCase(), j]))
+
+  // Find any reference jobs that are used in entries but not yet in the DB
+  const missingJobsToInsert: any[] = []
+  for (const entry of entriesToSave) {
+    if (!isValidUuid(entry.job_id)) {
+      const ref = availableJobs.find((j) => j.id === entry.job_id) || demoJobs.find((j) => j.id === entry.job_id)
+      if (ref && !codeToDbJob.has(ref.code.trim().toLowerCase())) {
+        missingJobsToInsert.push(formatJobForDb(ref, factoryId))
+      }
+    }
+  }
+
+  if (missingJobsToInsert.length > 0) {
+    const { data: inserted } = await supabase
+      .from('tpi_job_codes')
+      .upsert(missingJobsToInsert, { onConflict: 'factory_id,code' })
+      .select('*')
+    for (const j of (inserted as Job[]) || []) {
+      codeToDbJob.set(j.code.trim().toLowerCase(), j)
+    }
+  }
+
+  // Replace any non-UUID job_id with the real DB UUID
+  return entriesToSave.map((entry) => {
+    if (isValidUuid(entry.job_id)) return entry
+    const ref = availableJobs.find((j) => j.id === entry.job_id) || demoJobs.find((j) => j.id === entry.job_id)
+    if (ref) {
+      const match = codeToDbJob.get(ref.code.trim().toLowerCase())
+      if (match && match.id) {
+        return { ...entry, job_id: match.id }
+      }
+    }
+    return entry
+  })
+}
+
+export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
+  preview = false,
+  initialDate,
+}) => {
+  // Outlet context for sidebar toggle (optional if in standalone preview)
+  const outletContext = useOutletContext<{ onMenuClick?: () => void } | null>()
+  const onMenuClick = outletContext?.onMenuClick || (() => {})
+  const navigate = useNavigate()
+  const { user } = useAppStore()
+  const queryClient = useQueryClient()
+
+  // ── Periods & Dates ────────────────────────────────────────────────
+  const { data: periods = [] } = useQuery<Period[]>({
+    queryKey: ['periods', user?.factory_id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('payroll_periods')
+        .select('*')
+        .eq('factory_id', user?.factory_id ?? '')
+        .order('period_start', { ascending: false })
+      if (error) throw error
+      return data
+    },
+    enabled: !!user?.factory_id && !preview,
+  })
+
+  const currentPeriod = periods[0] || null
+  const periodStart = currentPeriod ? parseLocal(currentPeriod.period_start) : new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+  const periodEnd = currentPeriod ? parseLocal(currentPeriod.period_end) : new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0)
+
+  const [currentDate, setCurrentDate] = useState<Date>(
+    initialDate ? parseLocal(initialDate) : new Date()
+  )
+  const activeDateStr = fmtDate(currentDate)
+  const weekend = isWeekend(activeDateStr)
+  const [isHoliday, setIsHoliday] = useState(false)
+
+  const isAtStart = currentPeriod ? activeDateStr <= fmtDate(periodStart) : false
+  const isAtEnd = currentPeriod ? activeDateStr >= fmtDate(periodEnd) : false
+
+  const navigateDate = (dir: -1 | 1) => {
+    const d = new Date(currentDate)
+    d.setDate(d.getDate() + dir)
+    if (currentPeriod) {
+      if (fmtDate(d) < fmtDate(periodStart) || fmtDate(d) > fmtDate(periodEnd)) return
+    }
+    setCurrentDate(d)
+    setSelectedPoolIds(new Set())
+  }
+
+  // ── Database Data vs Demo Data ─────────────────────────────────────
+  const { data: dbJobs = [] } = useQuery<Job[]>({
+    queryKey: ['tpi-jobs', user?.factory_id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('tpi_job_codes')
+        .select('*')
+        .eq('factory_id', user?.factory_id ?? '')
+        .order('code')
+      if (error) throw error
+
+      if ((!data || data.length === 0) && user?.factory_id) {
+        try {
+          const payload = demoJobs.map((ref) => formatJobForDb(ref, user.factory_id))
+          const res = await supabase
+            .from('tpi_job_codes')
+            .upsert(payload, { onConflict: 'factory_id,code' })
+            .select('*')
+          if (res.data && res.data.length > 0) {
+            return res.data as Job[]
+          }
+        } catch (e) {
+          console.warn('Auto-seed jobs error:', e)
+        }
+      }
+      return data || []
+    },
+    enabled: !!user?.factory_id && !preview,
+  })
+
+  const { data: dbEmployees = [] } = useQuery<Employee[]>({
+    queryKey: ['tpi-employees', user?.factory_id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('employees')
+        .select('id,employee_code,first_name,last_name,nationality,status,position')
+        .eq('factory_id', user?.factory_id ?? '')
+        .eq('status', 'active')
+        .order('employee_code')
+      if (error) throw error
+      return (data || []).sort((a, b) => compareEmployeeCode(a.employee_code, b.employee_code))
+    },
+    enabled: !!user?.factory_id && !preview,
+  })
+
+  // Query TPI Wage Profiles
+  const { data: dbWageProfiles = [] } = useQuery({
+    queryKey: ['tpi-profiles', user?.factory_id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('tpi_employee_wage_profiles')
+        .select('*')
+        .eq('factory_id', user?.factory_id ?? '')
+      if (error) return []
+      return data || []
+    },
+    enabled: !!user?.factory_id && !preview,
+  })
+
+  // Active jobs, employees, and wage profiles (seamlessly merge DB jobs with standard jobs)
+  const jobs = useMemo(() => {
+    const dbMap = new Map(dbJobs.map((j) => [j.code.trim().toLowerCase(), j]))
+    const merged: Job[] = demoJobs.map((refJob) => {
+      const key = refJob.code.trim().toLowerCase()
+      const dbMatch = dbMap.get(key)
+      if (dbMatch) {
+        dbMap.delete(key)
+        return dbMatch
+      }
+      return refJob
+    })
+    for (const customDbJob of dbMap.values()) {
+      merged.push(customDbJob)
+    }
+    return merged
+  }, [dbJobs])
+  const employees = useMemo(() => {
+    const list = [...(preview ? demoEmployees : dbEmployees)]
+    return list.sort((a, b) => compareEmployeeCode(a.employee_code, b.employee_code))
+  }, [preview, dbEmployees])
+  const wageProfiles = useMemo(() => (preview ? demoWageProfiles : dbWageProfiles), [preview, dbWageProfiles])
+
+  // Track daily revision for optimistic concurrency control
+  const [dayRevision, setDayRevision] = useState(0)
+
+  // Local shift entries state (start empty when not in preview mode)
+  const [entries, setEntries] = useState<Entry[]>(preview ? demoInitialEntries : [])
+
+  // Daily attendance state & query
+  const [isAttendanceModalOpen, setIsAttendanceModalOpen] = useState(false)
+  const { data: dailyAttendance = [], refetch: refetchAttendance } = useQuery({
+    queryKey: ['tpi-daily-attendance', user?.factory_id, activeDateStr],
+    queryFn: async () => {
+      if (!user?.factory_id || preview) return []
+      return await loadDailyAttendance(user.factory_id, activeDateStr)
+    },
+    enabled: !!user?.factory_id && !preview,
+  })
+
+  const attendanceEmpMap = useMemo(() => {
+    const map = new Map<string, AttendanceLog>()
+    for (const log of dailyAttendance) {
+      map.set(log.employee_id, log)
+    }
+    return map
+  }, [dailyAttendance])
+
+  // Load actual day's entries from Supabase
+  const { data: dayData } = useQuery({
+    queryKey: ['tpi-shift-day', user?.factory_id, activeDateStr],
+    queryFn: async () => {
+      if (!user?.factory_id || preview) return null
+      const localHoliday = getStoredHoliday(user.factory_id, activeDateStr)
+      try {
+        const res = await loadDay(user.factory_id, activeDateStr)
+        return {
+          ...res,
+          is_holiday: !!res.is_holiday || localHoliday,
+        }
+      } catch (e: any) {
+        console.warn('loadDay fallback:', e)
+        const { data } = await supabase
+          .from('tpi_shift_entries')
+          .select('employee_id, shift_index, job_id, rate_tier, rate_snapshot, job_code_snapshot, is_half_shift, actual_hours, ot_hours, ot_pay, is_holiday_ot')
+          .eq('factory_id', user.factory_id)
+          .eq('work_date', activeDateStr)
+        const hasDbHoliday = (data || []).some((e: any) => !!e.is_holiday_ot)
+        return { 
+          revision: 0, 
+          is_holiday: hasDbHoliday || localHoliday,
+          entries: (data || []) as any 
+        }
+      }
+    },
+    enabled: !!user?.factory_id && !preview,
+  })
+
+  useEffect(() => {
+    if (preview) {
+      setEntries(demoInitialEntries)
+      setDayRevision(0)
+      setIsHoliday(false)
+    } else if (dayData) {
+      setEntries(dayData.entries || [])
+      setDayRevision(dayData.revision || 0)
+      const dbHoliday = !!dayData.is_holiday || (dayData.entries || []).some((e: any) => !!e.is_holiday_ot)
+      const localHoliday = getStoredHoliday(user?.factory_id, activeDateStr)
+      const finalHoliday = dbHoliday || localHoliday
+      setIsHoliday(finalHoliday)
+      if (dbHoliday && !localHoliday && user?.factory_id) {
+        setStoredHoliday(user.factory_id, activeDateStr, true)
+      }
+    } else {
+      setEntries([])
+      setDayRevision(0)
+      setIsHoliday(getStoredHoliday(user?.factory_id, activeDateStr))
+    }
+  }, [dayData, preview, activeDateStr, user?.factory_id])
+
+  // Daily target requirements per job per shift (keyed by `${activeDateStr}:${job.id}`)
+  const [dailyTargets, setDailyTargets] = useState<Record<string, [number, number, number]>>({})
+
+  // Modal state for Daily Job Requirements (Step 1: Admin Paper Entry)
+  const [isTargetModalOpen, setIsTargetModalOpen] = useState(false)
+  const [tempDailyTargets, setTempDailyTargets] = useState<Record<string, [number, number, number]>>({})
+  const [targetModalSearch, setTargetModalSearch] = useState('')
+
+  const getShiftTargets = useCallback(
+    (job: Job): [number, number, number] => {
+      const key = `${activeDateStr}:${job.id}`
+      if (dailyTargets[key]) {
+        return dailyTargets[key]
+      }
+      // Default initial targets from job master quota
+      const m = job.planned_morning ?? (job.quota > 0 ? job.quota : 0)
+      const a = job.planned_afternoon ?? 0
+      const n = job.planned_night ?? 0
+      return [m, a, n]
+    },
+    [dailyTargets, activeDateStr]
+  )
+
+  // ── Selection and Search State (Diamond Pattern) ────────────────────
+  const [selectedPoolIds, setSelectedPoolIds] = useState<Set<string>>(new Set())
+  const [searchTerm, setSearchTerm] = useState('')
+
+  // ── Modal State for Editing / Adding Shifts to a Worker ─────────────
+  const [modalEmp, setModalEmp] = useState<Employee | null>(null)
+  const [modalShift1JobId, setModalShift1JobId] = useState<string>('')
+  const [modalShift1Index, setModalShift1Index] = useState<number>(0)
+  const [modalShift1IsHalf, setModalShift1IsHalf] = useState<boolean>(false)
+  const [modalShift1HasOt, setModalShift1HasOt] = useState<boolean>(false)
+  const [modalShift1OtHours, setModalShift1OtHours] = useState<number>(1)
+  const [modalHasShift2, setModalHasShift2] = useState<boolean>(false)
+  const [modalShift2JobId, setModalShift2JobId] = useState<string>('')
+  const [modalShift2Index, setModalShift2Index] = useState<number>(1)
+  const [modalShift2IsHalf, setModalShift2IsHalf] = useState<boolean>(false)
+  const [modalShift2HasOt, setModalShift2HasOt] = useState<boolean>(false)
+  const [modalShift2OtHours, setModalShift2OtHours] = useState<number>(1)
+
+  // ── Dynamic Height for Split Panel (Diamond Pattern) ────────────────
+  const splitRef = useRef<HTMLDivElement>(null)
+  const [splitHeight, setSplitHeight] = useState<number | null>(null)
+
+  const hasSelection = selectedPoolIds.size > 0
+
+  useEffect(() => {
+    const update = () => {
+      if (!splitRef.current) return
+      const footer = document.querySelector('footer')
+      const footerH = footer ? footer.getBoundingClientRect().height : 0
+      setSplitHeight(window.innerHeight - splitRef.current.getBoundingClientRect().top - footerH)
+    }
+    const raf = requestAnimationFrame(update)
+    window.addEventListener('resize', update)
+    return () => {
+      cancelAnimationFrame(raf)
+      window.removeEventListener('resize', update)
+    }
+  }, [hasSelection])
+
+  // ── Employee Lookup & Usage Tracking ────────────────────────────────
+  const empMap = useMemo(() => {
+    return new Map<string, Employee>(employees.map((e) => [e.id, e]))
+  }, [employees])
+
+  // Count how many shifts each worker is doing today (max 2)
+  const empUsageMap = useMemo(() => {
+    const map = new Map<string, { count: number; shifts: Set<number>; jobIds: string[] }>()
+    for (const e of entries) {
+      if (!map.has(e.employee_id)) {
+        map.set(e.employee_id, { count: 0, shifts: new Set(), jobIds: [] })
+      }
+      const u = map.get(e.employee_id)!
+      u.count++
+      u.shifts.add(e.shift_index)
+      u.jobIds.push(e.job_id)
+    }
+    return map
+  }, [entries])
+
+  const totalPeopleCount = empUsageMap.size
+  const doubleShiftCount = useMemo(() => Array.from(empUsageMap.values()).filter(u => u.count >= 2).length, [empUsageMap])
+
+  const availableJobs = useMemo(() => {
+    return jobs.filter((j) => isJobAvailable(j, activeDateStr))
+  }, [jobs, activeDateStr])
+
+  const regularJobs = useMemo(() => {
+    return availableJobs.filter((j) => j.job_type === 'regular')
+  }, [availableJobs])
+
+  const temporaryJobs = useMemo(() => {
+    return availableJobs.filter((j) => j.job_type === 'temporary')
+  }, [availableJobs])
+
+  const regularGroups = useMemo(() => {
+    const map = new Map<string, Job[]>()
+    for (const j of regularJobs) {
+      const dept = j.department || 'อื่นๆ'
+      if (!map.has(dept)) map.set(dept, [])
+      map.get(dept)!.push(j)
+    }
+    return Array.from(map.entries()).map(([department, groupJobs]) => ({
+      department,
+      jobs: groupJobs,
+    }))
+  }, [regularJobs])
+
+  const temporaryGroups = useMemo(() => {
+    const map = new Map<string, Job[]>()
+    for (const j of temporaryJobs) {
+      const dept = j.department || 'อื่นๆ'
+      if (!map.has(dept)) map.set(dept, [])
+      map.get(dept)!.push(j)
+    }
+    return Array.from(map.entries()).map(([department, groupJobs]) => ({
+      department,
+      jobs: groupJobs,
+    }))
+  }, [temporaryJobs])
+
+  const grandTotalTarget = useMemo(() => {
+    return availableJobs.reduce((sum, j) => {
+      const t = getShiftTargets(j)
+      return sum + t[0] + t[1] + t[2]
+    }, 0)
+  }, [availableJobs, getShiftTargets])
+
+  const regularTargetTotal = useMemo(() => {
+    return regularJobs.reduce((sum, j) => {
+      const t = getShiftTargets(j)
+      return sum + t[0] + t[1] + t[2]
+    }, 0)
+  }, [regularJobs, getShiftTargets])
+
+  const tempTargetTotal = useMemo(() => {
+    return temporaryJobs.reduce((sum, j) => {
+      const t = getShiftTargets(j)
+      return sum + t[0] + t[1] + t[2]
+    }, 0)
+  }, [temporaryJobs, getShiftTargets])
+
+  // Active jobs for Daily Requirements Modal
+  const activeJobsList = useMemo(() => {
+    return availableJobs.filter((j) => j.active)
+  }, [availableJobs])
+
+  const filteredModalJobs = useMemo(() => {
+    const term = targetModalSearch.toLowerCase().trim()
+    if (!term) return activeJobsList
+    return activeJobsList.filter(
+      (j) =>
+        j.code.toLowerCase().includes(term) ||
+        (j.department || '').toLowerCase().includes(term) ||
+        (j.description || '').toLowerCase().includes(term)
+    )
+  }, [activeJobsList, targetModalSearch])
+
+  const modalRegularTotal = useMemo(() => {
+    return activeJobsList
+      .filter((j) => j.job_type === 'regular')
+      .reduce((sum, j) => {
+        const t = tempDailyTargets[j.id] || [0, 0, 0]
+        return sum + t[0] + t[1] + t[2]
+      }, 0)
+  }, [activeJobsList, tempDailyTargets])
+
+  const modalTempTotal = useMemo(() => {
+    return activeJobsList
+      .filter((j) => j.job_type === 'temporary')
+      .reduce((sum, j) => {
+        const t = tempDailyTargets[j.id] || [0, 0, 0]
+        return sum + t[0] + t[1] + t[2]
+      }, 0)
+  }, [activeJobsList, tempDailyTargets])
+
+  const modalGrandTotal = modalRegularTotal + modalTempTotal
+
+  const handleOpenTargetModal = () => {
+    const initial: Record<string, [number, number, number]> = {}
+    activeJobsList.forEach((j) => {
+      const key = `${activeDateStr}:${j.id}`
+      if (dailyTargets[key]) {
+        initial[j.id] = [...dailyTargets[key]]
+      } else {
+        const m = j.planned_morning ?? (j.quota > 0 ? j.quota : 0)
+        const a = j.planned_afternoon ?? 0
+        const n = j.planned_night ?? 0
+        initial[j.id] = [m, a, n]
+      }
+    })
+    setTempDailyTargets(initial)
+    setTargetModalSearch('')
+    setIsTargetModalOpen(true)
+  }
+
+  const handleTempTargetChange = (jobId: string, shiftIndex: number, valStr: string) => {
+    const num = valStr === '' ? 0 : Math.max(0, parseInt(valStr, 10) || 0)
+    setTempDailyTargets((prev) => {
+      const current = prev[jobId] || [0, 0, 0]
+      const updated: [number, number, number] = [...current] as [number, number, number]
+      updated[shiftIndex] = num
+      return {
+        ...prev,
+        [jobId]: updated,
+      }
+    })
+  }
+
+  const handleFillDefaultQuotas = () => {
+    const updated: Record<string, [number, number, number]> = {}
+    activeJobsList.forEach((j) => {
+      updated[j.id] = [j.quota, 0, 0]
+    })
+    setTempDailyTargets(updated)
+    toast.info('เติมยอดกะเช้าตามยอดเต็มมาตรฐานเรียบร้อย')
+  }
+
+  const handleClearAllModalTargets = () => {
+    const updated: Record<string, [number, number, number]> = {}
+    activeJobsList.forEach((j) => {
+      updated[j.id] = [0, 0, 0]
+    })
+    setTempDailyTargets(updated)
+    toast.info('ล้างยอดเป้าหมายเป็น 0 เรียบร้อย')
+  }
+
+  const handleSaveDailyTargets = () => {
+    setDailyTargets((prev) => {
+      const next = { ...prev }
+      Object.entries(tempDailyTargets).forEach(([jobId, targets]) => {
+        next[`${activeDateStr}:${jobId}`] = targets
+      })
+      return next
+    })
+    setIsTargetModalOpen(false)
+    toast.success(`✓ บันทึกความต้องการแรงงานประจำวันเรียบร้อย (รวม ${modalGrandTotal} คน)`)
+  }
+
+  const renderQuotaBadge = (status: QuotaStatus, assigned: number, target: number) => {
+    if (status === 'paused') {
+      return <span className="vk-tpi-badge vk-badge-paused">งดจัดกะ</span>
+    }
+    if (status === 'zero' || (target === 0 && assigned === 0)) {
+      return <span className="vk-tpi-badge vk-badge-paused">0/0 ไม่ใช้วันนี้</span>
+    }
+    if (status === 'completed') {
+      return <span className="vk-tpi-badge vk-badge-completed">✓ ครบ {assigned}/{target} คน</span>
+    }
+    if (status === 'incomplete') {
+      return <span className="vk-tpi-badge vk-badge-incomplete">ขาดอีก {Math.max(0, target - assigned)} คน ({assigned}/{target})</span>
+    }
+    return <span className="vk-tpi-badge vk-badge-exceeded">เกิน +{assigned - target} คน ({assigned}/{target})</span>
+  }
+
+  const filteredPool = useMemo(() => {
+    const term = searchTerm.toLowerCase().trim()
+    return employees.filter((emp) => {
+      const code = emp.employee_code.toLowerCase()
+      const fullName = `${emp.first_name} ${emp.last_name}`.toLowerCase()
+      const nationality = (emp.nationality || '').toLowerCase()
+
+      const matchSearch = !term || code.includes(term) || fullName.includes(term) || nationality.includes(term)
+      return matchSearch
+    })
+  }, [employees, searchTerm])
+
+  const availableEligible = useMemo(() => {
+    return filteredPool.filter((emp) => {
+      const u = empUsageMap.get(emp.id)
+      return (u?.count || 0) < 2
+    })
+  }, [filteredPool, empUsageMap])
+
+  const allEligibleSelected = useMemo(() => {
+    if (availableEligible.length === 0) return false
+    return availableEligible.every((e) => selectedPoolIds.has(e.id))
+  }, [availableEligible, selectedPoolIds])
+
+  const toggleSelect = (empId: string) => {
+    const u = empUsageMap.get(empId)
+    if ((u?.count || 0) >= 2) return
+
+    setSelectedPoolIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(empId)) next.delete(empId)
+      else next.add(empId)
+      return next
+    })
+  }
+
+  const selectAll = () => {
+    setSelectedPoolIds((prev) => {
+      const next = new Set(prev)
+      availableEligible.forEach((e) => next.add(e.id))
+      return next
+    })
+  }
+
+  const deselectAll = () => {
+    setSelectedPoolIds(new Set())
+  }
+
+  const handleClearAll = () => {
+    if (window.confirm('ล้างการจัดกะทั้งหมดของวันนี้?')) setEntries([])
+  }
+
+  const handleResetToInitial = () => {
+    if (preview) {
+      setEntries(demoInitialEntries)
+    } else if (dayData) {
+      setEntries(dayData.entries || [])
+    } else {
+      setEntries([])
+    }
+  }
+
+  const openEmployeeModal = (emp: Employee) => {
+    const empEntries = entries.filter((e) => e.employee_id === emp.id)
+    const defaultJobId = availableJobs[0]?.id || jobs[0]?.id || ''
+    const isClerk = emp.position === 'clerk'
+    const defaultOtHours = isClerk ? 8 : 1
+
+    if (empEntries.length === 0) {
+      setModalShift1JobId(defaultJobId)
+      setModalShift1Index(0)
+      setModalShift1IsHalf(false)
+      setModalShift1HasOt(false)
+      setModalShift1OtHours(defaultOtHours)
+      setModalHasShift2(false)
+      setModalShift2JobId(defaultJobId)
+      setModalShift2Index(1)
+      setModalShift2IsHalf(false)
+      setModalShift2HasOt(false)
+      setModalShift2OtHours(defaultOtHours)
+    } else if (empEntries.length === 1) {
+      const s1 = empEntries[0]
+      setModalShift1JobId(s1.job_id)
+      setModalShift1Index(s1.shift_index)
+      setModalShift1IsHalf(!!s1.is_half_shift)
+      setModalShift1HasOt(!isClerk && !!(s1.ot_hours && s1.ot_hours > 0))
+      setModalShift1OtHours(s1.ot_hours || defaultOtHours)
+      setModalHasShift2(false)
+      setModalShift2JobId(s1.job_id)
+      setModalShift2Index((s1.shift_index + 1) % 3)
+      setModalShift2IsHalf(false)
+      setModalShift2HasOt(false)
+      setModalShift2OtHours(defaultOtHours)
+    } else {
+      const s1 = empEntries[0]
+      const s2 = empEntries[1]
+      setModalShift1JobId(s1.job_id)
+      setModalShift1Index(s1.shift_index)
+      setModalShift1IsHalf(!!s1.is_half_shift)
+      setModalShift1HasOt(!isClerk && !!(s1.ot_hours && s1.ot_hours > 0))
+      setModalShift1OtHours(s1.ot_hours || defaultOtHours)
+      setModalHasShift2(true)
+      setModalShift2JobId(s2.job_id)
+      setModalShift2Index(s2.shift_index)
+      setModalShift2IsHalf(!!s2.is_half_shift)
+      setModalShift2HasOt(!!(s2.ot_hours && s2.ot_hours > 0))
+      setModalShift2OtHours(s2.ot_hours || defaultOtHours)
+    }
+    setModalEmp(emp)
+  }
+
+  const handleClearModalShifts = () => {
+    if (!modalEmp) return
+    setEntries((prev) => prev.filter((e) => e.employee_id !== modalEmp.id))
+    toast.info(`ลบกะทั้งหมดของ ${modalEmp.first_name} ${modalEmp.last_name} แล้ว`)
+    setModalEmp(null)
+  }
+
+  const handleSaveModalShifts = () => {
+    if (!modalEmp) return
+    if (!modalShift1JobId) {
+      toast.error('กรุณาเลือกรหัสงานสำหรับกะที่ 1')
+      return
+    }
+    const job1 = jobs.find((j) => j.id === modalShift1JobId)
+    if (job1 && !job1.active) {
+      toast.error(`รหัสงาน ${job1.code} อยู่ในสถานะงดจัดกะ`)
+      return
+    }
+
+    const isClerk = modalEmp.position === 'clerk'
+    const tier1 = wageTier(wageProfiles.find((p) => p.employee_id === modalEmp.id), activeDateStr)
+    const baseRate1 = (tier1 === 'skilled' && job1?.skilled_rate) ? job1.skilled_rate : (job1?.normal_rate || 357)
+    const ot1 = (!isClerk && modalShift1HasOt) ? calculateEntryOt(modalShift1OtHours, baseRate1, isClerk) : { ot_hours: 0, ot_pay: 0 }
+
+    const updatedEntries = entries.filter((e) => e.employee_id !== modalEmp.id)
+    const newEmpEntries: Entry[] = [
+      {
+        employee_id: modalEmp.id,
+        job_id: modalShift1JobId,
+        shift_index: modalShift1Index,
+        is_half_shift: modalShift1IsHalf,
+        actual_hours: modalShift1IsHalf ? 4 : 8,
+        ot_hours: ot1.ot_hours,
+        ot_pay: ot1.ot_pay,
+      },
+    ]
+
+    if (modalHasShift2) {
+      if (modalShift1Index === modalShift2Index) {
+        toast.error('กะที่ 1 และกะที่ 2 ต้องไม่เป็นช่วงเวลาเดียวกัน')
+        return
+      }
+      if (!modalShift2JobId) {
+        toast.error('กรุณาเลือกรหัสงานสำหรับกะที่ 2')
+        return
+      }
+      const job2 = jobs.find((j) => j.id === modalShift2JobId)
+      if (job2 && !job2.active) {
+        toast.error(`รหัสงาน ${job2.code} อยู่ในสถานะงดจัดกะ`)
+        return
+      }
+
+      const tier2 = wageTier(wageProfiles.find((p) => p.employee_id === modalEmp.id), activeDateStr)
+      const baseRate2 = (tier2 === 'skilled' && job2?.skilled_rate) ? job2.skilled_rate : (job2?.normal_rate || 357)
+      const ot2 = modalShift2HasOt ? calculateEntryOt(modalShift2OtHours, baseRate2, isClerk) : { ot_hours: 0, ot_pay: 0 }
+
+      newEmpEntries.push({
+        employee_id: modalEmp.id,
+        job_id: modalShift2JobId,
+        shift_index: modalShift2Index,
+        is_half_shift: modalShift2IsHalf,
+        actual_hours: modalShift2IsHalf ? 4 : 8,
+        ot_hours: ot2.ot_hours,
+        ot_pay: ot2.ot_pay,
+      })
+    }
+
+    const candidateEntries = [...updatedEntries, ...newEmpEntries]
+    const err = validateEntries(candidateEntries)
+    if (err) {
+      toast.error(`ไม่สามารถบันทึกได้: ${err}`)
+      return
+    }
+
+    setEntries(candidateEntries)
+    toast.success(`✓ บันทึกการจัดกะของ ${modalEmp.first_name} ${modalEmp.last_name} เรียบร้อยแล้ว`)
+    setModalEmp(null)
+  }
+
+  const canAssign = useCallback(
+    (empId: string, shiftIndex: number, currentJobId?: string) => {
+      const u = empUsageMap.get(empId)
+      if (!u) return { ok: true }
+      if (u.shifts.has(shiftIndex)) {
+        const alreadyInThisCell = entries.some(
+          (e) => e.employee_id === empId && e.shift_index === shiftIndex && e.job_id === currentJobId
+        )
+        if (alreadyInThisCell) {
+          return { ok: false, reason: 'พนักงานอยู่ในกะนี้แล้ว' }
+        }
+        return { ok: false, reason: 'พนักงานลงกะนี้ในรหัสงานอื่นแล้ว' }
+      }
+      if (u.count >= 2) {
+        return { ok: false, reason: 'พนักงานลงครบ 2 กะแล้ว' }
+      }
+      return { ok: true }
+    },
+    [empUsageMap, entries]
+  )
+
+  const handleAssignSelected = (jobId: string, shiftIndex: number) => {
+    if (selectedPoolIds.size === 0) return
+
+    const targetJob = jobs.find((j) => j.id === jobId)
+    if (targetJob && !targetJob.active) {
+      toast.error('รหัสงานนี้อยู่ในสถานะงดจัดกะ')
+      return
+    }
+
+    const newEntries = [...entries]
+    let assignedCount = 0
+    const errors: string[] = []
+
+    for (const empId of selectedPoolIds) {
+      const check = canAssign(empId, shiftIndex, jobId)
+      if (!check.ok) {
+        const emp = empMap.get(empId)
+        errors.push(`${emp?.first_name || empId}: ${check.reason}`)
+        continue
+      }
+      newEntries.push({ employee_id: empId, job_id: jobId, shift_index: shiftIndex })
+      assignedCount++
+    }
+
+    const err = validateEntries(newEntries)
+    if (err) {
+      toast.error(`ไม่สามารถจัดลงได้: ${err}`)
+      return
+    }
+
+    setEntries(newEntries)
+    setSelectedPoolIds(new Set())
+
+    if (assignedCount > 0) {
+      toast.success(`✓ จัดพนักงาน ${assignedCount} คน ลงกะ${SHIFTS[shiftIndex].name} สำเร็จ`)
+    }
+    if (errors.length > 0) {
+      toast.warning(`ไม่สามารถจัดลงได้ ${errors.length} คน: ${errors[0]}`)
+    }
+  }
+
+  const handleRemove = (empId: string, jobId: string, shiftIndex: number) => {
+    setEntries((prev) =>
+      prev.filter((e) => !(e.employee_id === empId && e.job_id === jobId && e.shift_index === shiftIndex))
+    )
+  }
+
+  // ── Render Grouped Consecutive 2-Shift Cards ───────────────────────
+  const renderJobDoubleShifts = (
+    jobId: string,
+    doubleShiftEmps: { empId: string; span: 'morning-afternoon' | 'afternoon-night' | 'night-morning' }[]
+  ) => {
+    // Group & Sort: 1. เช้า+บ่าย (morning-afternoon) -> 2. บ่าย+ดึก (afternoon-night) -> 3. ดึก+เช้า (night-morning)
+    const spanPriority = { 'morning-afternoon': 1, 'afternoon-night': 2, 'night-morning': 3 }
+    const sorted = [...doubleShiftEmps].sort((a, b) => {
+      if (spanPriority[a.span] !== spanPriority[b.span]) {
+        return spanPriority[a.span] - spanPriority[b.span]
+      }
+      const empA = empMap.get(a.empId)
+      const empB = empMap.get(b.empId)
+      return compareEmployeeCode(empA?.employee_code, empB?.employee_code)
+    })
+
+    return sorted.map(({ empId, span }) => {
+      const emp = empMap.get(empId)
+      if (!emp) return null
+
+      const empDoubleEntries = entries.filter((e) => e.employee_id === empId && e.job_id === jobId)
+      const hasHalf = empDoubleEntries.some((e) => e.is_half_shift)
+      const hasOt = empDoubleEntries.some((e) => (e.ot_hours ?? 0) > 0)
+      const totalOtHrs = empDoubleEntries.reduce((sum, e) => sum + (e.ot_hours || 0), 0)
+
+      const handleRemoveDouble = (e: React.MouseEvent) => {
+        e.stopPropagation()
+        setEntries((prev) => prev.filter((entry) => !(entry.employee_id === empId && entry.job_id === jobId)))
+        toast.info(`ลบกะควบของ ${emp.first_name} ${emp.last_name} ออกจากงานนี้แล้ว`)
+      }
+
+      if (span === 'morning-afternoon') {
+        return (
+          <div
+            key={`double-${empId}-ma`}
+            className="vk-tpi-double-span-card span-morning-afternoon"
+            onClick={() => openEmployeeModal(emp)}
+            title="คลิกเพื่อแก้ไขการจัดกะ"
+          >
+            <div className="vk-tpi-double-main">
+              <div className="vk-tpi-double-line1">
+                <span className="vk-double-name">
+                  {emp.first_name} {emp.last_name}
+                  {emp.nationality ? <span className="vk-pool-nat-txt"> ({emp.nationality})</span> : null}
+                </span>
+                <span className="vk-double-badge">ควบกะเช้า + กะบ่าย</span>
+                {hasHalf && <span className="vk-tpi-wp-half">ครึ่งกะ</span>}
+                {hasOt && (
+                  <span className="vk-tpi-wp-ot">
+                    {emp.position === 'clerk' ? 'OT 8 ชม.' : `OT ${totalOtHrs} ชม.`}
+                  </span>
+                )}
+              </div>
+              <div className="vk-tpi-double-line2">
+                <span className="vk-double-code">{emp.employee_code}</span>
+              </div>
+            </div>
+            <div className="vk-tpi-double-right">
+              <button
+                type="button"
+                className="vk-tpi-btn-del"
+                title="ลบออกจากการจัดกะนี้"
+                onClick={handleRemoveDouble}
+              >
+                <X style={{ width: 14, height: 14 }} />
+              </button>
+            </div>
+          </div>
+        )
+      }
+
+      if (span === 'afternoon-night') {
+        return (
+          <div
+            key={`double-${empId}-an`}
+            className="vk-tpi-double-span-card span-afternoon-night"
+            onClick={() => openEmployeeModal(emp)}
+            title="คลิกเพื่อแก้ไขการจัดกะ"
+          >
+            <div className="vk-tpi-double-main">
+              <div className="vk-tpi-double-line1">
+                <span className="vk-double-name">
+                  {emp.first_name} {emp.last_name}
+                  {emp.nationality ? <span className="vk-pool-nat-txt"> ({emp.nationality})</span> : null}
+                </span>
+                <span className="vk-double-badge">ควบกะบ่าย + กะดึก</span>
+                {hasHalf && <span className="vk-tpi-wp-half">ครึ่งกะ</span>}
+                {hasOt && (
+                  <span className="vk-tpi-wp-ot">
+                    {emp.position === 'clerk' ? 'OT 8 ชม.' : `OT ${totalOtHrs} ชม.`}
+                  </span>
+                )}
+              </div>
+              <div className="vk-tpi-double-line2">
+                <span className="vk-double-code">{emp.employee_code}</span>
+              </div>
+            </div>
+            <div className="vk-tpi-double-right">
+              <button
+                type="button"
+                className="vk-tpi-btn-del"
+                title="ลบออกจากการจัดกะนี้"
+                onClick={handleRemoveDouble}
+              >
+                <X style={{ width: 14, height: 14 }} />
+              </button>
+            </div>
+          </div>
+        )
+      }
+
+      // span === 'night-morning' (ดึก + เช้า)
+      // Displays in column 1 (morning) and column 3 (night) with column 2 (afternoon) empty
+      return (
+        <div key={`double-${empId}-nm`} className="vk-tpi-split-double-row">
+          {/* Column 1: Morning Shift Box */}
+          <div
+            className="vk-tpi-split-double-card card-morning"
+            onClick={() => openEmployeeModal(emp)}
+            title="คลิกเพื่อแก้ไขการจัดกะ"
+          >
+            <div className="vk-tpi-double-main">
+              <div className="vk-tpi-double-line1">
+                <span className="vk-double-name">
+                  {emp.first_name} {emp.last_name}
+                  {emp.nationality ? <span className="vk-pool-nat-txt"> ({emp.nationality})</span> : null}
+                </span>
+                <span className="vk-double-badge">ควบดึก + เช้า</span>
+                {hasHalf && <span className="vk-tpi-wp-half">ครึ่งกะ</span>}
+                {hasOt && (
+                  <span className="vk-tpi-wp-ot">
+                    {emp.position === 'clerk' ? 'OT 8 ชม.' : `OT ${totalOtHrs} ชม.`}
+                  </span>
+                )}
+              </div>
+              <div className="vk-tpi-double-line2">
+                <span className="vk-double-code">{emp.employee_code} · กะเช้า</span>
+              </div>
+            </div>
+            <div className="vk-tpi-double-right">
+              <button
+                type="button"
+                className="vk-tpi-btn-del"
+                title="ลบออกจากการจัดกะนี้"
+                onClick={handleRemoveDouble}
+              >
+                <X style={{ width: 14, height: 14 }} />
+              </button>
+            </div>
+          </div>
+
+          {/* Column 2: Afternoon Shift (Blank / Empty lane) */}
+          <div className="vk-tpi-split-double-empty" title="กะบ่าย: ไม่ได้ลงกะ (ควบดึก+เช้า)">
+            <div className="vk-tpi-split-bridge-line" />
+          </div>
+
+          {/* Column 3: Night Shift Box */}
+          <div
+            className="vk-tpi-split-double-card card-night"
+            onClick={() => openEmployeeModal(emp)}
+            title="คลิกเพื่อแก้ไขการจัดกะ"
+          >
+            <div className="vk-tpi-double-main">
+              <div className="vk-tpi-double-line1">
+                <span className="vk-double-name">
+                  {emp.first_name} {emp.last_name}
+                  {emp.nationality ? <span className="vk-pool-nat-txt"> ({emp.nationality})</span> : null}
+                </span>
+                <span className="vk-double-badge">ควบดึก + เช้า</span>
+                {hasHalf && <span className="vk-tpi-wp-half">ครึ่งกะ</span>}
+                {hasOt && (
+                  <span className="vk-tpi-wp-ot">
+                    {emp.position === 'clerk' ? 'OT 8 ชม.' : `OT ${totalOtHrs} ชม.`}
+                  </span>
+                )}
+              </div>
+              <div className="vk-tpi-double-line2">
+                <span className="vk-double-code">{emp.employee_code} · กะดึก</span>
+              </div>
+            </div>
+            <div className="vk-tpi-double-right">
+              <button
+                type="button"
+                className="vk-tpi-btn-del"
+                title="ลบออกจากการจัดกะนี้"
+                onClick={handleRemoveDouble}
+              >
+                <X style={{ width: 14, height: 14 }} />
+              </button>
+            </div>
+          </div>
+        </div>
+      )
+    })
+  }
+
+  // ── Drag & Drop Handlers ────────────────────────────────────────────
+  const [draggedEmpId, setDraggedEmpId] = useState<string | null>(null)
+  const [dragSource, setDragSource] = useState<{ type: 'pool' } | { type: 'cell'; jobId: string; shiftIndex: number } | null>(null)
+
+  const handleDragStartFromPool = (e: React.DragEvent, empId: string) => {
+    setDraggedEmpId(empId)
+    setDragSource({ type: 'pool' })
+    e.dataTransfer.setData('text/plain', empId)
+    e.dataTransfer.effectAllowed = 'move'
+  }
+
+  const handleDragStartFromCell = (e: React.DragEvent, empId: string, jobId: string, shiftIndex: number) => {
+    setDraggedEmpId(empId)
+    setDragSource({ type: 'cell', jobId, shiftIndex })
+    e.dataTransfer.setData('text/plain', empId)
+    e.dataTransfer.effectAllowed = 'move'
+  }
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    e.currentTarget.classList.add('vk-drag-over')
+  }
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.currentTarget.classList.remove('vk-drag-over')
+  }
+
+  const handleDrop = (e: React.DragEvent, targetJobId: string, targetShiftIndex: number) => {
+    e.preventDefault()
+    e.currentTarget.classList.remove('vk-drag-over')
+
+    const empId = draggedEmpId || e.dataTransfer.getData('text/plain')
+    if (!empId) return
+
+    const targetJob = jobs.find((j) => j.id === targetJobId)
+    if (targetJob && !targetJob.active) {
+      toast.error('รหัสงานนี้อยู่ในสถานะงดจัดกะ')
+      return
+    }
+
+    if (dragSource?.type === 'cell') {
+      if (dragSource.jobId === targetJobId && dragSource.shiftIndex === targetShiftIndex) return
+      const filtered = entries.filter(
+        (entry) => !(entry.employee_id === empId && entry.job_id === dragSource.jobId && entry.shift_index === dragSource.shiftIndex)
+      )
+      const newEntries = [...filtered, { employee_id: empId, job_id: targetJobId, shift_index: targetShiftIndex }]
+      const err = validateEntries(newEntries)
+      if (err) {
+        toast.error(`ไม่สามารถย้ายได้: ${err}`)
+        return
+      }
+      setEntries(newEntries)
+      toast.success(`✓ ย้ายพนักงานไปกะ${SHIFTS[targetShiftIndex].name} สำเร็จ`)
+    } else {
+      const check = canAssign(empId, targetShiftIndex, targetJobId)
+      if (!check.ok) {
+        toast.error(`ไม่สามารถจัดลงได้: ${check.reason}`)
+        return
+      }
+      const newEntries = [...entries, { employee_id: empId, job_id: targetJobId, shift_index: targetShiftIndex }]
+      const err = validateEntries(newEntries)
+      if (err) {
+        toast.error(`ไม่สามารถจัดลงได้: ${err}`)
+        return
+      }
+      setEntries(newEntries)
+      toast.success(`✓ จัดพนักงานลงกะ${SHIFTS[targetShiftIndex].name} สำเร็จ`)
+    }
+
+    setDraggedEmpId(null)
+    setDragSource(null)
+  }
+
+  const handleToggleHoliday = (checked: boolean) => {
+    setIsHoliday(checked)
+    setStoredHoliday(user?.factory_id, activeDateStr, checked)
+  }
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const err = validateEntries(entries)
+      if (err) throw new Error(err)
+
+      // Ensure local holiday cache is firmly preserved
+      setStoredHoliday(user?.factory_id, activeDateStr, isHoliday)
+
+      if (!user?.factory_id || preview) {
+        toast.info('โหมดตัวอย่าง (Preview Mode): บันทึกข้อมูลจำลองเรียบร้อย')
+        return true
+      }
+
+      // Convert any reference job IDs to real database UUIDs
+      const validEntries = await ensureValidJobUuids(entries, user.factory_id, jobs)
+      setEntries(validEntries)
+
+      const nextRev = await saveDay(user.factory_id, activeDateStr, {
+        revision: dayRevision,
+        is_holiday: isHoliday,
+        entries: validEntries.map((e) => ({ ...e, is_holiday_ot: isHoliday })),
+      })
+      setDayRevision(nextRev)
+      return true
+    },
+    onSuccess: () => {
+      setStoredHoliday(user?.factory_id, activeDateStr, isHoliday)
+      queryClient.invalidateQueries({ queryKey: ['tpi-jobs', user?.factory_id] })
+      queryClient.invalidateQueries({ queryKey: ['tpi-shift-day', user?.factory_id, activeDateStr] })
+      queryClient.invalidateQueries({ queryKey: ['all-tpi-period-shifts'] })
+      queryClient.invalidateQueries({ queryKey: ['summary-all-shifts'] })
+      queryClient.invalidateQueries({ queryKey: ['payslip-all-shifts'] })
+      toast.success(`✓ บันทึกข้อมูลการจัดกะ ${fmtDisplay(activeDateStr)} สำเร็จ`)
+    },
+    onError: (e: any) => toast.error('บันทึกไม่สำเร็จ', { description: errorMessage(e) }),
+  })
+
+  return (
+    <>
+      <TopBar
+        title="กรอกกะรายวัน"
+        subtitle={preview ? 'โหมดจำลองข้อมูล (Preview)' : currentPeriod?.label || ''}
+        onMenuClick={onMenuClick}
+      />
+
+      <div
+        className="vk-date-strip"
+        style={{
+          borderBottom: '1px solid var(--vk-rule)',
+          background: isHoliday ? 'var(--vk-marigold-tint)' : weekend ? '#FAF6FD' : 'var(--vk-bone)',
+          padding: '8px 16px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
+          position: 'sticky',
+          top: 'var(--vk-topbar-h)',
+          zIndex: 20,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+          <button
+            type="button"
+            className="vk-btn vk-btn--ghost"
+            style={{ height: 32, padding: '0 10px' }}
+            disabled={isAtStart}
+            onClick={() => navigateDate(-1)}
+          >
+            <ChevronLeft style={{ width: 15, height: 15 }} />
+          </button>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 260, justifyContent: 'center' }}>
+            <div
+              style={{
+                fontFamily: 'var(--vk-sans)',
+                fontWeight: 700,
+                fontSize: 17,
+                letterSpacing: '-0.01em',
+                color: isHoliday ? '#6F4A0E' : weekend ? '#5b21b6' : 'var(--vk-ink)',
+              }}
+            >
+              {fmtDisplay(activeDateStr)}
+            </div>
+            {weekend && (
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  letterSpacing: '0.08em',
+                  color: '#5b21b6',
+                  background: 'rgba(91,33,182,0.08)',
+                  padding: '2px 8px',
+                  borderRadius: 999,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                วันหยุดสุดสัปดาห์
+              </span>
+            )}
+            {isHoliday && (
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  letterSpacing: '0.08em',
+                  color: '#6F4A0E',
+                  background: 'rgba(235,160,0,0.18)',
+                  padding: '2px 8px',
+                  borderRadius: 999,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                วันหยุดนักขัตฤกษ์
+              </span>
+            )}
+          </div>
+
+          <button
+            type="button"
+            className="vk-btn vk-btn--ghost"
+            style={{ height: 32, padding: '0 10px' }}
+            disabled={isAtEnd}
+            onClick={() => navigateDate(1)}
+          >
+            <ChevronRight style={{ width: 15, height: 15 }} />
+          </button>
+        </div>
+
+        {/* Row 2: holiday checkbox + weekend badge (desktop) + save button */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              cursor: 'pointer',
+              padding: '4px 12px',
+              border: `1px solid ${isHoliday ? 'var(--vk-marigold)' : 'var(--vk-rule-soft)'}`,
+              borderRadius: 6,
+              background: isHoliday ? 'var(--vk-marigold-tint)' : 'transparent',
+              fontSize: 13,
+              fontWeight: 600,
+              color: isHoliday ? '#6F4A0E' : 'var(--vk-ink-2)',
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={isHoliday}
+              onChange={(e) => handleToggleHoliday(e.target.checked)}
+              style={{ accentColor: 'var(--vk-marigold)' }}
+            />
+            วันหยุดนักขัตฤกษ์ (OT ×2)
+          </label>
+
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button
+              type="button"
+              className="vk-btn vk-btn-secondary"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, background: '#ffffff', borderColor: 'var(--vk-rule-soft)' }}
+              onClick={handleOpenTargetModal}
+              title="เปิดหน้าต่างกำหนดความต้องการแรงงานประจำวันตามเอกสารกระดาษ"
+            >
+              <Briefcase style={{ width: 14, height: 14, color: 'var(--vk-persimmon)' }} />
+              จัดการรหัสงานประจำวัน (กำหนดเป้าหมาย)
+            </button>
+
+            <button
+              type="button"
+              className="vk-btn vk-btn-secondary"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: 13,
+                background: dailyAttendance.length > 0 ? '#fef2f2' : '#ffffff',
+                borderColor: dailyAttendance.length > 0 ? '#fca5a5' : 'var(--vk-rule-soft)',
+                color: dailyAttendance.length > 0 ? '#b91c1c' : 'var(--vk-ink-2)',
+                fontWeight: dailyAttendance.length > 0 ? 600 : 500
+              }}
+              onClick={() => setIsAttendanceModalOpen(true)}
+              title="บันทึกพนักงานที่ ขาด ลา มาสาย ประจำวันนี้"
+            >
+              <UserX style={{ width: 14, height: 14, color: dailyAttendance.length > 0 ? '#b91c1c' : 'var(--vk-persimmon)' }} />
+              {dailyAttendance.length > 0 ? `ขาด/ลา/มาสาย (${dailyAttendance.length})` : 'บันทึก ขาด/ลา/มาสาย'}
+            </button>
+
+            <button
+              type="button"
+              className="vk-btn vk-btn--primary"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13 }}
+              onClick={() => saveMutation.mutate()}
+              disabled={saveMutation.isPending}
+            >
+              <Save style={{ width: 14, height: 14 }} />
+              {saveMutation.isPending ? 'กำลังบันทึก...' : 'บันทึกวันนี้'}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* 3. Selection Bar (Diamond Pattern: Appears when workers selected in Pool) */}
+      {hasSelection && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            padding: '8px 20px',
+            background: 'var(--vk-ink)',
+            color: 'var(--vk-bone)',
+            fontFamily: 'var(--vk-sans)',
+            borderBottom: '1px solid rgba(255,255,255,0.08)',
+            position: 'sticky',
+            top: 'calc(var(--vk-topbar-h) + 85px)',
+            zIndex: 19,
+            flexShrink: 0,
+          }}
+        >
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+              color: 'var(--vk-persimmon)',
+              flexShrink: 0,
+            }}
+          >
+            เลือกแล้ว {selectedPoolIds.size} คน
+          </span>
+          <span style={{ fontSize: 12, fontWeight: 600, flexShrink: 0, color: '#fde68a' }}>
+            → คลิกที่ช่องกะในตารางที่ต้องการลง
+          </span>
+          <span
+            style={{
+              fontSize: 11,
+              color: 'rgba(255,255,255,0.6)',
+              flex: 1,
+              minWidth: 0,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {employees
+              .filter((e) => selectedPoolIds.has(e.id))
+              .map((e) => `${e.first_name} ${e.last_name}`)
+              .join(', ')}
+          </span>
+          <button
+            type="button"
+            onClick={deselectAll}
+            style={{
+              background: 'rgba(255,255,255,0.15)',
+              border: 'none',
+              cursor: 'pointer',
+              color: 'var(--vk-bone)',
+              padding: '3px 10px',
+              borderRadius: 4,
+              fontSize: 12,
+              flexShrink: 0,
+            }}
+          >
+            ยกเลิก
+          </button>
+        </div>
+      )}
+
+      {/* 4. Two-Panel Split Layout (Diamond vk-shift-split structure) */}
+      <div
+        ref={splitRef}
+        className="vk-shift-split vk-tpi-split-container"
+        style={splitHeight ? { height: splitHeight } : undefined}
+      >
+        {/* Left Panel: Employee Pool (2-line layout consistent for all workers) */}
+        <div className="vk-pool-wrapper">
+          <div className="vk-pool-header">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+              <div className="vk-eyebrow">
+                POOL · พนักงาน ({availableEligible.length}/{employees.length})
+              </div>
+              {availableEligible.length > 0 && (
+                <button
+                  type="button"
+                  onClick={allEligibleSelected ? deselectAll : selectAll}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: '0.06em',
+                    color: allEligibleSelected ? 'var(--vk-persimmon)' : 'var(--vk-ink-3)',
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    padding: '2px 0',
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  <CheckSquare style={{ width: 12, height: 12 }} />
+                  {allEligibleSelected ? 'ยกเลิก' : 'เลือกทั้งหมด'}
+                </button>
+              )}
+            </div>
+
+            {/* Search Input Box */}
+            <div className="vk-search-container">
+              <Search className="vk-search-icon" />
+              <input
+                type="text"
+                placeholder="ค้นหาชื่อ, รหัส, สัญชาติ..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="vk-search-input"
+              />
+              {searchTerm && (
+                <button
+                  type="button"
+                  onClick={() => setSearchTerm('')}
+                  className="vk-search-clear"
+                  title="ล้างคำค้นหา"
+                >
+                  <X style={{ width: 12, height: 12 }} />
+                </button>
+              )}
+            </div>
+          </div>
+
+            {/* Pool List */}
+          <div className="vk-pool-list">
+            {filteredPool.length === 0 ? (
+              <div className="vk-small" style={{ color: 'var(--vk-ink-3)', padding: '16px 8px', textAlign: 'center', lineHeight: 1.5 }}>
+                {searchTerm
+                  ? 'ไม่พบพนักงานที่ตรงกับที่ค้นหา'
+                  : employees.length === 0
+                  ? 'ยังไม่มีรายชื่อพนักงานในระบบ (กรุณาเพิ่มพนักงานที่เมนู "ฐานข้อมูลพนักงาน")'
+                  : 'จัดกะครบทุกคนแล้ว ✓'}
+              </div>
+            ) : (
+              filteredPool.map((emp) => {
+                const isSelected = selectedPoolIds.has(emp.id)
+                const u = empUsageMap.get(emp.id)
+                const count = u?.count || 0
+                const isMaxed = count >= 2
+
+                return (
+                  <div
+                    key={emp.id}
+                    onClick={() => !isMaxed && toggleSelect(emp.id)}
+                    className={`vk-employee-card ${isMaxed ? 'is-maxed' : ''}`}
+                    data-selected={isSelected}
+                    data-blocked={isMaxed}
+                    draggable={!isMaxed}
+                    onDragStart={(e) => handleDragStartFromPool(e, emp.id)}
+                  >
+                    {/* Checkbox indicator */}
+                    <div
+                      style={{
+                        width: 16,
+                        height: 16,
+                        borderRadius: 4,
+                        flexShrink: 0,
+                        border: `2px solid ${isSelected ? 'var(--vk-persimmon)' : 'var(--vk-rule-soft)'}`,
+                        background: isSelected ? 'var(--vk-persimmon)' : 'transparent',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        marginTop: 2,
+                      }}
+                    >
+                      {isSelected && (
+                        <svg width="9" height="7" viewBox="0 0 9 7" fill="none">
+                          <path
+                            d="M1 3.5L3.5 6L8 1"
+                            stroke="white"
+                            strokeWidth="1.8"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      )}
+                    </div>
+
+                    {/* Employee Info - STRICT 2-LINE CONSISTENT LAYOUT (Diamond Style) */}
+                    <div className="vk-pool-card-content">
+                      {/* Line 1: Name + Badges */}
+                      <div className="vk-pool-card-line1">
+                        <span className="vk-pool-emp-name">
+                          {emp.first_name} {emp.last_name}
+                          {emp.nationality ? <span className="vk-pool-nat-txt"> ({emp.nationality})</span> : null}
+                          {(emp.position === 'clerk' || (emp.position && String(emp.position).toLowerCase() === 'clerk')) && (
+                            <span className="vk-pool-clerk-badge">
+                              เสมียน
+                            </span>
+                          )}
+                        </span>
+                        <div className="vk-pool-badges-group">
+                          {count === 1 && (
+                            <span className="vk-badge-shift-1">
+                              1 กะ
+                            </span>
+                          )}
+                          {count >= 2 && (
+                            <span className="vk-badge-shift-2">
+                              2 กะ
+                            </span>
+                          )}
+                          {attendanceEmpMap.has(emp.id) && (
+                            <span
+                              style={{
+                                fontSize: 9,
+                                fontWeight: 700,
+                                padding: '1px 5px',
+                                borderRadius: 4,
+                                background: attendanceEmpMap.get(emp.id)?.type === 'absent' ? '#fee2e2' : attendanceEmpMap.get(emp.id)?.type === 'leave' ? '#fef3c7' : '#f3f4f6',
+                                color: attendanceEmpMap.get(emp.id)?.type === 'absent' ? '#b91c1c' : attendanceEmpMap.get(emp.id)?.type === 'leave' ? '#b45309' : '#374151',
+                                border: `1px solid ${attendanceEmpMap.get(emp.id)?.type === 'absent' ? '#fca5a5' : attendanceEmpMap.get(emp.id)?.type === 'leave' ? '#fcd34d' : '#d1d5db'}`
+                              }}
+                              title={formatAttendanceSummary(attendanceEmpMap.get(emp.id)!)}
+                            >
+                              {attendanceEmpMap.get(emp.id)?.type === 'absent' ? 'ขาด' : attendanceEmpMap.get(emp.id)?.type === 'leave' ? 'ลา' : 'สาย'}
+                            </span>
+                          )}
+                          {entries.some(e => e.employee_id === emp.id && (e.ot_hours ?? 0) > 0) && (
+                            <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 999, background: '#ffedd5', color: '#c2410c', border: '1px solid #fed7aa' }}>
+                              OT
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Line 2: Code & Manage Button */}
+                      <div className="vk-pool-card-line2">
+                        <span className="vk-emp-code-txt">{emp.employee_code}</span>
+                        <button
+                          type="button"
+                          className="vk-pool-btn-manage"
+                          title="คลิกเพื่อจัดการกะ หรือเพิ่มเป็น 2 กะ"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            openEmployeeModal(emp)
+                          }}
+                        >
+                          จัดการกะ
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })
+            )}
+          </div>
+        </div>
+
+        {/* Right Panel: TPI 3-Shift Job Matrix */}
+        <div className="vk-tpi-matrix-wrapper">
+          {/* Sticky Matrix Header */}
+          <div className="vk-tpi-matrix-sticky-header">
+            <div className="vk-tpi-th-info">
+              <span>รหัสงาน / แผนก / ความต้องการแรงงาน (เป้าหมาย {grandTotalTarget} คน)</span>
+            </div>
+            {SHIFTS.map((shift, idx) => {
+              const shiftAssignedTotal = entries.filter((e) => e.shift_index === idx).length
+              return (
+                <div key={idx} className="vk-tpi-th-shift">
+                  <div className="vk-tpi-shift-h-title">กะ{shift.name}</div>
+                  <div className="vk-tpi-shift-h-time">{shift.time}</div>
+                  <div className="vk-tpi-shift-h-stat">จัดแล้ว: <strong>{shiftAssignedTotal}</strong> คน</div>
+                </div>
+              )
+            })}
+          </div>
+
+          <div className="vk-tpi-matrix-scroll-area">
+            {/* Section 1: ประเภทงานประจำ (Regular Jobs) */}
+            <div className="vk-tpi-group-section">
+              <div className="vk-tpi-group-banner banner-regular">
+                <div className="vk-tpi-banner-title">
+                  <h2>1. ประเภทงานประจำ (Regular Jobs)</h2>
+                  <span className="vk-tpi-banner-tag">เป้าหมายรวม: {regularTargetTotal} คน</span>
+                </div>
+                <div className="vk-tpi-banner-stat">
+                  จัดแล้ว: <strong>{entries.filter((e) => regularJobs.some((j) => j.id === e.job_id)).length}</strong> / {regularTargetTotal} คน
+                </div>
+              </div>
+
+              {regularGroups.map((group) => {
+                const deptTarget = group.jobs.reduce((sum, j) => {
+                  const t = getShiftTargets(j)
+                  return sum + t[0] + t[1] + t[2]
+                }, 0)
+                const deptAssigned = group.jobs.reduce((sum, j) => sum + usage(entries, j.id).total, 0)
+                const isDeptComplete = deptAssigned >= deptTarget && deptTarget > 0
+
+                return (
+                  <div key={group.department} className="vk-tpi-dept-block">
+                    <div className="vk-tpi-dept-bar">
+                      <span className="vk-tpi-dept-name">{group.department}</span>
+                      <span className="vk-tpi-dept-info">
+                        ยอดแผนก: <strong>{deptAssigned}/{deptTarget}</strong> คน
+                        <span className={`vk-tpi-dept-pill ${deptTarget === 0 && deptAssigned === 0 ? 'pill-zero' : isDeptComplete ? 'pill-done' : 'pill-pend'}`}>
+                          {deptTarget === 0 && deptAssigned === 0 ? '— ไม่ใช้วันนี้' : isDeptComplete ? '✓ ครบ' : `ขาดอีก ${Math.max(0, deptTarget - deptAssigned)}`}
+                        </span>
+                      </span>
+                    </div>
+
+                    {group.jobs.map((job) => {
+                      const { total } = usage(entries, job.id)
+                      const targets = getShiftTargets(job)
+                      const todayTarget = targets[0] + targets[1] + targets[2]
+                      const quotaStatus = getJobQuotaStatus(job, total, todayTarget)
+                      const isPaused = quotaStatus === 'paused'
+
+                      // Check for employees doing double shifts in this exact same job
+                      const jobEntries = entries.filter((e) => e.job_id === job.id)
+                      const empShiftMapInJob = new Map<string, Set<number>>()
+                      jobEntries.forEach((e) => {
+                        if (!empShiftMapInJob.has(e.employee_id)) empShiftMapInJob.set(e.employee_id, new Set())
+                        empShiftMapInJob.get(e.employee_id)!.add(e.shift_index)
+                      })
+
+                      // Double-shift worker IDs in this job
+                      const doubleShiftEmps: { empId: string; span: 'morning-afternoon' | 'afternoon-night' | 'night-morning' }[] = []
+                      const handledDoubleEmpIds = new Set<string>()
+
+                      empShiftMapInJob.forEach((shiftsSet, empId) => {
+                        if (shiftsSet.has(0) && shiftsSet.has(1)) {
+                          doubleShiftEmps.push({ empId, span: 'morning-afternoon' })
+                          handledDoubleEmpIds.add(empId)
+                        } else if (shiftsSet.has(1) && shiftsSet.has(2)) {
+                          doubleShiftEmps.push({ empId, span: 'afternoon-night' })
+                          handledDoubleEmpIds.add(empId)
+                        } else if (shiftsSet.has(2) && shiftsSet.has(0)) {
+                          doubleShiftEmps.push({ empId, span: 'night-morning' })
+                          handledDoubleEmpIds.add(empId)
+                        }
+                      })
+
+                      return (
+                        <div key={job.id} className={`vk-tpi-row ${isPaused ? 'row-paused' : ''} status-${quotaStatus}`}>
+                          {/* Left Column: Job Info */}
+                          <div className="vk-tpi-cell-info">
+                            <div className="vk-tpi-code-line">
+                              <span className="vk-tpi-code-tag">{job.code}</span>
+                              <span className="vk-tpi-dept-tag">{job.department}</span>
+                            </div>
+                            <div className="vk-tpi-desc">{job.description}</div>
+                            <div className="vk-tpi-quota-line">
+                              <span className="vk-tpi-quota-label">ยอดที่ต้องใช้:</span>
+                              <strong>{todayTarget}</strong> คน
+                              {renderQuotaBadge(quotaStatus, total, todayTarget)}
+                            </div>
+                          </div>
+
+                          {/* Right Side: 3-Shift Grid with 2-Column Spanning for Double Shifts */}
+                          <div className="vk-tpi-shifts-grid">
+                            {/* Prominent Shift Headers Row */}
+                            <div className="vk-tpi-shifts-row-header">
+                              {SHIFTS.map((shift, shiftIndex) => {
+                                const totalShiftCount = jobEntries.filter((e) => e.shift_index === shiftIndex).length
+                                const targetForShift = targets[shiftIndex]
+
+                                const isZero = targetForShift === 0 && totalShiftCount === 0
+                                const isMet = targetForShift > 0 && totalShiftCount >= targetForShift
+                                const statClass = isZero ? 'is-zero' : isMet ? 'is-met' : ''
+
+                                return (
+                                  <div key={shiftIndex} className="vk-tpi-shift-col-header">
+                                    <span className="vk-tpi-shift-col-title">กะ{shift.name}</span>
+                                    <span className={`vk-tpi-shift-col-stat ${statClass}`}>
+                                      {totalShiftCount}/{targetForShift}
+                                    </span>
+                                  </div>
+                                )
+                              })}
+                            </div>
+
+                            {/* Spanning 2-Column Double Shifts in this Job (Grouped & Sorted) */}
+                            {renderJobDoubleShifts(job.id, doubleShiftEmps)}
+
+                            {/* 3 Individual Shift Columns */}
+                            {SHIFTS.map((shift, shiftIndex) => {
+                              // Filter entries for this shift that are NOT part of a double-shift in this same job
+                              const singleShiftEntries = jobEntries.filter(
+                                (e) => e.shift_index === shiftIndex && !handledDoubleEmpIds.has(e.employee_id)
+                              )
+                              const totalShiftCount = jobEntries.filter((e) => e.shift_index === shiftIndex).length
+                              const canDrop = hasSelection && !isPaused
+
+                              return (
+                                <div
+                                  key={shiftIndex}
+                                  onClick={() => {
+                                    if (canDrop) handleAssignSelected(job.id, shiftIndex)
+                                  }}
+                                  className={`vk-tpi-cell-shift col-${shiftIndex} ${canDrop ? 'can-drop' : ''} ${isPaused ? 'cell-paused' : ''}`}
+                                  onDragOver={isPaused ? undefined : handleDragOver}
+                                  onDragLeave={isPaused ? undefined : handleDragLeave}
+                                  onDrop={isPaused ? undefined : (e) => handleDrop(e, job.id, shiftIndex)}
+                                >
+                                  <div className="vk-tpi-workers-stack">
+                                    {singleShiftEntries.map((entry) => {
+                                      const emp = empMap.get(entry.employee_id)
+                                      if (!emp) return null
+                                      const u = empUsageMap.get(emp.id)
+                                      const totalWorkerShifts = u?.count || 1
+
+                                      return (
+                                        <div
+                                          key={`${entry.employee_id}-${shiftIndex}`}
+                                          className="vk-tpi-worker-pill"
+                                          draggable={!isPaused}
+                                          onDragStart={(e) => handleDragStartFromCell(e, emp.id, job.id, shiftIndex)}
+                                          onClick={(e) => {
+                                            e.stopPropagation()
+                                            openEmployeeModal(emp)
+                                          }}
+                                          title="คลิกเพื่อจัดการกะ หรือเพิ่มกะที่ 2"
+                                        >
+                                          <div className="vk-tpi-worker-pill-main">
+                                            <div className="vk-tpi-worker-pill-line1">
+                                              <span className="vk-tpi-wp-name">{emp.first_name} {emp.last_name}</span>
+                                              {totalWorkerShifts > 1 && (
+                                                <span className="vk-tpi-wp-2shift" title="มีอีก 1 กะในรหัสงานอื่น">
+                                                  2 กะ
+                                                </span>
+                                              )}
+                                              {entry.is_half_shift && (
+                                                <span className="vk-tpi-wp-half" title="ทำงานครึ่งกะ (4 ชม.) ลาครึ่งวัน">
+                                                  ครึ่งกะ 4 ชม.
+                                                </span>
+                                              )}
+                                              {(Number(entry.ot_hours) || 0) > 0 && (
+                                                <span className="vk-tpi-wp-ot" title={emp.position === 'clerk' ? 'OT เสมียนเต็มกะ 8 ชม. (2 เท่า)' : `OT ${entry.ot_hours} ชม. (1.5 เท่า/ชม.)`}>
+                                                  {emp.position === 'clerk' ? 'OT 8 ชม. (2x)' : `OT ${entry.ot_hours} ชม. (1.5x)`}
+                                                </span>
+                                              )}
+                                            </div>
+                                            <div className="vk-tpi-worker-pill-line2">
+                                              <span className="vk-tpi-wp-code">{emp.employee_code}</span>
+                                            </div>
+                                          </div>
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation()
+                                              handleRemove(emp.id, job.id, shiftIndex)
+                                            }}
+                                            className="vk-tpi-btn-del"
+                                            title="ลบออกจากกะ"
+                                          >
+                                            <X style={{ width: 14, height: 14 }} />
+                                          </button>
+                                        </div>
+                                      )
+                                    })}
+
+                                    {canDrop && (
+                                      <div className="vk-tpi-drop-target">
+                                        + วาง {selectedPoolIds.size} คน ที่นี่
+                                      </div>
+                                    )}
+
+                                    {singleShiftEntries.length === 0 && totalShiftCount === 0 && !canDrop && (
+                                      <div className="vk-tpi-cell-empty">
+                                        {isPaused ? 'งดจัดกะ' : 'ว่าง'}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Section 2: ประเภทงานชั่วคราว (Temporary Jobs) */}
+            <div className="vk-tpi-group-section">
+              <div className="vk-tpi-group-banner banner-temp">
+                <div className="vk-tpi-banner-title">
+                  <h2>2. ประเภทงานชั่วคราว (Temporary Jobs)</h2>
+                  <span className="vk-tpi-banner-tag">เป้าหมายรวม: {tempTargetTotal} คน</span>
+                </div>
+                <div className="vk-tpi-banner-stat">
+                  จัดแล้ว: <strong>{entries.filter((e) => temporaryJobs.some((j) => j.id === e.job_id)).length}</strong> / {tempTargetTotal} คน
+                </div>
+              </div>
+
+              {temporaryGroups.map((group) => {
+                const deptTarget = group.jobs.reduce((sum, j) => {
+                  const t = getShiftTargets(j)
+                  return sum + t[0] + t[1] + t[2]
+                }, 0)
+                const deptAssigned = group.jobs.reduce((sum, j) => sum + usage(entries, j.id).total, 0)
+                const isDeptComplete = deptAssigned >= deptTarget && deptTarget > 0
+
+                return (
+                  <div key={group.department} className="vk-tpi-dept-block">
+                    <div className="vk-tpi-dept-bar">
+                      <span className="vk-tpi-dept-name">{group.department}</span>
+                      <span className="vk-tpi-dept-info">
+                        ยอดแผนก: <strong>{deptAssigned}/{deptTarget}</strong> คน
+                        <span className={`vk-tpi-dept-pill ${deptTarget === 0 && deptAssigned === 0 ? 'pill-zero' : isDeptComplete ? 'pill-done' : 'pill-pend'}`}>
+                          {deptTarget === 0 && deptAssigned === 0 ? '— ไม่ใช้วันนี้' : isDeptComplete ? '✓ ครบ' : `ขาดอีก ${Math.max(0, deptTarget - deptAssigned)}`}
+                        </span>
+                      </span>
+                    </div>
+
+                    {group.jobs.map((job) => {
+                      const { total } = usage(entries, job.id)
+                      const targets = getShiftTargets(job)
+                      const todayTarget = targets[0] + targets[1] + targets[2]
+                      const quotaStatus = getJobQuotaStatus(job, total, todayTarget)
+                      const isPaused = quotaStatus === 'paused'
+
+                      // Check for employees doing double shifts in this exact same job
+                      const jobEntries = entries.filter((e) => e.job_id === job.id)
+                      const empShiftMapInJob = new Map<string, Set<number>>()
+                      jobEntries.forEach((e) => {
+                        if (!empShiftMapInJob.has(e.employee_id)) empShiftMapInJob.set(e.employee_id, new Set())
+                        empShiftMapInJob.get(e.employee_id)!.add(e.shift_index)
+                      })
+
+                      const doubleShiftEmps: { empId: string; span: 'morning-afternoon' | 'afternoon-night' | 'night-morning' }[] = []
+                      const handledDoubleEmpIds = new Set<string>()
+
+                      empShiftMapInJob.forEach((shiftsSet, empId) => {
+                        if (shiftsSet.has(0) && shiftsSet.has(1)) {
+                          doubleShiftEmps.push({ empId, span: 'morning-afternoon' })
+                          handledDoubleEmpIds.add(empId)
+                        } else if (shiftsSet.has(1) && shiftsSet.has(2)) {
+                          doubleShiftEmps.push({ empId, span: 'afternoon-night' })
+                          handledDoubleEmpIds.add(empId)
+                        } else if (shiftsSet.has(2) && shiftsSet.has(0)) {
+                          doubleShiftEmps.push({ empId, span: 'night-morning' })
+                          handledDoubleEmpIds.add(empId)
+                        }
+                      })
+
+                      return (
+                        <div key={job.id} className={`vk-tpi-row ${isPaused ? 'row-paused' : ''} status-${quotaStatus}`}>
+                          {/* Left Column: Job Info */}
+                          <div className="vk-tpi-cell-info">
+                            <div className="vk-tpi-code-line">
+                              <span className="vk-tpi-code-tag">{job.code}</span>
+                              <span className="vk-tpi-dept-tag">{job.department}</span>
+                              {job.expires_on && (
+                                <span className="vk-tpi-exp-tag">ถึง {formatThaiBuddhistDate(job.expires_on)}</span>
+                              )}
+                            </div>
+                            <div className="vk-tpi-desc">{job.description}</div>
+                            <div className="vk-tpi-quota-line">
+                              <span className="vk-tpi-quota-label">ยอดที่ต้องใช้:</span>
+                              <strong>{todayTarget}</strong> คน
+                              {renderQuotaBadge(quotaStatus, total, todayTarget)}
+                            </div>
+                          </div>
+
+                          {/* Right Side: 3-Shift Grid with 2-Column Spanning for Double Shifts */}
+                          <div className="vk-tpi-shifts-grid">
+                            {/* Prominent Shift Headers Row */}
+                            <div className="vk-tpi-shifts-row-header">
+                              {SHIFTS.map((shift, shiftIndex) => {
+                                const totalShiftCount = jobEntries.filter((e) => e.shift_index === shiftIndex).length
+                                const targetForShift = targets[shiftIndex]
+
+                                const isZero = targetForShift === 0 && totalShiftCount === 0
+                                const isMet = targetForShift > 0 && totalShiftCount >= targetForShift
+                                const statClass = isZero ? 'is-zero' : isMet ? 'is-met' : ''
+
+                                return (
+                                  <div key={shiftIndex} className="vk-tpi-shift-col-header">
+                                    <span className="vk-tpi-shift-col-title">กะ{shift.name}</span>
+                                    <span className={`vk-tpi-shift-col-stat ${statClass}`}>
+                                      {totalShiftCount}/{targetForShift}
+                                    </span>
+                                  </div>
+                                )
+                              })}
+                            </div>
+
+                            {/* Spanning 2-Column Double Shifts in this Job (Grouped & Sorted) */}
+                            {renderJobDoubleShifts(job.id, doubleShiftEmps)}
+
+                            {/* 3 Individual Shift Columns */}
+                            {SHIFTS.map((shift, shiftIndex) => {
+                              const singleShiftEntries = jobEntries.filter(
+                                (e) => e.shift_index === shiftIndex && !handledDoubleEmpIds.has(e.employee_id)
+                              )
+                              const totalShiftCount = jobEntries.filter((e) => e.shift_index === shiftIndex).length
+                              const canDrop = hasSelection && !isPaused
+
+                              return (
+                                <div
+                                  key={shiftIndex}
+                                  onClick={() => {
+                                    if (canDrop) handleAssignSelected(job.id, shiftIndex)
+                                  }}
+                                  className={`vk-tpi-cell-shift col-${shiftIndex} ${canDrop ? 'can-drop' : ''} ${isPaused ? 'cell-paused' : ''}`}
+                                  onDragOver={isPaused ? undefined : handleDragOver}
+                                  onDragLeave={isPaused ? undefined : handleDragLeave}
+                                  onDrop={isPaused ? undefined : (e) => handleDrop(e, job.id, shiftIndex)}
+                                >
+                                  <div className="vk-tpi-workers-stack">
+                                    {singleShiftEntries.map((entry) => {
+                                      const emp = empMap.get(entry.employee_id)
+                                      if (!emp) return null
+                                      const u = empUsageMap.get(emp.id)
+                                      const totalWorkerShifts = u?.count || 1
+
+                                      return (
+                                        <div
+                                          key={`${entry.employee_id}-${shiftIndex}`}
+                                          className="vk-tpi-worker-pill"
+                                          draggable={!isPaused}
+                                          onDragStart={(e) => handleDragStartFromCell(e, emp.id, job.id, shiftIndex)}
+                                          onClick={(e) => {
+                                            e.stopPropagation()
+                                            openEmployeeModal(emp)
+                                          }}
+                                          title="คลิกเพื่อจัดการกะ หรือเพิ่มกะที่ 2"
+                                        >
+                                          <div className="vk-tpi-worker-pill-main">
+                                            <div className="vk-tpi-worker-pill-line1">
+                                              <span className="vk-tpi-wp-name">{emp.first_name} {emp.last_name}</span>
+                                              {totalWorkerShifts > 1 && (
+                                                <span className="vk-tpi-wp-2shift" title="มีอีก 1 กะในรหัสงานอื่น">
+                                                  2 กะ
+                                                </span>
+                                              )}
+                                              {entry.is_half_shift && (
+                                                <span className="vk-tpi-wp-half" title="ทำงานครึ่งกะ (4 ชม.) ลาครึ่งวัน">
+                                                  ครึ่งกะ 4 ชม.
+                                                </span>
+                                              )}
+                                              {(Number(entry.ot_hours) || 0) > 0 && (
+                                                <span className="vk-tpi-wp-ot" title={emp.position === 'clerk' ? 'OT เสมียนเต็มกะ 8 ชม. (2 เท่า)' : `OT ${entry.ot_hours} ชม. (1.5 เท่า/ชม.)`}>
+                                                  {emp.position === 'clerk' ? 'OT 8 ชม. (2x)' : `OT ${entry.ot_hours} ชม. (1.5x)`}
+                                                </span>
+                                              )}
+                                            </div>
+                                            <div className="vk-tpi-worker-pill-line2">
+                                              <span className="vk-tpi-wp-code">{emp.employee_code}</span>
+                                            </div>
+                                          </div>
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation()
+                                              handleRemove(emp.id, job.id, shiftIndex)
+                                            }}
+                                            className="vk-tpi-btn-del"
+                                            title="ลบออกจากกะ"
+                                          >
+                                            <X style={{ width: 14, height: 14 }} />
+                                          </button>
+                                        </div>
+                                      )
+                                    })}
+
+                                    {canDrop && (
+                                      <div className="vk-tpi-drop-target">
+                                        + วาง {selectedPoolIds.size} คน ที่นี่
+                                      </div>
+                                    )}
+
+                                    {singleShiftEntries.length === 0 && totalShiftCount === 0 && !canDrop && (
+                                      <div className="vk-tpi-cell-empty">
+                                        {isPaused ? 'งดจัดกะ' : 'ว่าง'}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 5. Employee Shift Modal (Clicking on worker card to manage 1 or 2 consecutive shifts) */}
+      {modalEmp && (() => {
+        const modalIsClerk = modalEmp.position === 'clerk'
+        const modalJob1 = jobs.find((j) => j.id === modalShift1JobId)
+        const modalJob2 = jobs.find((j) => j.id === modalShift2JobId)
+        const modalTier = wageTier(
+          wageProfiles.find((p) => p.employee_id === modalEmp.id),
+          activeDateStr
+        )
+        const modalBaseRate1 =
+          modalTier === 'skilled' && modalJob1?.skilled_rate
+            ? modalJob1.skilled_rate
+            : modalJob1?.normal_rate || 357
+        const modalBaseRate2 =
+          modalTier === 'skilled' && modalJob2?.skilled_rate
+            ? modalJob2.skilled_rate
+            : modalJob2?.normal_rate || 357
+
+        const modalShift1Wage = modalShift1IsHalf ? modalBaseRate1 / 2 : modalBaseRate1
+        const modalShift1OtCalc = (!modalIsClerk && modalShift1HasOt)
+          ? calculateEntryOt(modalShift1OtHours, modalBaseRate1, modalIsClerk)
+          : { ot_hours: 0, ot_pay: 0 }
+
+        const modalShift2Wage = modalShift2IsHalf ? modalBaseRate2 / 2 : modalBaseRate2
+        const modalShift2OtCalc = modalShift2HasOt
+          ? calculateEntryOt(modalShift2OtHours, modalBaseRate2, modalIsClerk)
+          : { ot_hours: 0, ot_pay: 0 }
+
+        return (
+          <div className="vk-modal-backdrop" onClick={() => setModalEmp(null)}>
+            <div className="vk-modal-window" onClick={(e) => e.stopPropagation()}>
+              <div className="vk-modal-top">
+                <div className="vk-modal-header-info">
+                  <h3 className="vk-modal-emp-title">
+                    {modalEmp.first_name} {modalEmp.last_name}
+                  </h3>
+                  <div className="vk-modal-emp-meta">
+                    <span className="vk-meta-code">{modalEmp.employee_code}</span>
+                    {modalEmp.nationality && <span className="vk-meta-nat">{modalEmp.nationality}</span>}
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        padding: '2px 8px',
+                        borderRadius: 999,
+                        background: modalIsClerk ? 'rgba(177,71,41,0.12)' : 'var(--vk-bone-2)',
+                        color: modalIsClerk ? 'var(--vk-persimmon)' : 'var(--vk-ink-2)',
+                      }}
+                    >
+                      {modalIsClerk ? 'พนักงานกลุ่มเสมียน' : 'พนักงานทั่วไป'}
+                    </span>
+                  </div>
+
+                </div>
+                <button
+                  type="button"
+                  className="vk-modal-close-btn"
+                  onClick={() => setModalEmp(null)}
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="vk-modal-content">
+                {/* Quick Consecutive Presets */}
+                <div className="vk-modal-presets-section">
+                  <span className="vk-presets-label">ทางลัดจัด 2 กะต่อเนื่อง (ควบกะ):</span>
+                  <div className="vk-presets-btns">
+                    <button
+                      type="button"
+                      className="vk-preset-chip"
+                      onClick={() => {
+                        setModalShift1Index(0)
+                        setModalHasShift2(true)
+                        if (!modalShift2JobId) setModalShift2JobId(modalShift1JobId)
+                      }}
+                    >
+                      เช้า + บ่าย (07:40–00:00)
+                    </button>
+                    <button
+                      type="button"
+                      className="vk-preset-chip"
+                      onClick={() => {
+                        setModalShift1Index(1)
+                        setModalHasShift2(true)
+                        setModalShift2Index(2)
+                        if (!modalShift2JobId) setModalShift2JobId(modalShift1JobId)
+                      }}
+                    >
+                      บ่าย + ดึก (15:40–08:00)
+                    </button>
+                    <button
+                      type="button"
+                      className="vk-preset-chip"
+                      onClick={() => {
+                        setModalShift1Index(2)
+                        setModalHasShift2(true)
+                        setModalShift2Index(0)
+                        if (!modalShift2JobId) setModalShift2JobId(modalShift1JobId)
+                      }}
+                    >
+                      ดึก + เช้า (23:40–16:00)
+                    </button>
+                    <button
+                      type="button"
+                      className="vk-preset-chip"
+                      onClick={() => {
+                        setModalShift1Index(0)
+                        setModalHasShift2(true)
+                        setModalShift2Index(2)
+                        if (!modalShift2JobId) setModalShift2JobId(modalShift1JobId)
+                      }}
+                    >
+                      เช้า + ดึก (เว้นบ่าย)
+                    </button>
+                  </div>
+                </div>
+
+                {/* Shift 1 Configuration */}
+                <div className="vk-shift-config-card">
+                  <div className="vk-shift-card-head">
+                    <span className="vk-shift-card-num">กะที่ 1 (Shift 1)</span>
+                    <span className="vk-shift-card-tag">จำเป็น</span>
+                  </div>
+                  <div className="vk-shift-config-grid">
+                    <div className="vk-field-group">
+                      <label>รหัสงาน:</label>
+                      <select
+                        className="vk-modal-select"
+                        value={modalShift1JobId}
+                        onChange={(e) => setModalShift1JobId(e.target.value)}
+                      >
+                        <optgroup label="1. ประเภทงานประจำ">
+                          {regularJobs.map((j) => (
+                            <option key={j.id} value={j.id}>
+                              {j.code} - {j.description.substring(0, 32)}...
+                            </option>
+                          ))}
+                        </optgroup>
+                        <optgroup label="2. ประเภทงานชั่วคราว">
+                          {temporaryJobs.map((j) => (
+                            <option key={j.id} value={j.id}>
+                              {j.code} - {j.description.substring(0, 32)}...
+                            </option>
+                          ))}
+                        </optgroup>
+                      </select>
+                    </div>
+
+                    <div className="vk-field-group">
+                      <label>ช่วงเวลากะ:</label>
+                      <select
+                        className="vk-modal-select"
+                        value={modalShift1Index}
+                        onChange={(e) => {
+                          const newIdx = Number(e.target.value)
+                          setModalShift1Index(newIdx)
+                          if (modalShift2Index === newIdx) {
+                            setModalShift2Index((newIdx + 1) % 3)
+                          }
+                        }}
+                      >
+                        {SHIFTS.map((s, idx) => (
+                          <option key={idx} value={idx}>
+                            กะ{s.name} ({s.time})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Half-Shift / Leave Option */}
+                  <div
+                    style={{
+                      marginTop: 10,
+                      padding: '8px 12px',
+                      background: modalShift1IsHalf ? '#fef3c7' : '#f8fafc',
+                      border: `1px solid ${modalShift1IsHalf ? '#f59e0b' : '#e2e8f0'}`,
+                      borderRadius: 6,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                    }}
+                  >
+                    <label
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        cursor: 'pointer',
+                        userSelect: 'none',
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: modalShift1IsHalf ? '#92400e' : 'var(--vk-ink-2)',
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={modalShift1IsHalf}
+                        onChange={(e) => setModalShift1IsHalf(e.target.checked)}
+                        style={{ accentColor: '#d97706', width: 15, height: 15 }}
+                      />
+                      <span>ทำงานครึ่งกะ / ลาครึ่งวัน (4 ชม.)</span>
+                    </label>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: modalShift1IsHalf ? '#b45309' : '#64748b',
+                      }}
+                    >
+                      {modalShift1IsHalf ? 'คิดค่าแรง 50% (4 ชม.)' : 'เต็มกะ (8 ชม.)'}
+                    </span>
+                  </div>
+
+                  {/* OT Section for Shift 1 — Hidden for clerks (Clerks must work 8h Shift 1; OT is only allowed in Shift 2) */}
+                  {!modalIsClerk && (
+                    <div
+                      style={{
+                        marginTop: 10,
+                        padding: '10px 12px',
+                        background: modalShift1HasOt ? '#fff7ed' : '#f8fafc',
+                        border: `1px solid ${modalShift1HasOt ? '#f97316' : '#e2e8f0'}`,
+                        borderRadius: 6,
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
+                        <label
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8,
+                            cursor: 'pointer',
+                            userSelect: 'none',
+                            fontSize: 12,
+                            fontWeight: 600,
+                            color: modalShift1HasOt ? '#9a3412' : 'var(--vk-ink-2)',
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={modalShift1HasOt}
+                            onChange={(e) => {
+                              setModalShift1HasOt(e.target.checked)
+                              if (e.target.checked && modalShift1OtHours <= 0) {
+                                setModalShift1OtHours(1)
+                              }
+                            }}
+                            style={{ accentColor: '#ea580c', width: 15, height: 15 }}
+                          />
+                          <span>OT (จ่าย 1.5 เท่าต่อชั่วโมง)</span>
+                        </label>
+                        {modalShift1HasOt && (
+                          <span style={{ fontSize: 12, fontWeight: 700, color: '#c2410c' }}>
+                            +฿{modalShift1OtCalc.ot_pay.toFixed(2)}
+                          </span>
+                        )}
+                      </div>
+
+                      {modalShift1HasOt && (
+                        <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed #fed7aa' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: 11, color: '#9a3412', fontWeight: 600 }}>จำนวนชั่วโมง OT:</span>
+                              {[1, 2, 3, 4].map((h) => (
+                                <button
+                                  key={h}
+                                  type="button"
+                                  onClick={() => setModalShift1OtHours(h)}
+                                  style={{
+                                    fontSize: 11,
+                                    fontWeight: modalShift1OtHours === h ? 700 : 500,
+                                    padding: '2px 8px',
+                                    borderRadius: 4,
+                                    border: `1px solid ${modalShift1OtHours === h ? '#ea580c' : '#fdba74'}`,
+                                    background: modalShift1OtHours === h ? '#ea580c' : '#ffffff',
+                                    color: modalShift1OtHours === h ? '#ffffff' : '#9a3412',
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  {h} ชม.
+                                </button>
+                              ))}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                                <input
+                                  type="number"
+                                  min={0.5}
+                                  max={12}
+                                  step={0.5}
+                                  value={modalShift1OtHours}
+                                  onChange={(e) => setModalShift1OtHours(Math.max(0, Number(e.target.value)))}
+                                  style={{
+                                    width: 48,
+                                    height: 24,
+                                    fontSize: 11,
+                                    textAlign: 'center',
+                                    borderRadius: 4,
+                                    border: '1px solid #fdba74',
+                                    padding: '0 4px',
+                                  }}
+                                />
+                                <span style={{ fontSize: 11, color: '#9a3412' }}>ชม.</span>
+                              </div>
+                            </div>
+                            <div style={{ fontSize: 11, color: '#c2410c' }}>
+                              (อัตรา (฿{modalBaseRate1}/8 × 1.5) = ฿{(modalBaseRate1 / 8 * 1.5).toFixed(2)}/ชม.)
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {modalShift1HasOt && (
+                        <div style={{ marginTop: 6, fontSize: 11, color: '#9a3412', background: 'rgba(254, 215, 170, 0.4)', padding: '4px 8px', borderRadius: 4 }}>
+                          <span>ค่าแรงกะ ฿{modalShift1Wage.toFixed(2)} + OT {modalShift1OtHours} ชม. ฿{modalShift1OtCalc.ot_pay.toFixed(2)} = <strong>รวม ฿{(modalShift1Wage + modalShift1OtCalc.ot_pay).toFixed(2)}</strong></span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Shift 2 (Optional Double Shift) Configuration — hidden when Shift 1 is half-shift */}
+                {!modalShift1IsHalf && (
+                <div className={`vk-shift-config-card ${modalHasShift2 ? 'is-active' : 'is-disabled'}`}>
+                  <div className="vk-shift-card-head">
+                    <label className="vk-shift2-toggle-label">
+                      <input
+                        type="checkbox"
+                        checked={modalHasShift2}
+                        onChange={(e) => {
+                          setModalHasShift2(e.target.checked)
+                          if (e.target.checked) {
+                            if (!modalShift2JobId) setModalShift2JobId(modalShift1JobId)
+                            if (modalShift2Index === modalShift1Index) {
+                              setModalShift2Index((modalShift1Index + 1) % 3)
+                            }
+                          }
+                        }}
+                      />
+                      <span className="vk-shift-card-num">กะที่ 2 (Shift 2 — ควบ 2 กะ)</span>
+                    </label>
+                    {modalHasShift2 ? (
+                      <span className="vk-shift-badge-active">เปิดทำงาน 2 กะ</span>
+                    ) : (
+                      <span className="vk-shift-badge-off">ยังไม่เปิด</span>
+                    )}
+                  </div>
+
+                  {modalHasShift2 && (
+                    <>
+                      <div className="vk-shift-config-grid">
+                        <div className="vk-field-group">
+                          <label>รหัสงานกะที่ 2:</label>
+                          <select
+                            className="vk-modal-select"
+                            value={modalShift2JobId}
+                            onChange={(e) => setModalShift2JobId(e.target.value)}
+                          >
+                            <optgroup label="1. ประเภทงานประจำ">
+                              {regularJobs.map((j) => (
+                                <option key={j.id} value={j.id}>
+                                  {j.code} - {j.description.substring(0, 32)}...
+                                </option>
+                              ))}
+                            </optgroup>
+                            <optgroup label="2. ประเภทงานชั่วคราว">
+                              {temporaryJobs.map((j) => (
+                                <option key={j.id} value={j.id}>
+                                  {j.code} - {j.description.substring(0, 32)}...
+                                </option>
+                              ))}
+                            </optgroup>
+                          </select>
+                        </div>
+
+                        <div className="vk-field-group">
+                          <label>ช่วงเวลากะที่ 2:</label>
+                          <select
+                            className="vk-modal-select"
+                            value={modalShift2Index}
+                            onChange={(e) => setModalShift2Index(Number(e.target.value))}
+                          >
+                            {SHIFTS.map((s, idx) => (
+                              <option key={idx} value={idx} disabled={idx === modalShift1Index}>
+                                กะ{s.name} ({s.time}){idx === modalShift1Index ? ' (ซ้ำกับกะที่ 1)' : ''}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* Half-Shift / Leave Option for Shift 2 */}
+                      <div
+                        style={{
+                          marginTop: 10,
+                          padding: '8px 12px',
+                          background: modalShift2IsHalf ? '#fef3c7' : '#f8fafc',
+                          border: `1px solid ${modalShift2IsHalf ? '#f59e0b' : '#e2e8f0'}`,
+                          borderRadius: 6,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                        }}
+                      >
+                        <label
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8,
+                            cursor: 'pointer',
+                            userSelect: 'none',
+                            fontSize: 12,
+                            fontWeight: 600,
+                            color: modalShift2IsHalf ? '#92400e' : 'var(--vk-ink-2)',
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={modalShift2IsHalf}
+                            onChange={(e) => setModalShift2IsHalf(e.target.checked)}
+                            style={{ accentColor: '#d97706', width: 15, height: 15 }}
+                          />
+                          <span>ทำงานครึ่งกะ / ลาครึ่งวัน (4 ชม.)</span>
+                        </label>
+                        <span
+                          style={{
+                            fontSize: 11,
+                            fontWeight: 700,
+                            color: modalShift2IsHalf ? '#b45309' : '#64748b',
+                          }}
+                        >
+                          {modalShift2IsHalf ? 'คิดค่าแรง 50% (4 ชม.)' : 'เต็มกะ (8 ชม.)'}
+                        </span>
+                      </div>
+
+                      {/* OT Section for Shift 2 */}
+                      <div
+                        style={{
+                          marginTop: 10,
+                          padding: '10px 12px',
+                          background: modalShift2HasOt ? '#fff7ed' : '#f8fafc',
+                          border: `1px solid ${modalShift2HasOt ? '#f97316' : '#e2e8f0'}`,
+                          borderRadius: 6,
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
+                          <label
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 8,
+                              cursor: 'pointer',
+                              userSelect: 'none',
+                              fontSize: 12,
+                              fontWeight: 600,
+                              color: modalShift2HasOt ? '#9a3412' : 'var(--vk-ink-2)',
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={modalShift2HasOt}
+                              onChange={(e) => {
+                                setModalShift2HasOt(e.target.checked)
+                                if (e.target.checked && modalShift2OtHours <= 0) {
+                                  setModalShift2OtHours(modalIsClerk ? 8 : 1)
+                                }
+                              }}
+                              style={{ accentColor: '#ea580c', width: 15, height: 15 }}
+                            />
+                            <span>
+                              {modalIsClerk ? 'ทำ OT เต็มกะ (8 ชม.) — ได้รับเงิน 2 เท่าจากค่าแรง' : 'OT (จ่าย 1.5 เท่าต่อชั่วโมง)'}
+                            </span>
+                          </label>
+                          {modalShift2HasOt && (
+                            <span style={{ fontSize: 12, fontWeight: 700, color: '#c2410c' }}>
+                              +฿{modalShift2OtCalc.ot_pay.toFixed(2)}
+                            </span>
+                          )}
+                        </div>
+
+                        {modalShift2HasOt && !modalIsClerk && (
+                          <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed #fed7aa' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+                                <span style={{ fontSize: 11, color: '#9a3412', fontWeight: 600 }}>จำนวนชั่วโมง OT:</span>
+                                {[1, 2, 3, 4].map((h) => (
+                                  <button
+                                    key={h}
+                                    type="button"
+                                    onClick={() => setModalShift2OtHours(h)}
+                                    style={{
+                                      fontSize: 11,
+                                      fontWeight: modalShift2OtHours === h ? 700 : 500,
+                                      padding: '2px 8px',
+                                      borderRadius: 4,
+                                      border: `1px solid ${modalShift2OtHours === h ? '#ea580c' : '#fdba74'}`,
+                                      background: modalShift2OtHours === h ? '#ea580c' : '#ffffff',
+                                      color: modalShift2OtHours === h ? '#ffffff' : '#9a3412',
+                                      cursor: 'pointer',
+                                    }}
+                                  >
+                                    {h} ชม.
+                                  </button>
+                                ))}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                                  <input
+                                    type="number"
+                                    min={0.5}
+                                    max={12}
+                                    step={0.5}
+                                    value={modalShift2OtHours}
+                                    onChange={(e) => setModalShift2OtHours(Math.max(0, Number(e.target.value)))}
+                                    style={{
+                                      width: 48,
+                                      height: 24,
+                                      fontSize: 11,
+                                      textAlign: 'center',
+                                      borderRadius: 4,
+                                      border: '1px solid #fdba74',
+                                      padding: '0 4px',
+                                    }}
+                                  />
+                                  <span style={{ fontSize: 11, color: '#9a3412' }}>ชม.</span>
+                                </div>
+                              </div>
+                              <div style={{ fontSize: 11, color: '#c2410c' }}>
+                                (อัตรา (฿{modalBaseRate2}/8 × 1.5) = ฿{(modalBaseRate2 / 8 * 1.5).toFixed(2)}/ชม.)
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {modalShift2HasOt && (
+                          <div style={{ marginTop: 6, fontSize: 11, color: '#9a3412', background: 'rgba(254, 215, 170, 0.4)', padding: '4px 8px', borderRadius: 4 }}>
+                            {modalIsClerk ? (
+                              <span>OT เสมียนเต็มกะ 8 ชม. (จ่าย 2 เท่า): <strong>฿{modalShift2OtCalc.ot_pay.toFixed(2)}</strong> <span style={{ fontSize: 10, color: '#b45309', marginLeft: 4 }}>(คิดเป็น OT 2 เท่า และไม่นำไปรวมกับค่ากะซ้ำซ้อน)</span></span>
+                            ) : (
+                              <span>ค่าแรงกะ ฿{modalShift2Wage.toFixed(2)} + OT {modalShift2OtHours} ชม. ฿{modalShift2OtCalc.ot_pay.toFixed(2)} = <strong>รวม ฿{(modalShift2Wage + modalShift2OtCalc.ot_pay).toFixed(2)}</strong></span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+                )} {/* end !modalShift1IsHalf */}
+              </div>
+
+              {/* Modal Bottom Actions */}
+              <div className="vk-modal-bottom-actions">
+                <button
+                  type="button"
+                  className="vk-btn vk-btn-danger-outline"
+                  onClick={handleClearModalShifts}
+                >
+                  <Trash2 style={{ width: 14, height: 14 }} />
+                  ลบกะทั้งหมดของคนนี้
+                </button>
+
+                <div className="vk-modal-bottom-right">
+                  <button
+                    type="button"
+                    className="vk-btn vk-btn-secondary"
+                    onClick={() => setModalEmp(null)}
+                  >
+                    ยกเลิก
+                  </button>
+                  <button
+                    type="button"
+                    className="vk-btn vk-btn-primary"
+                    onClick={handleSaveModalShifts}
+                  >
+                    <Plus style={{ width: 14, height: 14 }} />
+                    บันทึกการจัดกะ ({modalHasShift2 ? '2 กะ' : '1 กะ'})
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* ── Daily Job Requirements Modal (Step 1: Admin Paper Entry) ── */}
+      {isTargetModalOpen && (
+        <div className="vk-modal-backdrop" onClick={() => setIsTargetModalOpen(false)}>
+          <div
+            className="vk-targets-modal-container"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="vk-modal-header">
+              <div className="vk-modal-header-left">
+                <div className="vk-modal-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Briefcase style={{ width: 18, height: 18, color: 'var(--vk-persimmon)' }} />
+                  กำหนดความต้องการแรงงานประจำวัน (Daily Job Requirements)
+                </div>
+                <div className="vk-modal-subtitle">
+                  วันที่: <strong>{fmtDisplay(activeDateStr)}</strong> · กรอกจำนวนแรงงานที่ต้องการแยกรายกะตามเอกสารรายวัน (เฉพาะรหัสงานที่เปิดใช้งาน)
+                </div>
+              </div>
+              <button
+                type="button"
+                className="vk-modal-btn-close"
+                onClick={() => setIsTargetModalOpen(false)}
+                title="ปิดหน้าต่าง"
+              >
+                <X style={{ width: 20, height: 20 }} />
+              </button>
+            </div>
+
+            {/* Modal Summary Bar & Quick Tools */}
+            <div className="vk-targets-summary-bar">
+              <div className="vk-targets-pills-wrap">
+                <div className="vk-target-pill">
+                  งานประจำ: <strong>{modalRegularTotal}</strong> คน
+                </div>
+                <div className="vk-target-pill">
+                  งานชั่วคราว: <strong>{modalTempTotal}</strong> คน
+                </div>
+                <div className="vk-target-pill" style={{ background: '#fef3c7', borderColor: '#fde68a' }}>
+                  รวมความต้องการวันนี้: <strong style={{ fontSize: 14 }}>{modalGrandTotal}</strong> คน
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ position: 'relative' }}>
+                  <Search style={{ position: 'absolute', left: 8, top: 7, width: 14, height: 14, color: 'var(--vk-ink-3)' }} />
+                  <input
+                    type="text"
+                    placeholder="ค้นหารหัสงาน / แผนก..."
+                    value={targetModalSearch}
+                    onChange={(e) => setTargetModalSearch(e.target.value)}
+                    className="vk-input"
+                    style={{ height: 28, fontSize: 12, paddingLeft: 26, width: 180 }}
+                  />
+                </div>
+                <button
+                  type="button"
+                  className="vk-btn vk-btn-secondary"
+                  style={{ height: 28, padding: '0 8px', fontSize: 11 }}
+                  onClick={handleFillDefaultQuotas}
+                  title="เติมยอดกะเช้าตามยอดเต็มมาตรฐานของรหัสงาน"
+                >
+                  เติมตามยอดเต็มปกติ
+                </button>
+                <button
+                  type="button"
+                  className="vk-btn vk-btn-secondary"
+                  style={{ height: 28, padding: '0 8px', fontSize: 11 }}
+                  onClick={handleClearAllModalTargets}
+                  title="รีเซ็ตยอดทุกกะเป็น 0"
+                >
+                  ล้างเป็น 0 ทั้งหมด
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Table Area */}
+            <div className="vk-target-table-wrap">
+              <table className="vk-targets-table">
+                <thead>
+                  <tr>
+                    <th style={{ width: 85 }}>รหัสงาน</th>
+                    <th style={{ width: 130 }}>แผนก / ฝ่าย</th>
+                    <th>รายละเอียดงาน</th>
+                    <th style={{ width: 85, textAlign: 'center' }}>ประเภท</th>
+                    <th style={{ width: 85, textAlign: 'center' }}>ยอดเต็มปกติ</th>
+                    <th style={{ width: 85, textAlign: 'center', background: '#25201b' }}>กะเช้า (A)</th>
+                    <th style={{ width: 85, textAlign: 'center', background: '#25201b' }}>กะบ่าย (B)</th>
+                    <th style={{ width: 85, textAlign: 'center', background: '#25201b' }}>กะดึก (C)</th>
+                    <th style={{ width: 90, textAlign: 'center' }}>รวมวันนี้</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredModalJobs.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} style={{ padding: '30px', textAlign: 'center', color: 'var(--vk-ink-3)' }}>
+                        ไม่พบรหัสงานที่ตรงกับการค้นหา
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredModalJobs.map((job) => {
+                      const targets = tempDailyTargets[job.id] || [0, 0, 0]
+                      const todaySum = targets[0] + targets[1] + targets[2]
+                      const isZero = todaySum === 0
+
+                      return (
+                        <tr key={job.id} style={{ background: isZero ? '#fafafa' : '#ffffff' }}>
+                          {/* รหัสงาน */}
+                          <td style={{ fontWeight: 700, fontFamily: 'var(--vk-mono)' }}>
+                            <span className="vk-tpi-code-tag" style={{ fontSize: 11 }}>
+                              {job.code}
+                            </span>
+                          </td>
+
+                          {/* แผนก */}
+                          <td style={{ fontWeight: 600, color: 'var(--vk-ink)', fontSize: 12 }}>
+                            {job.department}
+                          </td>
+
+                          {/* รายละเอียด */}
+                          <td style={{ color: 'var(--vk-ink-2)', fontSize: 12 }}>
+                            {job.description}
+                          </td>
+
+                          {/* ประเภท */}
+                          <td style={{ textAlign: 'center' }}>
+                            <span
+                              style={{
+                                fontSize: 10,
+                                fontWeight: 700,
+                                padding: '2px 6px',
+                                borderRadius: 4,
+                                background: job.job_type === 'regular' ? '#fef3c7' : '#dbeafe',
+                                color: job.job_type === 'regular' ? '#92400e' : '#1e40af',
+                              }}
+                            >
+                              {job.job_type === 'regular' ? 'ประจำ' : 'ชั่วคราว'}
+                            </span>
+                          </td>
+
+                          {/* ยอดเต็ม */}
+                          <td style={{ textAlign: 'center', fontFamily: 'var(--vk-mono)', fontSize: 12, color: 'var(--vk-ink-3)' }}>
+                            {job.quota} คน
+                          </td>
+
+                          {/* Input กะเช้า */}
+                          <td style={{ textAlign: 'center' }}>
+                            <input
+                              type="number"
+                              min={0}
+                              step={1}
+                              className="vk-target-input-shift"
+                              value={targets[0] === 0 ? '' : targets[0]}
+                              placeholder="0"
+                              onChange={(e) => handleTempTargetChange(job.id, 0, e.target.value)}
+                            />
+                          </td>
+
+                          {/* Input กะบ่าย */}
+                          <td style={{ textAlign: 'center' }}>
+                            <input
+                              type="number"
+                              min={0}
+                              step={1}
+                              className="vk-target-input-shift"
+                              value={targets[1] === 0 ? '' : targets[1]}
+                              placeholder="0"
+                              onChange={(e) => handleTempTargetChange(job.id, 1, e.target.value)}
+                            />
+                          </td>
+
+                          {/* Input กะดึก */}
+                          <td style={{ textAlign: 'center' }}>
+                            <input
+                              type="number"
+                              min={0}
+                              step={1}
+                              className="vk-target-input-shift"
+                              value={targets[2] === 0 ? '' : targets[2]}
+                              placeholder="0"
+                              onChange={(e) => handleTempTargetChange(job.id, 2, e.target.value)}
+                            />
+                          </td>
+
+                          {/* รวมวันนี้ */}
+                          <td style={{ textAlign: 'center', fontFamily: 'var(--vk-mono)', fontWeight: 800, fontSize: 13, color: isZero ? 'var(--vk-ink-3)' : '#15803d' }}>
+                            {todaySum} คน
+                          </td>
+                        </tr>
+                      )
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="vk-modal-bottom-actions">
+              <button
+                type="button"
+                className="vk-btn vk-btn-secondary"
+                onClick={() => setIsTargetModalOpen(false)}
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                className="vk-btn vk-btn-primary"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                onClick={handleSaveDailyTargets}
+              >
+                <CheckSquare style={{ width: 14, height: 14 }} />
+                บันทึกและนำไปใช้ในการจัดกะ (รวม {modalGrandTotal} คน)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Daily Attendance Modal (Absent / Leave / Late) */}
+      <AttendanceModal
+        isOpen={isAttendanceModalOpen}
+        onClose={() => setIsAttendanceModalOpen(false)}
+        factoryId={user?.factory_id || ''}
+        workDate={activeDateStr}
+        employees={employees}
+        onChanged={() => {
+          refetchAttendance()
+        }}
+      />
+    </>
+  )
+}
+
+export default TpiShiftEntry

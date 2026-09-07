@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
@@ -7,11 +7,13 @@ import { TopBar } from '../components/layout/TopBar'
 import EmployeeFormModal from './EmployeeFormModal'
 import EmployeeImportModal from './EmployeeImportModal'
 import { Plus, Upload, Search, AlertCircle, UserX, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
+import { isTpiCompany } from '../features/tpi/model'
+import { formatEmployeeFullName, compareEmployeeCode } from '../lib/formatters'
 import '../styles/tokens.css'
 
 function fmtNationality(nationality: string | null) {
   if (!nationality || nationality === 'ไทย') return 'ไทย'
-  if (nationality === 'เมียนมา' || nationality.toLowerCase().includes('myanmar') || nationality.toLowerCase().includes('burma')) return 'เมียนมา/กะเหรี่ยง'
+  if (nationality === 'เมียนมา' || nationality.toLowerCase().includes('myanmar') || nationality.toLowerCase().includes('burma')) return 'เมียนมา'
   return nationality
 }
 
@@ -21,6 +23,11 @@ interface Employee {
   rate_per_12h: number; payment_method: string; bank_name: string | null
   bank_account: string | null; position: string | null; job_title: string | null
   data_complete: boolean
+  is_safety_officer?: boolean | null
+  has_position_allowance?: boolean | null
+  national_id?: string | null
+  social_security_number?: string | null
+  exempt_social_security?: boolean | null
 }
 
 type SortCol = 'employee_code' | 'name' | 'nationality' | 'rate' | 'position'
@@ -32,8 +39,27 @@ const POSITIONS: Record<string, string> = {
 
 export default function Employees() {
   const { onMenuClick } = useOutletContext<{ onMenuClick: () => void }>()
-  const { user } = useAppStore()
+  const { user, companyContext } = useAppStore()
   const queryClient = useQueryClient()
+
+  // Fetch factories list to reliably identify active factory name
+  const { data: factories = [] } = useQuery({
+    queryKey: ['factories-list'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('factories').select('id, name')
+      if (error) return []
+      return data || []
+    },
+    staleTime: 60000,
+  })
+
+  const currentFactoryName =
+    factories.find((f) => f.id === user?.factory_id)?.name ||
+    companyContext?.factoryName ||
+    companyContext?.name ||
+    ''
+
+  const isTpi = isTpiCompany(currentFactoryName)
 
   const [searchTerm, setSearchTerm] = useState('')
   const [showPendingOnly, setShowPendingOnly] = useState(false)
@@ -48,21 +74,45 @@ export default function Employees() {
     queryKey: ['employees-all', user?.factory_id],
     queryFn: async () => {
       const { data, error } = await supabase.from('employees')
-        .select('id,employee_code,first_name,last_name,prefix,nationality,status,rate_per_12h,payment_method,bank_name,bank_account,position,job_title,data_complete')
+        .select('id,employee_code,first_name,last_name,prefix,nationality,status,rate_per_12h,payment_method,bank_name,bank_account,position,job_title,data_complete,is_safety_officer,has_position_allowance,national_id,social_security_number,exempt_social_security')
         .eq('factory_id', user?.factory_id ?? '').order('employee_code')
-      if (error) throw error; return data
+      if (error) throw error
+      return (data || []).sort((a: any, b: any) => compareEmployeeCode(a.employee_code, b.employee_code))
     },
     enabled: !!user?.factory_id,
     staleTime: 0,
   })
+
+  // Query TPI Wage Profiles if in TPI factory
+  const { data: tpiProfiles = [] } = useQuery({
+    queryKey: ['tpi-profiles', user?.factory_id],
+    queryFn: async () => {
+      if (!user?.factory_id || !isTpi) return []
+      const { data, error } = await supabase
+        .from('tpi_employee_wage_profiles')
+        .select('*')
+        .eq('factory_id', user.factory_id)
+      if (error) return []
+      return data || []
+    },
+    enabled: !!user?.factory_id && isTpi,
+  })
+
+  const tpiProfileMap = useMemo(() => {
+    const map = new Map<string, { rate_tier: string; skilled_from: string | null }>()
+    for (const p of (tpiProfiles || [])) {
+      map.set(p.employee_id, { rate_tier: p.rate_tier, skilled_from: p.skilled_from })
+    }
+    return map
+  }, [tpiProfiles])
 
   const pendingCount  = employees.filter(e => e.data_complete === false).length
   const inactiveCount = employees.filter(e => e.status === 'inactive').length
 
   const filtered = employees.filter(emp => {
     const matchesSearch =
-      emp.employee_code.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      `${emp.first_name} ${emp.last_name}`.toLowerCase().includes(searchTerm.toLowerCase())
+      (emp.employee_code || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      `${emp.first_name || ''} ${emp.last_name || ''}`.toLowerCase().includes(searchTerm.toLowerCase())
     if (showPendingOnly)  return matchesSearch && emp.data_complete === false
     if (showInactiveOnly) return matchesSearch && emp.status === 'inactive'
     if (!searchTerm.trim() && emp.status === 'inactive') return false
@@ -70,9 +120,12 @@ export default function Employees() {
   })
 
   const sorted = [...filtered].sort((a, b) => {
+    if (sortCol === 'employee_code') {
+      const cmp = compareEmployeeCode(a.employee_code, b.employee_code)
+      return sortAsc ? cmp : -cmp
+    }
     let vA: string | number = '', vB: string | number = ''
-    if (sortCol === 'employee_code') { vA = a.employee_code; vB = b.employee_code }
-    else if (sortCol === 'name')     { vA = `${a.first_name} ${a.last_name}`; vB = `${b.first_name} ${b.last_name}` }
+    if (sortCol === 'name')     { vA = `${a.first_name} ${a.last_name}`; vB = `${b.first_name} ${b.last_name}` }
     else if (sortCol === 'nationality') { vA = a.nationality||''; vB = b.nationality||'' }
     else if (sortCol === 'rate')     { vA = Number(a.rate_per_12h); vB = Number(b.rate_per_12h) }
     else if (sortCol === 'position') { vA = a.position||''; vB = b.position||'' }
@@ -197,7 +250,7 @@ export default function Employees() {
                   { label: 'ตำแหน่ง',         col: null,                        align: 'left'  },
                   { label: 'สัญชาติ',         col: 'nationality'   as SortCol, align: 'left'  },
                   { label: 'วิธีรับเงิน',     col: null,                        align: 'left'  },
-                  { label: 'ค่าจ้าง/เงินเดือน', col: 'rate'        as SortCol, align: 'right' },
+                  { label: isTpi ? 'ประเภทค่าแรง' : 'ค่าจ้าง/เงินเดือน', col: isTpi ? null : ('rate' as SortCol), align: isTpi ? 'center' : 'right' },
                   { label: 'สถานะ',           col: null,                        align: 'right' },
                 ].map((h, i) => (
                   <th key={i}
@@ -228,12 +281,34 @@ export default function Employees() {
                     {emp.employee_code}
                   </td>
                   <td style={{ padding: '13px 14px', opacity: emp.status === 'inactive' ? 0.5 : 1 }}>
-                    <div style={{ fontWeight: 600, fontSize: 14 }}>{emp.prefix ? `${emp.prefix}` : ''}{emp.first_name} {emp.last_name}</div>
-                    {emp.data_complete === false && (
-                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 2, fontSize: 11, color: '#6F4A0E', background: 'var(--vk-marigold-tint)', padding: '1px 7px', borderRadius: 999 }}>
-                        <AlertCircle style={{ width: 10, height: 10 }} /> ข้อมูลไม่ครบ
-                      </div>
-                    )}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <span style={{ fontWeight: 600, fontSize: 14 }}>{formatEmployeeFullName(emp, isTpi)}</span>
+                      {emp.is_safety_officer && (
+                        <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 4, background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0' }} title="เจ้าหน้าที่ความปลอดภัย (จป.) +500/เดือน">
+                          จป.
+                        </span>
+                      )}
+                      {emp.has_position_allowance && (
+                        <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 4, background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe' }} title="มีค่าตำแหน่ง +1,000/เดือน">
+                          ค่าตำแหน่ง
+                        </span>
+                      )}
+                      {emp.nationality !== 'ไทย' && !emp.national_id && !emp.social_security_number ? (
+                        <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 4, background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa' }} title="ยังไม่มีเลข ปกส (ไม่หัก)">
+                          รอ ปกส
+                        </span>
+                      ) : null}
+                      {emp.exempt_social_security && (
+                        <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 4, background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1' }} title="ได้รับการยกเว้นไม่ต้องหักประกันสังคม">
+                          ยกเว้น ปกส
+                        </span>
+                      )}
+                      {emp.data_complete === false && (emp.nationality === 'ไทย' || emp.national_id || emp.social_security_number) && (
+                        <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 4, background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca' }} title="ข้อมูลพนักงานยังไม่สมบูรณ์">
+                          ข้อมูลไม่ครบ
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td style={{ padding: '13px 14px', fontSize: 13, color: 'var(--vk-ink-3)', opacity: emp.status === 'inactive' ? 0.5 : 1 }}>
                     {POSITIONS[emp.position ?? ''] || emp.position || '—'}
@@ -249,8 +324,20 @@ export default function Employees() {
                       ? <span><span style={{ fontWeight: 600 }}>{emp.bank_name || '—'}</span> <span style={{ fontFamily: 'var(--vk-mono)', fontSize: 12 }}>{emp.bank_account || ''}</span></span>
                       : 'เงินสด'}
                   </td>
-                  <td style={{ padding: '13px 14px', textAlign: 'right', fontFamily: 'var(--vk-mono)', fontSize: 14, fontVariantNumeric: 'tabular-nums', opacity: emp.status === 'inactive' ? 0.5 : 1 }}>
-                    {Number(emp.rate_per_12h).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                  <td style={{ padding: '13px 14px', textAlign: isTpi ? 'center' : 'right', fontFamily: isTpi ? 'inherit' : 'var(--vk-mono)', fontSize: 13, fontVariantNumeric: 'tabular-nums', opacity: emp.status === 'inactive' ? 0.5 : 1 }}>
+                    {isTpi ? (
+                      tpiProfileMap.get(emp.id)?.rate_tier === 'skilled' ? (
+                        <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: '#dcfce7', color: '#15803d' }}>
+                          ค่าแรงฝีมือ
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: '#fef3c7', color: '#92400e' }}>
+                          ค่าแรงปกติ
+                        </span>
+                      )
+                    ) : (
+                      Number(emp.rate_per_12h).toLocaleString('en-US', { minimumFractionDigits: 2 })
+                    )}
                   </td>
                   <td style={{ padding: '13px 14px', textAlign: 'right' }}>
                     <span className="vk-pill" data-tone={emp.status === 'active' ? 'approved' : 'draft'}>

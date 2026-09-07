@@ -58,22 +58,40 @@ export function useAuth() {
           setCompanyContext(null);
           return;
         }
+        let activeFactoryId = profile.factory_id;
+        let activeFactoryObj = profile.factories;
+
+        if (profile.role === 'superUser') {
+          const savedFactoryId = localStorage.getItem('virankorn_active_factory_id');
+          if (savedFactoryId && savedFactoryId !== profile.factory_id) {
+            const { data: factoryData } = await supabase
+              .from('factories')
+              .select('id, name, companies(id, name, short_name, company_type)')
+              .eq('id', savedFactoryId)
+              .single();
+
+            if (factoryData) {
+              activeFactoryId = factoryData.id;
+              activeFactoryObj = factoryData as any;
+            }
+          }
+        }
+
         setCompanyContext(null);
         setUser({
           id: profile.id,
           role: profile.role,
-          factory_id: profile.factory_id,
+          factory_id: activeFactoryId,
           full_name: profile.full_name || session.user.email
         });
 
-        const factory = profile.factories;
-        if (factory?.companies) {
-          const company = Array.isArray(factory.companies) ? factory.companies[0] : factory.companies;
+        if (activeFactoryObj?.companies) {
+          const company = Array.isArray(activeFactoryObj.companies) ? activeFactoryObj.companies[0] : activeFactoryObj.companies;
           setCompanyContext({
             id: company.id,
             name: company.name,
             type: company.company_type,
-            factoryName: factory.name
+            factoryName: activeFactoryObj.name
           });
         }
       }

@@ -15,6 +15,7 @@ import { useAppStore } from '../../store/useAppStore'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
+import { compareEmployeeCode } from '../../lib/formatters'
 import type { PaySlipData } from './PaySlipPreview'
 
 type Props = {
@@ -266,7 +267,8 @@ export default function PayslipExportModal({ isOpen, onClose, uniqueMonths }: Pr
       })
 
       slips.sort((a, b) => {
-        if (a.employee_code !== b.employee_code) return String(a.employee_code).localeCompare(String(b.employee_code))
+        const cmp = compareEmployeeCode(a.employee_code, b.employee_code)
+        if (cmp !== 0) return cmp
         return new Date(a.period_start).getTime() - new Date(b.period_start).getTime()
       })
 

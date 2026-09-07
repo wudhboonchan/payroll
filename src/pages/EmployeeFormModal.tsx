@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
@@ -8,7 +8,10 @@ import { useAppStore } from '@/store/useAppStore'
 import { toast } from 'sonner'
 import { UserPlus, X, AlertTriangle } from 'lucide-react'
 import { NATIONALITIES } from '@/lib/constants'
+import { normalizePrefix } from '@/lib/formatters'
 import '../styles/tokens.css'
+import { isTpiCompany } from '../features/tpi/model'
+import './TpiShiftEntry.css'
 
 const employeeSchema = z
   .object({
@@ -29,6 +32,9 @@ const employeeSchema = z
     notes: z.string().optional(),
     data_complete: z.boolean().default(false),
     exempt_social_security: z.boolean().default(false),
+    is_safety_officer: z.boolean().default(false),
+    has_position_allowance: z.boolean().default(false),
+    social_security_number: z.string().optional(),
   })
   .superRefine((data, ctx) => {
     if (data.nationality === 'ไทย' && !data.last_name?.trim()) {
@@ -64,6 +70,9 @@ interface Employee {
   payment_method: 'cash' | 'bank_transfer'; bank_name: string | null; bank_account: string | null
   rate_per_12h: number; status: 'active' | 'inactive'; notes: string | null; data_complete: boolean
   exempt_social_security: boolean
+  is_safety_officer?: boolean | null
+  has_position_allowance?: boolean | null
+  social_security_number?: string | null
 }
 
 const fieldStyle: React.CSSProperties = {
@@ -75,9 +84,32 @@ const errorStyle: React.CSSProperties = {
 }
 
 export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSuccess }: Props) {
-  const { user } = useAppStore()
+  const { user, companyContext } = useAppStore()
   const queryClient = useQueryClient()
   const [inactiveConfirm, setInactiveConfirm] = useState<{ shiftCount: number; pendingValues: EmployeeFormValues } | null>(null)
+
+  // Fetch factories list to reliably identify active factory name
+  const { data: factories = [] } = useQuery({
+    queryKey: ['factories-list'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('factories').select('id, name')
+      if (error) return []
+      return data || []
+    },
+    staleTime: 60000,
+  })
+
+  const currentFactoryName =
+    factories.find((f) => f.id === user?.factory_id)?.name ||
+    companyContext?.factoryName ||
+    companyContext?.name ||
+    ''
+
+  const isTpi = isTpiCompany(currentFactoryName)
+
+  // TPI specific wage tier state ('normal' | 'skilled')
+  const [tpiRateTier, setTpiRateTier] = useState<'normal' | 'skilled'>('normal')
+  const [tpiSkilledFrom, setTpiSkilledFrom] = useState<string>('')
 
   const { register, handleSubmit, reset, watch, setValue, formState: { errors } } = useForm<EmployeeFormValues>({
     resolver: zodResolver(employeeSchema) as any,
@@ -86,12 +118,35 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
 
   const paymentMethod = watch('payment_method')
   const nationality = watch('nationality')
+  const prefix = watch('prefix')
   const dataComplete = watch('data_complete')
   const exemptSS = watch('exempt_social_security')
+  const isSafetyOfficer = watch('is_safety_officer')
+  const hasPositionAllowance = watch('has_position_allowance')
+  const nationalIdWatch = watch('national_id')
   const wageType = watch('wage_type')
   const position = watch('position')
   const currentRate = watch('rate_per_12h') || 0
   const isThai = !nationality || nationality === 'ไทย'
+  const prevNationalityRef = useRef<string>(nationality || 'ไทย')
+
+  // When nationality switches between Thai and Foreign (TPI factory only), convert prefix
+  useEffect(() => {
+    if (!isTpi) return
+    const prev = prevNationalityRef.current
+    if (prev !== nationality) {
+      if (nationality !== 'ไทย' && prev === 'ไทย') {
+        if (prefix === 'นาย') setValue('prefix', 'Mr.')
+        else if (prefix === 'นาง') setValue('prefix', 'Mrs.')
+        else if (prefix === 'นางสาว') setValue('prefix', 'Ms.')
+      } else if (nationality === 'ไทย' && prev !== 'ไทย') {
+        if (prefix === 'Mr.' || prefix === 'Mr') setValue('prefix', 'นาย')
+        else if (prefix === 'Mrs.' || prefix === 'Mrs') setValue('prefix', 'นาง')
+        else if (prefix === 'Ms.' || prefix === 'Ms') setValue('prefix', 'นางสาว')
+      }
+      prevNationalityRef.current = nationality
+    }
+  }, [nationality, prefix, setValue, isTpi])
 
   const { data: employeeData } = useQuery({
     queryKey: ['employee', employeeId],
@@ -102,6 +157,22 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
       return data as Employee
     },
     enabled: !!employeeId && isOpen,
+  })
+
+  // Query TPI Wage Profile for existing employee
+  const { data: tpiWageProfile } = useQuery({
+    queryKey: ['tpi-employee-wage', user?.factory_id, employeeId],
+    enabled: !!user?.factory_id && !!employeeId && isOpen && isTpi,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('tpi_employee_wage_profiles')
+        .select('*')
+        .eq('employee_id', employeeId!)
+        .eq('factory_id', user!.factory_id)
+        .maybeSingle()
+      if (error) return null
+      return data
+    },
   })
 
   // Pre-fetch shift count so handleSave can check synchronously (no async freeze)
@@ -120,33 +191,85 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
   })
 
   useEffect(() => {
-    if (position === 'clerk') setValue('wage_type', 'monthly')
-    else if (position === 'worker') setValue('wage_type', 'daily')
-  }, [position, setValue])
+    if (!isTpi) {
+      if (position === 'clerk') setValue('wage_type', 'monthly')
+      else if (position === 'worker') setValue('wage_type', 'daily')
+    } else {
+      setValue('wage_type', 'daily')
+    }
+  }, [position, setValue, isTpi])
+
+  useEffect(() => {
+    if (isTpi) {
+      if (tpiWageProfile) {
+        setTpiRateTier((tpiWageProfile.rate_tier as any) || 'normal')
+        setTpiSkilledFrom(tpiWageProfile.skilled_from || '')
+      } else {
+        setTpiRateTier('normal')
+        setTpiSkilledFrom('')
+      }
+    }
+  }, [tpiWageProfile, employeeId, isOpen, isTpi])
 
   useEffect(() => {
     if (employeeData && isOpen) {
+      const empNat = employeeData.nationality || 'ไทย'
+      const normPref = normalizePrefix(employeeData.prefix, empNat, employeeData.first_name, isTpi)
+      prevNationalityRef.current = empNat
       reset({
-        employee_code: employeeData.employee_code, prefix: employeeData.prefix || '',
-        first_name: employeeData.first_name, last_name: employeeData.last_name || '',
-        national_id: employeeData.national_id || '', nationality: employeeData.nationality || 'ไทย',
-        position: employeeData.position || 'worker', job_title: employeeData.job_title || '',
-        wage_type: employeeData.wage_type || 'daily', payment_method: employeeData.payment_method || 'bank_transfer',
-        bank_name: employeeData.bank_name || '', bank_account: employeeData.bank_account || '',
-        rate_per_12h: employeeData.rate_per_12h, status: employeeData.status || 'active',
-        notes: employeeData.notes || '', data_complete: employeeData.data_complete ?? false,
+        employee_code: employeeData.employee_code,
+        prefix: normPref || '',
+        first_name: employeeData.first_name,
+        last_name: employeeData.last_name || '',
+        national_id: employeeData.national_id || '',
+        nationality: empNat,
+        position: employeeData.position || 'worker',
+        job_title: employeeData.job_title || '',
+        wage_type: employeeData.wage_type || 'daily',
+        payment_method: employeeData.payment_method || 'bank_transfer',
+        bank_name: (() => {
+          const b = (employeeData.bank_name || '').trim()
+          if (b.includes('เกษตร') || b.includes('ธ.ก.ส') || b.includes('ธกส') || b.toLowerCase().includes('baac')) {
+            return 'ธ.ก.ส.'
+          }
+          return b
+        })(),
+        bank_account: employeeData.bank_account || '',
+        rate_per_12h: employeeData.rate_per_12h,
+        status: employeeData.status || 'active',
+        notes: employeeData.notes || '',
+        data_complete: employeeData.data_complete ?? false,
         exempt_social_security: employeeData.exempt_social_security ?? false,
+        is_safety_officer: employeeData.is_safety_officer ?? false,
+        has_position_allowance: employeeData.has_position_allowance ?? false,
+        social_security_number: employeeData.social_security_number || '',
       })
     } else if (!employeeId && isOpen) {
+      prevNationalityRef.current = 'ไทย'
       reset({
-        employee_code: '', prefix: '', first_name: '', last_name: '', national_id: '',
-        nationality: 'ไทย', position: 'worker', job_title: '', wage_type: 'daily',
-        payment_method: 'bank_transfer', bank_name: '', bank_account: '',
-        rate_per_12h: 0, status: 'active', notes: '', data_complete: false,
+        employee_code: '',
+        prefix: '',
+        first_name: '',
+        last_name: '',
+        national_id: '',
+        nationality: 'ไทย',
+        position: 'worker',
+        job_title: '',
+        wage_type: 'daily',
+        payment_method: 'bank_transfer',
+        bank_name: '',
+        bank_account: '',
+        rate_per_12h: 0,
+        status: 'active',
+        notes: '',
+        data_complete: false,
         exempt_social_security: false,
+        is_safety_officer: false,
+        has_position_allowance: false,
+        social_security_number: '',
       })
     }
-  }, [employeeData, employeeId, isOpen, reset])
+  }, [employeeData, employeeId, isOpen, reset, isTpi])
 
   const mutation = useMutation({
     mutationFn: async ({ values, deleteShifts }: { values: EmployeeFormValues; deleteShifts: boolean }) => {
@@ -156,23 +279,48 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
         const { error: shiftErr } = await supabase.from('shift_assignments').delete().eq('employee_id', employeeId)
         if (shiftErr) throw shiftErr
       }
+      const normPrefix = normalizePrefix(values.prefix, values.nationality, values.first_name, isTpi)
       const payload = {
         ...values,
+        prefix: normPrefix || null,
         last_name: values.last_name?.trim() || '',
         factory_id: user.factory_id,
         bank_name: values.payment_method === 'cash' ? null : values.bank_name,
         bank_account: values.payment_method === 'cash' ? null : values.bank_account,
+        wage_type: isTpi ? 'daily' : values.wage_type,
+        rate_per_12h: isTpi ? 0 : values.rate_per_12h,
       }
+      let savedEmpId = employeeId
       if (employeeId) {
         const { error } = await supabase.from('employees').update(payload).eq('id', employeeId)
         if (error) throw error
       } else {
-        const { error } = await supabase.from('employees').insert(payload)
+        const { data: newEmp, error } = await supabase.from('employees').insert(payload).select('id').single()
         if (error) throw error
+        savedEmpId = newEmp.id
+      }
+
+      // Upsert TPI Wage Profile if in TPI factory
+      if (isTpi && savedEmpId) {
+        const { error: profileErr } = await supabase
+          .from('tpi_employee_wage_profiles')
+          .upsert({
+            employee_id: savedEmpId,
+            factory_id: user.factory_id,
+            rate_tier: tpiRateTier,
+            skilled_from: tpiRateTier === 'skilled' ? (tpiSkilledFrom || null) : null,
+            updated_at: new Date().toISOString(),
+          }, { onConflict: 'factory_id,employee_id' })
+        if (profileErr) {
+          console.error('Error saving tpi wage profile:', profileErr)
+        }
       }
     },
     onSuccess: (_, { deleteShifts }) => {
       queryClient.invalidateQueries({ queryKey: ['employees'] })
+      queryClient.invalidateQueries({ queryKey: ['employees-all'] })
+      queryClient.invalidateQueries({ queryKey: ['tpi-profiles'] })
+      queryClient.invalidateQueries({ queryKey: ['tpi-employee-wage'] })
       queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] })
       queryClient.removeQueries({ queryKey: ['employee', employeeId] })
       queryClient.removeQueries({ queryKey: ['employee-shift-count', employeeId] })
@@ -258,19 +406,35 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
               </div>
             </div>
 
-            {/* Row 2: เลขบัตร + คำนำหน้า */}
+            {/* Row 2: เลขบัตร / เลข ปกส (ต่างชาติ) + คำนำหน้า */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
               <div style={fieldStyle}>
-                <label className="vk-eyebrow">เลขบัตรประชาชน / Passport</label>
-                <input className="vk-input" {...register('national_id')} />
+                <label className="vk-eyebrow">
+                  {isThai ? 'เลขบัตรประชาชน' : 'เลขประจำตัวประกันสังคม (ปกส)'}
+                </label>
+                <input
+                  className="vk-input"
+                  {...register('national_id')}
+                  placeholder={isThai ? 'เลขบัตรประชาชน 13 หลัก' : 'ระบุเลข ปกส เมื่อได้รับแล้ว'}
+                />
               </div>
               <div style={fieldStyle}>
                 <label className="vk-eyebrow">คำนำหน้า</label>
                 <select className="vk-input" {...register('prefix')}>
-                  <option value="">เลือก</option>
-                  <option value="นาย">นาย</option>
-                  <option value="นาง">นาง</option>
-                  <option value="นางสาว">นางสาว</option>
+                  <option value="">{isTpi && !isThai ? 'Select' : 'เลือก'}</option>
+                  {isTpi && !isThai ? (
+                    <>
+                      <option value="Mr.">Mr.</option>
+                      <option value="Ms.">Ms.</option>
+                      <option value="Mrs.">Mrs.</option>
+                    </>
+                  ) : (
+                    <>
+                      <option value="นาย">นาย</option>
+                      <option value="นาง">นาง</option>
+                      <option value="นางสาว">นางสาว</option>
+                    </>
+                  )}
                 </select>
               </div>
             </div>
@@ -298,7 +462,7 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
                   <option value="worker">พนักงาน (ทั่วไป)</option>
                   <option value="clerk">เสมียน</option>
                 </select>
-                {position === 'clerk' && (
+                {position === 'clerk' && !isTpi && (
                   <span style={{ fontSize: 11, color: '#6F4A0E', background: 'var(--vk-marigold-tint)', padding: '3px 8px', borderRadius: 4 }}>
                     เสมียน: คิดค่าแรงแบบรายเดือน / OT ชั่วโมงละ 1.5 เท่า
                   </span>
@@ -310,37 +474,133 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
               </div>
             </div>
 
-            {/* Row 5: ประเภทค่าจ้าง + อัตราค่าจ้าง */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-              <div style={fieldStyle}>
-                <label className="vk-eyebrow">ประเภทค่าจ้าง *</label>
-                <div style={{ display: 'flex', gap: 20, paddingTop: 6 }}>
-                  {(['daily', 'monthly'] as const).map(v => (
-                    <label key={v} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, opacity: 1, cursor: 'not-allowed' }}>
-                      <input type="radio" value={v} {...register('wage_type')} disabled style={{ accentColor: 'var(--vk-persimmon)' }} />
-                      {v === 'daily' ? 'รายวัน' : 'รายเดือน'}
+            {/* Row 5: ประเภทค่าแรง (TPI: Radio ปกติ/ฝีมือ | ตราเพชร: รายวัน/รายเดือน) */}
+            {isTpi ? (
+              <div style={{ background: '#faf8f4', border: '1px solid var(--vk-rule-soft)', borderRadius: 8, padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
+                  <label className="vk-eyebrow" style={{ fontSize: 12, fontWeight: 700, color: 'var(--vk-ink-2)', margin: 0 }}>
+                    ประเภทค่าแรงพนักงาน <span style={{ color: 'var(--vk-crimson)' }}>*</span>
+                  </label>
+                  <span style={{ fontSize: 11, color: 'var(--vk-ink-3)' }}>
+                    (คิดค่าแรงอัตโนมัติตามอัตราของรหัสงาน)
+                  </span>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  {/* Option 1: ค่าแรงปกติ */}
+                  <label
+                    style={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: 10,
+                      padding: '12px 14px',
+                      borderRadius: 8,
+                      border: tpiRateTier === 'normal' ? '2px solid var(--vk-persimmon)' : '1px solid var(--vk-rule-soft)',
+                      background: tpiRateTier === 'normal' ? '#ffffff' : '#ffffff',
+                      boxShadow: tpiRateTier === 'normal' ? '0 1px 3px rgba(177,71,41,0.1)' : 'none',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="tpi_rate_tier"
+                      value="normal"
+                      checked={tpiRateTier === 'normal'}
+                      onChange={() => setTpiRateTier('normal')}
+                      style={{ width: 18, height: 18, accentColor: 'var(--vk-persimmon)', marginTop: 2, cursor: 'pointer' }}
+                    />
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--vk-ink)' }}>
+                        ค่าแรงปกติ
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--vk-ink-3)', marginTop: 2 }}>
+                        อัตราค่าแรงปกติของแต่ละรหัสงาน
+                      </div>
+                    </div>
+                  </label>
+
+                  {/* Option 2: ค่าแรงฝีมือ */}
+                  <label
+                    style={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: 10,
+                      padding: '12px 14px',
+                      borderRadius: 8,
+                      border: tpiRateTier === 'skilled' ? '2px solid #16a34a' : '1px solid var(--vk-rule-soft)',
+                      background: tpiRateTier === 'skilled' ? '#ffffff' : '#ffffff',
+                      boxShadow: tpiRateTier === 'skilled' ? '0 1px 3px rgba(22,163,74,0.1)' : 'none',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="tpi_rate_tier"
+                      value="skilled"
+                      checked={tpiRateTier === 'skilled'}
+                      onChange={() => setTpiRateTier('skilled')}
+                      style={{ width: 18, height: 18, accentColor: '#16a34a', marginTop: 2, cursor: 'pointer' }}
+                    />
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: '#15803d' }}>
+                        ค่าแรงฝีมือ
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--vk-ink-3)', marginTop: 2 }}>
+                        อัตราค่าแรงฝีมือตามรหัสงาน
+                      </div>
+                    </div>
+                  </label>
+                </div>
+
+                {tpiRateTier === 'skilled' && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4, padding: '10px 14px', background: '#f0fdf4', borderRadius: 6, border: '1px solid #bbf7d0' }}>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: '#166534', whiteSpace: 'nowrap' }}>
+                      วันที่เริ่มใช้เรทฝีมือ (ถ้ามี):
                     </label>
-                  ))}
-                </div>
-              </div>
-              <div style={fieldStyle}>
-                <label className="vk-eyebrow">
-                  {wageType === 'monthly' ? 'เงินเดือน (บาท/เดือน) *' : 'อัตราค่าจ้างรายวัน (บาท) *'}
-                </label>
-                <div style={{ position: 'relative' }}>
-                  <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 13, color: 'var(--vk-ink-3)' }}>฿</span>
-                  <input className="vk-input" type="number" step="0.01" {...register('rate_per_12h')}
-                    style={{ paddingLeft: 24 }} placeholder={wageType === 'monthly' ? 'เช่น 15000' : 'เช่น 350'} />
-                </div>
-                {wageType === 'daily' && position === 'worker' && currentRate > 0 && (
-                  <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
-                    <span style={{ fontSize: 11, background: 'rgba(177,71,41,0.08)', color: 'var(--vk-persimmon)', padding: '2px 8px', borderRadius: 999 }}>ค่าจ้างปกติ: 357 ฿</span>
-                    <span style={{ fontSize: 11, background: 'rgba(0,90,180,0.07)', color: '#005ab4', padding: '2px 8px', borderRadius: 999 }}>ค่ากะ: {Math.max(0, currentRate - 357)} ฿</span>
+                    <input
+                      type="date"
+                      value={tpiSkilledFrom}
+                      onChange={(e) => setTpiSkilledFrom(e.target.value)}
+                      className="vk-input"
+                      style={{ height: 34, background: '#ffffff', borderColor: '#86efac', maxWidth: 200, fontSize: 12 }}
+                    />
                   </div>
                 )}
-                {errors.rate_per_12h && <span style={errorStyle}>{errors.rate_per_12h.message}</span>}
               </div>
-            </div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                <div style={fieldStyle}>
+                  <label className="vk-eyebrow">ประเภทค่าจ้าง *</label>
+                  <div style={{ display: 'flex', gap: 20, paddingTop: 6 }}>
+                    {(['daily', 'monthly'] as const).map(v => (
+                      <label key={v} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, opacity: 1, cursor: 'not-allowed' }}>
+                        <input type="radio" value={v} {...register('wage_type')} disabled style={{ accentColor: 'var(--vk-persimmon)' }} />
+                        {v === 'daily' ? 'รายวัน' : 'รายเดือน'}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div style={fieldStyle}>
+                  <label className="vk-eyebrow">
+                    {wageType === 'monthly' ? 'เงินเดือน (บาท/เดือน) *' : 'อัตราค่าจ้างรายวัน (บาท) *'}
+                  </label>
+                  <div style={{ position: 'relative' }}>
+                    <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 13, color: 'var(--vk-ink-3)' }}>฿</span>
+                    <input className="vk-input" type="number" step="0.01" {...register('rate_per_12h')}
+                      style={{ paddingLeft: 24 }} placeholder={wageType === 'monthly' ? 'เช่น 15000' : 'เช่น 350'} />
+                  </div>
+                  {wageType === 'daily' && position === 'worker' && currentRate > 0 && (
+                    <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+                      <span style={{ fontSize: 11, background: 'rgba(177,71,41,0.08)', color: 'var(--vk-persimmon)', padding: '2px 8px', borderRadius: 999 }}>ค่าจ้างปกติ: 357 ฿</span>
+                      <span style={{ fontSize: 11, background: 'rgba(0,90,180,0.07)', color: '#005ab4', padding: '2px 8px', borderRadius: 999 }}>ค่ากะ: {Math.max(0, currentRate - 357)} ฿</span>
+                    </div>
+                  )}
+                  {errors.rate_per_12h && <span style={errorStyle}>{errors.rate_per_12h.message}</span>}
+                </div>
+              </div>
+            )}
 
             {/* Payment method */}
             <div style={{ border: '1px solid var(--vk-rule)', padding: '16px', background: 'var(--vk-bone)' }}>
@@ -368,6 +628,7 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
                       <option value="กรุงศรี">กรุงศรี (BAY)</option>
                       <option value="ทหารไทยธนชาต">ทหารไทยธนชาต (TTB)</option>
                       <option value="ออมสิน">ออมสิน (GSB)</option>
+                      <option value="ธ.ก.ส.">ธนาคารเพื่อการเกษตรและสหกรณ์การเกษตร (ธ.ก.ส. / BAAC)</option>
                       <option value="อื่นๆ">อื่นๆ</option>
                     </select>
                     {errors.bank_name && <span style={errorStyle}>{errors.bank_name.message}</span>}
@@ -396,25 +657,88 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
               </div>
             </div>
 
+            {/* สิทธิ์เงินพิเศษและค่าตำแหน่ง (TPI Special Allowances) */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--vk-ink-2)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                สิทธิ์เงินพิเศษและค่าตำแหน่ง (จ่ายในงวดที่จบที่สิ้นเดือน)
+              </div>
+
+              {/* Checkbox 1: เจ้าหน้าที่ความปลอดภัย (จป.) */}
+              <label style={{
+                display: 'flex', alignItems: 'flex-start', gap: 12, padding: '12px 16px',
+                border: `1px solid ${isSafetyOfficer ? '#059669' : 'var(--vk-rule-soft)'}`,
+                background: isSafetyOfficer ? '#ecfdf5' : 'var(--vk-bone)',
+                cursor: 'pointer',
+              }}>
+                <input type="checkbox" {...register('is_safety_officer')}
+                  style={{ marginTop: 2, accentColor: '#059669', flexShrink: 0 }} />
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: isSafetyOfficer ? '#065f46' : 'var(--vk-ink)' }}>
+                    เจ้าหน้าที่ความปลอดภัย (จป.) (+500 บาท/เดือน)
+                  </div>
+                  <div style={{ fontSize: 11, color: isSafetyOfficer ? '#047857' : 'var(--vk-ink-3)', marginTop: 2, lineHeight: 1.5 }}>
+                    จ่ายเพิ่มให้คนละ 500 บาท/เดือน ในงวดที่จบที่สิ้นเดือน (งวดหลัง)
+                  </div>
+                </div>
+              </label>
+
+              {/* Checkbox 2: มีค่าตำแหน่ง */}
+              <label style={{
+                display: 'flex', alignItems: 'flex-start', gap: 12, padding: '12px 16px',
+                border: `1px solid ${hasPositionAllowance ? '#2563eb' : 'var(--vk-rule-soft)'}`,
+                background: hasPositionAllowance ? '#eff6ff' : 'var(--vk-bone)',
+                cursor: 'pointer',
+              }}>
+                <input type="checkbox" {...register('has_position_allowance')}
+                  style={{ marginTop: 2, accentColor: '#2563eb', flexShrink: 0 }} />
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: hasPositionAllowance ? '#1e40af' : 'var(--vk-ink)' }}>
+                    มีค่าตำแหน่ง (+1,000 บาท/เดือน)
+                  </div>
+                  <div style={{ fontSize: 11, color: hasPositionAllowance ? '#1d4ed8' : 'var(--vk-ink-3)', marginTop: 2, lineHeight: 1.5 }}>
+                    จ่ายเพิ่มให้คนละ 1,000 บาท/เดือน ในงวดที่จบที่สิ้นเดือน (งวดหลัง)
+                  </div>
+                </div>
+              </label>
+            </div>
+
             {/* ยกเว้นประกันสังคม — เฉพาะพนักงานสัญชาติไทย */}
             {isThai && (
               <label style={{
                 display: 'flex', alignItems: 'flex-start', gap: 12, padding: '14px 16px',
-                border: `1px solid ${exemptSS ? '#f59e0b' : 'var(--vk-rule-soft)'}`,
-                background: exemptSS ? '#fffbeb' : 'var(--vk-bone)',
+                border: `1px solid ${exemptSS ? '#94a3b8' : 'var(--vk-rule-soft)'}`,
+                background: exemptSS ? '#f8fafc' : 'var(--vk-bone)',
                 cursor: 'pointer',
               }}>
                 <input type="checkbox" {...register('exempt_social_security')}
-                  style={{ marginTop: 2, accentColor: '#f59e0b', flexShrink: 0 }} />
+                  style={{ marginTop: 2, accentColor: '#475569', flexShrink: 0 }} />
                 <div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: exemptSS ? '#92400e' : 'var(--vk-ink)' }}>
-                    ไม่หักประกันสังคม
+                  <div style={{ fontSize: 13, fontWeight: 600, color: exemptSS ? '#334155' : 'var(--vk-ink)' }}>
+                    ไม่หักประกันสังคม (ยกเว้น ปกส)
                   </div>
-                  <div style={{ fontSize: 11, color: exemptSS ? '#b45309' : 'var(--vk-ink-3)', marginTop: 2, lineHeight: 1.5 }}>
+                  <div style={{ fontSize: 11, color: exemptSS ? '#64748b' : 'var(--vk-ink-3)', marginTop: 2, lineHeight: 1.5 }}>
                     คิดเงินเต็มจำนวน ไม่หักประกันสังคม — สำหรับพนักงานไทยที่ได้รับการยกเว้น
                   </div>
                 </div>
               </label>
+            )}
+
+            {/* สำหรับพนักงานต่างชาติ: แจ้งเตือนสถานะการหัก ปกส */}
+            {!isThai && (
+              <div style={{
+                padding: '12px 16px',
+                background: (nationalIdWatch?.trim() && dataComplete) ? '#f0fdf4' : '#fffbeb',
+                border: `1px solid ${(nationalIdWatch?.trim() && dataComplete) ? '#86efac' : '#fde68a'}`,
+                fontSize: 12,
+                lineHeight: 1.6,
+                color: (nationalIdWatch?.trim() && dataComplete) ? '#166534' : '#92400e',
+              }}>
+                {(nationalIdWatch?.trim() && dataComplete) ? (
+                  <span>✓ <strong>พร้อมหัก ปกส:</strong> มีเลข ปกส และข้อมูลสมบูรณ์แล้ว ระบบจะหัก ปกส ตามอัตราที่กำหนดในงวด (จากกะแรก) อัตโนมัติ</span>
+                ) : (
+                  <span>⚠️ <strong>พนักงานต่างชาติ:</strong> จะถูกหัก ปกส เมื่อกรอกเลขประจำตัว ปกส ในช่องด้านบน และกดติ๊ก <strong>"ข้อมูลสมบูรณ์"</strong> ด้านล่างนี้เรียบร้อยแล้ว</span>
+                )}
+              </div>
             )}
 
             {/* Data complete checkbox */}

@@ -8,7 +8,7 @@ import { toast } from 'sonner'
 import { Download, FileText, Grid3x3, ShieldCheck, Loader2, Search, Check, X, Users, FileSpreadsheet, Printer } from 'lucide-react'
 import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
-import { formatPeriodLabel } from '../lib/formatters'
+import { formatPeriodLabel, compareEmployeeCode } from '../lib/formatters'
 import '../styles/tokens.css'
 
 interface PayrollPeriod { id: string; period_start: string; period_end: string; status: string | null }
@@ -573,7 +573,8 @@ export default function Export() {
       const { data, error } = await supabase.from('employees')
         .select('id,employee_code,first_name,last_name,status')
         .eq('factory_id', user?.factory_id ?? '').order('employee_code')
-      if (error) throw error; return data
+      if (error) throw error
+      return (data || []).sort((a: any, b: any) => compareEmployeeCode(a.employee_code, b.employee_code))
     }, enabled: !!user?.factory_id && (showPdfModal || showSummaryModal),
   })
 
@@ -674,7 +675,7 @@ export default function Export() {
           'ค่าเสื้อพนักงาน': x.uni,
           'รวม': income-deduct
         }
-      }).sort((a,b)=>String(a['รหัสพนักงาน']).localeCompare(String(b['รหัสพนักงาน'])))
+      }).sort((a, b) => compareEmployeeCode(a['รหัสพนักงาน'], b['รหัสพนักงาน']))
       const label = getExportLabel()
       const wb = XLSX.utils.book_new(); const ws = XLSX.utils.aoa_to_sheet([[`ค่าแรง ${label}`]])
       XLSX.utils.sheet_add_json(ws, rows, { origin:'A2' }); XLSX.utils.book_append_sheet(wb, ws, 'Payroll Summary')
@@ -766,16 +767,25 @@ export default function Export() {
         .select('id,name').eq('id', user?.factory_id ?? '').single()
       const branchName = fullFactoryName(factoryData?.name || '')
 
-      // Fetch shift_assignments for all entries in bulk
+      // Fetch shift_assignments for all entries in bulk with pagination
       const empIds    = [...new Set((entries as any[]).map(e => e.employee_id))]
-      const { data: allShifts = [] } = await supabase.from('shift_assignments' as any)
-        .select('employee_id,period_id,work_date,is_holiday_ot,is_holiday_ot_exempt,is_half_shift,actual_hours,ot_hours')
-        .in('period_id', targetPeriodIds)
-        .in('employee_id', empIds)
-        .limit(10000)
+      let allShifts: any[] = []
+      let fromShift = 0
+      const PAGE_SHIFT = 1000
+      while (true) {
+        const { data, error } = await supabase.from('shift_assignments' as any)
+          .select('employee_id,period_id,work_date,is_holiday_ot,is_holiday_ot_exempt,is_half_shift,actual_hours,ot_hours')
+          .in('period_id', targetPeriodIds)
+          .in('employee_id', empIds)
+          .range(fromShift, fromShift + PAGE_SHIFT - 1)
+        if (error) break
+        allShifts = allShifts.concat(data ?? [])
+        if (!data || data.length < PAGE_SHIFT) break
+        fromShift += PAGE_SHIFT
+      }
 
-      const sorted = [...(entries as any[])].sort((a,b)=>{
-        const cmp = String(a.employee.employee_code).localeCompare(String(b.employee.employee_code))
+      const sorted = [...(entries as any[])].sort((a, b) => {
+        const cmp = compareEmployeeCode(a.employee?.employee_code, b.employee?.employee_code)
         return cmp !== 0 ? cmp : new Date(a.period.period_start).getTime() - new Date(b.period.period_start).getTime()
       })
 
@@ -859,12 +869,21 @@ body>div>div{border:none!important;box-shadow:none!important;border-bottom:1px s
 
       const empIds = [...new Set(entries.map(e => e.employee_id))]
 
-      // 2. Fetch shift_assignments
-      const { data: allShifts = [] } = await supabase.from('shift_assignments' as any)
-        .select('employee_id,period_id,work_date,shift_type,is_holiday_ot,is_holiday_ot_exempt,is_half_shift,actual_hours,ot_hours,wood_excess,film_amount,is_cross_position,cross_position_title,cross_position_extra_pay')
-        .in('period_id', targetPeriodIds)
-        .in('employee_id', empIds)
-        .limit(10000)
+      // 2. Fetch shift_assignments with pagination
+      let allShifts: any[] = []
+      let fromShift = 0
+      const PAGE_SHIFT = 1000
+      while (true) {
+        const { data, error } = await supabase.from('shift_assignments' as any)
+          .select('employee_id,period_id,work_date,shift_type,is_holiday_ot,is_holiday_ot_exempt,is_half_shift,actual_hours,ot_hours,wood_excess,film_amount,is_cross_position,cross_position_title,cross_position_extra_pay')
+          .in('period_id', targetPeriodIds)
+          .in('employee_id', empIds)
+          .range(fromShift, fromShift + PAGE_SHIFT - 1)
+        if (error) break
+        allShifts = allShifts.concat(data ?? [])
+        if (!data || data.length < PAGE_SHIFT) break
+        fromShift += PAGE_SHIFT
+      }
 
       // 3. Fetch advance_payments
       const { data: allAdvances = [] } = await supabase.from('advance_payments')
@@ -872,8 +891,8 @@ body>div>div{border:none!important;box-shadow:none!important;border-bottom:1px s
         .in('period_id', targetPeriodIds)
         .in('employee_id', empIds)
 
-      const sortedEntries = [...entries].sort((a,b)=>{
-        const cmp = String(a.employee.employee_code).localeCompare(String(b.employee.employee_code))
+      const sortedEntries = [...entries].sort((a, b) => {
+        const cmp = compareEmployeeCode(a.employee?.employee_code, b.employee?.employee_code)
         return cmp !== 0 ? cmp : new Date(a.period.period_start).getTime() - new Date(b.period.period_start).getTime()
       })
 

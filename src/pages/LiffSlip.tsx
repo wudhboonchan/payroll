@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import { getLiffProfile } from '../lib/liff'
 import type { SlipIncomeRow, SlipDeductRow } from '../components/VKSlipDocument'
+import { isTpiCompany } from '../features/tpi/model'
 import { ShieldAlert, Eye, Loader2, AlertCircle, Link2, CheckCircle2 } from 'lucide-react'
 import '../styles/tokens.css'
 
@@ -409,20 +410,56 @@ export default function LiffSlip() {
     const amtOt     = isClerk ? Math.max(0, (entry.amount_ot || 0) - computed_ot_1x) : Number(entry.amount_ot || 0)
     const amtOt1x   = isClerk ? computed_ot_1x : 0
 
-    // formula details (same as EmployeeSlip)
-    const baseNormal = Number(emp.rate_per_12h) === 0 ? 0 : 357
-    const dnDays = days_normal
-    const dsDays = isClerk ? shifts.filter(s => isWeekend(new Date(s.work_date)) && !s.is_holiday_ot).length : days_shift
-    const dn = dnDays > 0 ? Number(entry.amount_normal || 0) / dnDays : 0
-    const ds = dsDays > 0 ? Number(entry.amount_shift  || 0) / dsDays : 0
+    // formula details (supports Diamond and TPI)
+    const isTpiSlip = isTpiCompany(factoryData?.name)
+    const rate = Number(emp.rate_per_12h || 0)
+    const fallbackRate = isTpiSlip ? (rate > 0 ? rate : 357) : (rate === 0 ? 0 : 357)
+    const baseNormal = fallbackRate
+
+    const dn = days_normal
+    const ds = isClerk ? shifts.filter(s => isWeekend(new Date(s.work_date)) && !s.is_holiday_ot).length : days_shift
+    const dnDays = isTpiSlip && dn === 0 && Number(entry.amount_normal || 0) > 0 && baseNormal > 0
+      ? Math.round(Number(entry.amount_normal || 0) / baseNormal)
+      : dn
+    const baseShift = isTpiSlip
+      ? (ds > 0 ? Math.round(Number(entry.amount_shift || 0) / ds) : fallbackRate)
+      : (ds > 0 ? Number(entry.amount_shift || 0) / ds : 0)
+    const dsDays = isTpiSlip && ds === 0 && Number(entry.amount_shift || 0) > 0 && baseShift > 0
+      ? Math.round(Number(entry.amount_shift || 0) / baseShift)
+      : ds
+
+    const clerkDaily = dnDays > 0 ? Number(entry.amount_normal || 0) / dnDays : 0
     const otHrs  = isClerk && clerkHourly > 0 ? Math.round(amtOt   / (clerkHourly * 1.5)) : 0
     const ot1Hrs = isClerk && clerkHourly > 0 ? Math.round(amtOt1x / clerkHourly)         : 0
-    const otDays = !isClerk && (baseNormal + ds) > 0 ? Math.round(amtOt / ((baseNormal + ds) * 2)) : 0
+    const otDays = !isClerk && (baseNormal + baseShift) > 0 ? Math.round(amtOt / ((baseNormal + baseShift) * 2)) : 0
 
-    const detailNormal = dnDays > 0 ? (isClerk ? `฿${Math.round(dn)} × ${dnDays} วัน` : `฿${baseNormal} × ${dnDays} วัน`) : null
-    const detailShift  = !isClerk && dsDays > 0 && ds > 0 ? `฿${Math.round(ds)} × ${dsDays} วัน` : null
+    // ── Separate OT for TPI vs Diamond ──
+    const tpiHolidayShifts = isTpiSlip ? (shifts || []).filter((s: any) => !!s.is_holiday_ot) : []
+    const amtHolidayOt = isTpiSlip
+      ? (tpiHolidayShifts.length > 0 ? tpiHolidayShifts.length * baseNormal * 2 : 0)
+      : 0
+    const amtRegularOt = isTpiSlip ? Math.max(0, amtOt - amtHolidayOt) : amtOt
+
+    const detailHolidayOt = isTpiSlip && amtHolidayOt > 0
+      ? `฿${baseNormal} × 2 × ${tpiHolidayShifts.length} วัน`
+      : null
+
+    const tpiOtHours = isTpiSlip
+      ? (shifts || []).reduce((a: number, s: any) => a + Number(s.ot_hours || 0), 0)
+      : 0
+    const tpiRegularOtHours = tpiOtHours > 0 ? tpiOtHours : (baseNormal > 0 ? Math.round(amtRegularOt / ((baseNormal / 8) * 1.5)) : 0)
+    const tpiClerkOtShifts = baseNormal > 0 ? Math.round(amtRegularOt / (baseNormal * 2)) : 0
+
+    const detailRegularOt = isTpiSlip && amtRegularOt > 0
+      ? (isClerk
+          ? `฿${baseNormal} × 2 × ${tpiClerkOtShifts} วัน (กะ 8 ชม.)`
+          : `(฿${baseNormal} ÷ 8) × 1.5 × ${tpiRegularOtHours} ชม.`)
+      : null
+
+    const detailNormal = dnDays > 0 ? (isClerk ? `฿${Math.round(clerkDaily)} × ${dnDays} วัน` : `฿${baseNormal} × ${dnDays} วัน`) : null
+    const detailShift  = !isClerk && dsDays > 0 && baseShift > 0 ? `฿${Math.round(baseShift)} × ${dsDays} วัน` : null
     const detailOt     = isClerk && otHrs  > 0 ? `฿${clerkHourly.toFixed(2)} × 1.5 × ${otHrs} ชม.`
-                       : !isClerk && otDays > 0 ? `฿${Math.round(baseNormal + ds)} × 2 × ${otDays} วัน` : null
+                       : !isClerk && otDays > 0 ? `฿${Math.round(baseNormal + baseShift)} × 2 × ${otDays} วัน` : null
     const detailOt1x   = isClerk && ot1Hrs > 0 ? `฿${clerkHourly.toFixed(2)} × 1.0 × ${ot1Hrs} ชม.` : null
 
     const specialSubs = (entry.special_note as string || '').split(',').map((s: string) => s.trim()).filter(Boolean)
@@ -439,7 +476,32 @@ export default function LiffSlip() {
     const dSafe      = Number(entry.deduct_safety_equipment   || 0)
     const dUni       = Number(entry.deduct_uniform            || 0)
 
-    const income: SlipIncomeRow[] = [
+    const tpiTotalSpecial = amtPos + amtSpecial
+    const tpiSpecialSubs: string[] = []
+    if (amtPos > 0) {
+      tpiSpecialSubs.push(`ค่าตำแหน่ง ฿${amtPos.toLocaleString()}`)
+    }
+    if (entry.special_note) {
+      const notes = (entry.special_note as string).split(',').map(s => s.trim()).filter(Boolean)
+      notes.forEach(n => {
+        if (!n.includes('ค่าตำแหน่ง') && !tpiSpecialSubs.includes(n)) {
+          tpiSpecialSubs.push(n)
+        }
+      })
+    } else if (amtSpecial > 0) {
+      tpiSpecialSubs.push(`ค่า จป. ฿${amtSpecial.toLocaleString()}`)
+    }
+
+    const income: SlipIncomeRow[] = isTpiSlip ? [
+      { label: isClerk ? 'ค่าจ้างปกติ (วันธรรมดา)' : 'ค่าจ้างปกติ (8 ชม.)', value: amtNormal,    detail: detailNormal,    subs: [] },
+      { label: 'ค่ากะ',                                                     value: amtShift,     detail: detailShift,     subs: [] },
+      { label: 'OT วันหยุดนักขัตฤกษ์ (×2)',                                 value: amtHolidayOt, detail: detailHolidayOt, subs: [] },
+      { label: isClerk ? 'OT ล่วงเวลา (×2)' : 'OT ล่วงเวลา (×1.5)',         value: amtRegularOt, detail: detailRegularOt, subs: [] },
+      { label: 'ค่าไม้ส่วนเกิน',  value: amtWood,          detail: null, subs: [] },
+      { label: 'ค่าฟิล์ม',        value: amtFilm,          detail: null, subs: [] },
+      { label: 'เบี้ยขยัน',       value: amtDilig,         detail: null, subs: [] },
+      { label: 'เงินพิเศษ',       value: tpiTotalSpecial,  detail: null, subs: tpiSpecialSubs },
+    ].filter(r => r.value > 0 && r.label !== '') as SlipIncomeRow[] : [
       { label: isClerk ? 'ค่าจ้างปกติ (วันธรรมดา)' : 'ค่าจ้างปกติ (8 ชม.)', value: amtNormal, detail: detailNormal, subs: [] },
       { label: 'ค่ากะ (4 ชม.)',                                                 value: amtShift,  detail: detailShift,  subs: [] },
       { label: isClerk ? 'OT ล่วงเวลา (×1.5)' : 'OT วันหยุดนักขัตฤกษ์ (×2)', value: amtOt,    detail: detailOt,     subs: [] },

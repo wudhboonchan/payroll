@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import { useAppStore } from '../store/useAppStore'
 import { toast } from 'sonner'
@@ -12,6 +12,8 @@ import {
   parseEmployeeExcel,
   type ParsedRow,
 } from '../lib/employeeExcel'
+import { normalizePrefix, formatEmployeeFullName } from '../lib/formatters'
+import { isTpiCompany } from '../features/tpi/model'
 import '../styles/tokens.css'
 
 interface Props {
@@ -31,6 +33,18 @@ export default function EmployeeImportModal({ isOpen, onClose }: Props) {
   const [parseError, setParseError] = useState<string | null>(null)
   const [fileName, setFileName] = useState('')
 
+  const { data: factories = [] } = useQuery({
+    queryKey: ['factories-list'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('factories').select('id, name')
+      if (error) return []
+      return data || []
+    },
+    staleTime: 60000,
+  })
+  const currentFactoryName = factories.find(f => f.id === user?.factory_id)?.name || ''
+  const isTpi = isTpiCompany(currentFactoryName)
+
   const validRows = parsedRows.filter(r => r.errors.length === 0)
   const errorRows = parsedRows.filter(r => r.errors.length > 0)
 
@@ -42,9 +56,9 @@ export default function EmployeeImportModal({ isOpen, onClose }: Props) {
     setParseError(null)
     setFileName(file.name)
     try {
-      const rows = await parseEmployeeExcel(file)
+      const rows = await parseEmployeeExcel(file, { isTpi })
       if (rows.length === 0) {
-        setParseError('ไม่พบข้อมูลในไฟล์ กรุณาตรวจสอบว่ากรอกข้อมูลตั้งแต่แถวที่ 4')
+        setParseError('ไม่พบข้อมูลในไฟล์ กรุณาตรวจสอบว่ากรอกข้อมูลตั้งแต่แถวที่ 7')
         return
       }
       setParsedRows(rows)
@@ -52,7 +66,7 @@ export default function EmployeeImportModal({ isOpen, onClose }: Props) {
     } catch (err: unknown) {
       setParseError((err as Error).message)
     }
-  }, [])
+  }, [isTpi])
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -71,28 +85,58 @@ export default function EmployeeImportModal({ isOpen, onClose }: Props) {
       if (!user?.factory_id) throw new Error('ไม่พบ factory context')
       const payload = validRows.map(r => ({
         employee_code: r.data.employee_code,
-        prefix: r.data.prefix || null,
+        prefix: normalizePrefix(r.data.prefix, r.data.nationality, r.data.first_name, isTpi) || null,
         first_name: r.data.first_name,
         last_name: r.data.last_name?.trim() || '',
         nationality: r.data.nationality || 'ไทย',
         national_id: r.data.national_id || null,
-        position: r.data.position || 'worker',
-        wage_type: r.data.position === 'clerk' ? 'monthly' : 'daily',
-        rate_per_12h: Number(r.data.rate_per_12h),
-        payment_method: r.data.payment_method as 'cash' | 'bank_transfer',
+        position: (r.data.position || 'worker') as 'worker' | 'clerk',
+        job_title: r.data.job_title || null,
+        wage_type: (isTpi ? 'daily' : (r.data.position === 'clerk' ? 'monthly' : 'daily')) as 'daily' | 'monthly',
+        rate_per_12h: isTpi ? 0 : (Number(r.data.rate_per_12h) || 0),
+        payment_method: (r.data.payment_method || 'bank_transfer') as 'cash' | 'bank_transfer',
         bank_name: r.data.payment_method === 'bank_transfer' ? r.data.bank_name || null : null,
         bank_account: r.data.payment_method === 'bank_transfer' ? r.data.bank_account || null : null,
         status: (r.data.status || 'active') as 'active' | 'inactive',
+        is_safety_officer: r.data.is_safety_officer === 'true',
+        has_position_allowance: r.data.has_position_allowance === 'true',
+        exempt_social_security: r.data.exempt_social_security === 'true',
+        data_complete: r.data.data_complete === 'true',
         notes: r.data.notes || null,
         factory_id: user.factory_id,
       }))
-      const { error } = await supabase
+      const { data: upsertedEmps, error } = await supabase
         .from('employees')
         .upsert(payload, { onConflict: 'employee_code,factory_id', ignoreDuplicates: false })
+        .select('id, employee_code')
       if (error) throw error
+
+      // In TPI, upsert wage profiles for each imported employee
+      if (isTpi && upsertedEmps && upsertedEmps.length > 0) {
+        const codeToId = new Map(upsertedEmps.map(e => [e.employee_code, e.id]))
+        const profilePayload = validRows.map(r => {
+          const empId = codeToId.get(r.data.employee_code)
+          if (!empId) return null
+          return {
+            employee_id: empId,
+            factory_id: user.factory_id,
+            rate_tier: r.data.rate_tier === 'skilled' ? 'skilled' : 'normal',
+            updated_at: new Date().toISOString(),
+          }
+        }).filter(Boolean)
+        if (profilePayload.length > 0) {
+          const { error: profileErr } = await supabase
+            .from('tpi_employee_wage_profiles')
+            .upsert(profilePayload, { onConflict: 'factory_id,employee_id' })
+          if (profileErr) console.error('Error saving tpi profiles:', profileErr)
+        }
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['employees'] })
+      queryClient.invalidateQueries({ queryKey: ['employees-all'] })
+      queryClient.invalidateQueries({ queryKey: ['tpi-profiles'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] })
       toast.success(`นำเข้าพนักงานสำเร็จ ${validRows.length} คน`)
       setStep('done')
     },
@@ -168,7 +212,7 @@ export default function EmployeeImportModal({ isOpen, onClose }: Props) {
                 <button
                   className="vk-btn"
                   style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 6, border: '1px solid var(--vk-persimmon)', color: 'var(--vk-persimmon)', background: 'transparent', whiteSpace: 'nowrap' }}
-                  onClick={downloadEmployeeTemplate}
+                  onClick={() => downloadEmployeeTemplate({ isTpi, factoryName: currentFactoryName })}
                 >
                   <FileDown style={{ width: 14, height: 14 }} />
                   ดาวน์โหลด Template
@@ -254,33 +298,83 @@ export default function EmployeeImportModal({ isOpen, onClose }: Props) {
 
               {/* Preview table */}
               <div style={{ border: '1px solid var(--vk-rule)', overflow: 'hidden' }}>
-                <div style={{ background: 'var(--vk-paper)', padding: '8px 14px', borderBottom: '1px solid var(--vk-rule)' }}>
+                <div style={{ background: 'var(--vk-paper)', padding: '8px 14px', borderBottom: '1px solid var(--vk-rule)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span className="vk-eyebrow">ตัวอย่างข้อมูลที่จะนำเข้า</span>
+                  <span style={{ fontSize: 11, color: 'var(--vk-ink-3)' }}>
+                    {isTpi ? 'ระบบคำนวณค่าแรงตามรหัสงานและประเภทค่าแรง' : ''}
+                  </span>
                 </div>
-                <div style={{ overflowX: 'auto', maxHeight: 240 }}>
+                <div style={{ overflowX: 'auto', maxHeight: 260 }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                     <thead>
                       <tr style={{ background: 'var(--vk-bone)', position: 'sticky', top: 0 }}>
-                        {['สถานะ', 'รหัส', 'ชื่อ-นามสกุล', 'สัญชาติ', 'ค่าแรง', 'วิธีรับเงิน'].map(h => (
+                        {[
+                          'สถานะ', 'รหัส', 'ชื่อ-นามสกุล', 'สัญชาติ', 'กลุ่มงาน', 'ตำแหน่งงาน',
+                          isTpi ? 'ประเภทค่าแรง' : 'ค่าแรง', 'สิทธิพิเศษ/เงื่อนไข', 'วิธีรับเงิน'
+                        ].map(h => (
                           <th key={h} style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: 'var(--vk-ink-2)', whiteSpace: 'nowrap', borderBottom: '1px solid var(--vk-rule)' }}>{h}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
-                      {parsedRows.map(r => (
-                        <tr key={r.rowNum} style={{ background: r.errors.length > 0 ? '#fef2f2' : 'var(--vk-paper)', borderBottom: '1px solid var(--vk-rule-soft)' }}>
-                          <td style={{ padding: '7px 12px' }}>
-                            {r.errors.length === 0
-                              ? <CheckCircle2 style={{ width: 14, height: 14, color: 'var(--vk-jade)' }} />
-                              : <AlertCircle style={{ width: 14, height: 14, color: '#dc2626' }} />}
-                          </td>
-                          <td style={{ padding: '7px 12px', fontFamily: 'var(--vk-mono)', fontWeight: 600, color: 'var(--vk-ink)' }}>{r.data.employee_code}</td>
-                          <td style={{ padding: '7px 12px', color: 'var(--vk-ink-2)' }}>{r.data.prefix} {r.data.first_name} {r.data.last_name}</td>
-                          <td style={{ padding: '7px 12px', color: 'var(--vk-ink-3)' }}>{r.data.nationality}</td>
-                          <td style={{ padding: '7px 12px', fontFamily: 'var(--vk-mono)', color: 'var(--vk-ink)' }}>{r.data.rate_per_12h}</td>
-                          <td style={{ padding: '7px 12px', color: 'var(--vk-ink-3)' }}>{r.data.payment_method === 'bank_transfer' ? 'โอนบัญชี' : 'เงินสด'}</td>
-                        </tr>
-                      ))}
+                      {parsedRows.map(r => {
+                        const isForeignWaitSS = r.data.nationality !== 'ไทย' && !r.data.national_id
+                        return (
+                          <tr key={r.rowNum} style={{ background: r.errors.length > 0 ? '#fef2f2' : 'var(--vk-paper)', borderBottom: '1px solid var(--vk-rule-soft)' }}>
+                            <td style={{ padding: '7px 12px' }}>
+                              {r.errors.length === 0
+                                ? <CheckCircle2 style={{ width: 14, height: 14, color: 'var(--vk-jade)' }} />
+                                : <AlertCircle style={{ width: 14, height: 14, color: '#dc2626' }} />}
+                            </td>
+                            <td style={{ padding: '7px 12px', fontFamily: 'var(--vk-mono)', fontWeight: 600, color: 'var(--vk-ink)' }}>{r.data.employee_code}</td>
+                            <td style={{ padding: '7px 12px', color: 'var(--vk-ink-2)', whiteSpace: 'nowrap' }}>{formatEmployeeFullName(r.data, isTpi)}</td>
+                            <td style={{ padding: '7px 12px', color: 'var(--vk-ink-3)', whiteSpace: 'nowrap' }}>{r.data.nationality}</td>
+                            <td style={{ padding: '7px 12px', color: 'var(--vk-ink-3)', whiteSpace: 'nowrap' }}>
+                              {r.data.position === 'clerk' ? 'เสมียน' : 'พนักงานทั่วไป'}
+                            </td>
+                            <td style={{ padding: '7px 12px', color: 'var(--vk-ink-2)', whiteSpace: 'nowrap' }}>
+                              {r.data.job_title || '—'}
+                            </td>
+                            <td style={{ padding: '7px 12px', whiteSpace: 'nowrap' }}>
+                              {isTpi ? (
+                                r.data.rate_tier === 'skilled' ? (
+                                  <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: '#dcfce7', color: '#15803d' }}>
+                                    ค่าแรงฝีมือ
+                                  </span>
+                                ) : (
+                                  <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: '#fef3c7', color: '#92400e' }}>
+                                    ค่าแรงปกติ
+                                  </span>
+                                )
+                              ) : (
+                                <span style={{ fontFamily: 'var(--vk-mono)' }}>{r.data.rate_per_12h || '—'}</span>
+                              )}
+                            </td>
+                            <td style={{ padding: '7px 12px' }}>
+                              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                                {r.data.is_safety_officer === 'true' && (
+                                  <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 5px', borderRadius: 4, background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0' }}>จป.</span>
+                                )}
+                                {r.data.has_position_allowance === 'true' && (
+                                  <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 5px', borderRadius: 4, background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe' }}>ค่าตำแหน่ง</span>
+                                )}
+                                {r.data.exempt_social_security === 'true' && (
+                                  <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 5px', borderRadius: 4, background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1' }}>ยกเว้น ปกส</span>
+                                )}
+                                {isForeignWaitSS && (
+                                  <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 5px', borderRadius: 4, background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa' }}>รอ ปกส</span>
+                                )}
+                                {r.data.data_complete !== 'true' && !isForeignWaitSS && (
+                                  <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 5px', borderRadius: 4, background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca' }}>ข้อมูลไม่ครบ</span>
+                                )}
+                              </div>
+                            </td>
+                            <td style={{ padding: '7px 12px', color: 'var(--vk-ink-3)', whiteSpace: 'nowrap' }}>
+                              {r.data.payment_method === 'bank_transfer' ? 'โอนบัญชี' : 'เงินสด'}
+                            </td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                   </table>
                 </div>
