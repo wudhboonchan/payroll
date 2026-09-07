@@ -8,7 +8,8 @@ import { toast } from 'sonner'
 import { Download, FileText, Grid3x3, ShieldCheck, Loader2, Search, Check, X, Users, FileSpreadsheet, Printer } from 'lucide-react'
 import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
-import { formatPeriodLabel, compareEmployeeCode } from '../lib/formatters'
+import { formatPeriodLabel, compareEmployeeCode, formatEmployeeFullName } from '../lib/formatters'
+import { isTpiCompany } from '../features/tpi/model'
 import '../styles/tokens.css'
 
 interface PayrollPeriod { id: string; period_start: string; period_end: string; status: string | null }
@@ -33,6 +34,15 @@ function thaiDateTimeNow() {
 }
 const mono = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2 })
 const POSITIONS: Record<string, string> = { worker: 'พนักงานทั่วไป', clerk: 'เสมียน', foreman: 'โฟร์แมน', office: 'พนักงานออฟฟิศ', manager: 'ผู้จัดการ' }
+
+function cleanNationality(nationality: string | null | undefined): string {
+  if (!nationality || nationality === 'ไทย') return 'ไทย'
+  const lower = nationality.toLowerCase().trim()
+  if (lower.includes('myanmar') || lower.includes('burma') || nationality.includes('เมียนมา') || nationality.includes('กะเหรี่ยง')) return 'เมียนมา'
+  if (nationality.includes('กัมพูชา') || lower.includes('cambodia')) return 'กัมพูชา'
+  if (nationality.includes('ลาว') || lower.includes('lao')) return 'ลาว'
+  return nationality.trim()
+}
 
 // ── Generate print HTML from entry data ──────────────────────────────────────
 const isWeekend = (d: string) => { const day = new Date(d).getDay(); return day === 0 || day === 6 }
@@ -527,8 +537,27 @@ function buildSummarySinglePdfHtml(emp: any, period: any, stats: any, advances: 
 // ── Main component ────────────────────────────────────────────────────────────
 export default function Export() {
   const { onMenuClick } = useOutletContext<{ onMenuClick: () => void }>()
-  const { user } = useAppStore()
+  const { user, companyContext } = useAppStore()
   const isNormalUser = user?.role === 'normalUser'
+
+  // Fetch factories list to reliably identify active factory name
+  const { data: factories = [] } = useQuery({
+    queryKey: ['factories-list'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('factories').select('id, name')
+      if (error) return []
+      return data || []
+    },
+    staleTime: 60000,
+  })
+
+  const currentFactoryName =
+    factories.find((f) => f.id === user?.factory_id)?.name ||
+    companyContext?.factoryName ||
+    companyContext?.name ||
+    ''
+
+  const isTpi = isTpiCompany(currentFactoryName)
 
   const [exportType,       setExportType]       = useState<'month' | 'period'>('month')
   const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(null)
@@ -557,6 +586,59 @@ export default function Export() {
   const [summaryMonths,       setSummaryMonths]       = useState<string[]>([])
   const [summaryEmpSearch,    setSummaryEmpSearch]    = useState('')
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false)
+
+  // Employee Database Export modal state
+  const [showEmployeeExportModal, setShowEmployeeExportModal] = useState(false)
+  const [empStatusFilter, setEmpStatusFilter]                 = useState<'all' | 'active' | 'inactive'>('all')
+  const [splitByNationality, setSplitByNationality]           = useState(true)
+  const [empNatFilter, setEmpNatFilter]                       = useState<string>('all')
+  const [isExportingEmployees, setIsExportingEmployees]       = useState(false)
+
+  // Full employees query for employee database export
+  const { data: allFactoryEmployees = [], isLoading: isLoadingAllEmployees } = useQuery<any[]>({
+    queryKey: ['employees-export-full', user?.factory_id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('employees')
+        .select('*')
+        .eq('factory_id', user?.factory_id ?? '')
+        .order('employee_code')
+        .limit(5000)
+      if (error) throw error
+      return (data || []).sort((a: any, b: any) => compareEmployeeCode(a.employee_code, b.employee_code))
+    },
+    enabled: !!user?.factory_id && showEmployeeExportModal,
+    staleTime: 30000,
+  })
+
+  // TPI Wage profiles query (if TPI factory)
+  const { data: tpiProfiles = [] } = useQuery<any[]>({
+    queryKey: ['tpi-wage-profiles-export', user?.factory_id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('tpi_employee_wage_profiles')
+        .select('*')
+        .eq('factory_id', user?.factory_id ?? '')
+        .limit(5000)
+      if (error) return []
+      return data || []
+    },
+    enabled: !!user?.factory_id && showEmployeeExportModal && isTpi,
+    staleTime: 30000,
+  })
+
+  const filteredEmployeesForExport = (allFactoryEmployees || []).filter(e => {
+    if (empStatusFilter === 'active' && e.status !== 'active') return false
+    if (empStatusFilter === 'inactive' && e.status !== 'inactive') return false
+    if (empNatFilter !== 'all' && cleanNationality(e.nationality) !== empNatFilter) return false
+    return true
+  })
+
+  const exportNatsPresent = Array.from(new Set(filteredEmployeesForExport.map(e => cleanNationality(e.nationality)))).sort((a, b) => {
+    if (a === 'ไทย') return -1
+    if (b === 'ไทย') return 1
+    return a.localeCompare(b, 'th')
+  })
 
   const { data: periods = [] } = useQuery<PayrollPeriod[]>({
     queryKey: ['periods', user?.factory_id],
@@ -713,6 +795,144 @@ export default function Export() {
       toast.success('ดาวน์โหลดฟอร์มประกันสังคมสำเร็จ')
     } catch(e:any){toast.error('เกิดข้อผิดพลาด',{description:e.message})}
     finally{setIsExportingSSO(false)}
+  }
+
+  // ── Employee Database Excel ────────────────────────────────────────────────
+  const handleExportEmployeeDatabase = async () => {
+    if (!filteredEmployeesForExport.length) {
+      toast.error('ไม่พบข้อมูลพนักงานตามเงื่อนไขที่เลือก')
+      return
+    }
+
+    setIsExportingEmployees(true)
+    try {
+      const XLSX = await import('xlsx')
+      const tpiProfileMap: Record<string, any> = {}
+      if (isTpi && tpiProfiles.length > 0) {
+        tpiProfiles.forEach(p => {
+          if (p.employee_id) tpiProfileMap[p.employee_id] = p
+        })
+      }
+
+      const mapEmployeeToRow = (emp: any, idx: number) => {
+        const nat = cleanNationality(emp.nationality)
+        const fullName = formatEmployeeFullName(emp, isTpi)
+        const posLabel = POSITIONS[emp.position] || emp.position || ''
+        const payMethod = emp.payment_method === 'bank_transfer' ? 'โอนธนาคาร' : (emp.payment_method === 'cash' ? 'เงินสด' : (emp.payment_method || '-'))
+        const bankName = emp.payment_method === 'bank_transfer' ? (emp.bank_name || '-') : '-'
+        const bankAccount = emp.payment_method === 'bank_transfer' ? (emp.bank_account || '-') : '-'
+        const profile = tpiProfileMap[emp.id]
+
+        const row: Record<string, any> = {
+          'ลำดับ': idx + 1,
+          'รหัสพนักงาน': emp.employee_code || '',
+          'คำนำหน้า': emp.prefix || '',
+          'ชื่อ': emp.first_name || '',
+          'นามสกุล': emp.last_name || '',
+          'ชื่อ-นามสกุล': fullName,
+          'สัญชาติ': nat,
+          'เลขประจำตัวประชาชน/พาสปอร์ต': emp.national_id || '',
+          'ตำแหน่ง': posLabel,
+          'หน้าที่/แผนก': emp.job_title || '',
+          'ประเภทค่าจ้าง': emp.wage_type === 'monthly' ? 'รายเดือน' : 'รายวัน (12 ชม.)',
+          'อัตราค่าจ้าง (บาท)': Number(emp.rate_per_12h) || 0,
+        }
+
+        if (isTpi) {
+          row['ระดับค่าแรง TPI'] = profile?.rate_tier === 'skilled' ? 'ช่างฝีมือ (Skilled)' : 'ทั่วไป (Normal)'
+          row['วันที่เริ่มเป็นช่างฝีมือ'] = (profile?.rate_tier === 'skilled' && profile?.skilled_from) ? profile.skilled_from : '-'
+        }
+
+        row['วิธีรับเงิน'] = payMethod
+        row['ธนาคาร'] = bankName
+        row['เลขที่บัญชี'] = bankAccount
+        row['เลขประจำตัวผู้เสียภาษี/ประกันสังคม'] = emp.social_security_number || emp.national_id || '-'
+        row['ยกเว้นประกันสังคม'] = emp.exempt_social_security ? 'ยกเว้น' : 'หัก ปกส.'
+        row['เจ้าหน้าที่ จป.'] = emp.is_safety_officer ? 'เป็น จป.' : '-'
+        row['ค่าตำแหน่ง'] = emp.has_position_allowance ? 'มี' : '-'
+        row['สถานะ'] = emp.status === 'active' ? 'ปฏิบัติงานอยู่' : 'พ้นสภาพ'
+        row['ความสมบูรณ์ข้อมูล'] = emp.data_complete ? 'สมบูรณ์' : 'ไม่สมบูรณ์'
+        row['หมายเหตุ'] = emp.notes || ''
+        row['วันที่ลงทะเบียน'] = emp.created_at ? format(new Date(emp.created_at), 'dd/MM/yyyy') : ''
+
+        return row
+      }
+
+      const colWidths = [
+        { wch: 6 },  // ลำดับ
+        { wch: 12 }, // รหัสพนักงาน
+        { wch: 10 }, // คำนำหน้า
+        { wch: 18 }, // ชื่อ
+        { wch: 18 }, // นามสกุล
+        { wch: 26 }, // ชื่อ-นามสกุล
+        { wch: 12 }, // สัญชาติ
+        { wch: 24 }, // เลขประจำตัวประชาชน/พาสปอร์ต
+        { wch: 16 }, // ตำแหน่ง
+        { wch: 18 }, // หน้าที่/แผนก
+        { wch: 16 }, // ประเภทค่าจ้าง
+        { wch: 16 }, // อัตราค่าจ้าง
+        ...(isTpi ? [{ wch: 20 }, { wch: 20 }] : []),
+        { wch: 14 }, // วิธีรับเงิน
+        { wch: 20 }, // ธนาคาร
+        { wch: 20 }, // เลขบัญชี
+        { wch: 24 }, // เลข ปกส.
+        { wch: 16 }, // ยกเว้นประกันสังคม
+        { wch: 14 }, // เจ้าหน้าที่ จป.
+        { wch: 14 }, // ค่าตำแหน่ง
+        { wch: 14 }, // สถานะ
+        { wch: 16 }, // ความสมบูรณ์ข้อมูล
+        { wch: 24 }, // หมายเหตุ
+        { wch: 14 }, // วันที่ลงทะเบียน
+      ]
+
+      const wb = XLSX.utils.book_new()
+
+      // Master sheet label
+      const masterSheetName = empStatusFilter === 'active'
+        ? 'พนง.ปัจจุบัน'
+        : (empStatusFilter === 'inactive' ? 'พนง.พ้นสภาพ' : 'พนักงานทั้งหมด')
+
+      const masterRows = filteredEmployeesForExport.map(mapEmployeeToRow)
+      const masterWs = XLSX.utils.json_to_sheet(masterRows)
+      masterWs['!cols'] = colWidths
+      XLSX.utils.book_append_sheet(wb, masterWs, masterSheetName)
+
+      // If splitByNationality, add one sheet per nationality
+      if (splitByNationality) {
+        const natsPresent = Array.from(new Set(filteredEmployeesForExport.map(e => cleanNationality(e.nationality))))
+        natsPresent.sort((a, b) => {
+          if (a === 'ไทย') return -1
+          if (b === 'ไทย') return 1
+          return a.localeCompare(b, 'th')
+        })
+
+        natsPresent.forEach(nat => {
+          const natList = filteredEmployeesForExport.filter(e => cleanNationality(e.nationality) === nat)
+          if (natList.length > 0) {
+            const natRows = natList.map(mapEmployeeToRow)
+            const natWs = XLSX.utils.json_to_sheet(natRows)
+            natWs['!cols'] = colWidths
+            const safeSheetName = (nat || 'ไม่ระบุ').replace(/[\/*?:[\]]/g, '').slice(0, 31)
+            if (safeSheetName !== masterSheetName && !wb.SheetNames.includes(safeSheetName)) {
+              XLSX.utils.book_append_sheet(wb, natWs, safeSheetName)
+            }
+          }
+        })
+      }
+
+      const dateStr = format(new Date(), 'yyyyMMdd')
+      const factoryTag = currentFactoryName ? currentFactoryName.replace(/[\s/*?:[\]]/g, '_') : 'Factory'
+      const statusTag = empStatusFilter === 'active' ? 'Active' : (empStatusFilter === 'inactive' ? 'Inactive' : 'All')
+      const fileName = `Employees_${factoryTag}_${statusTag}_${dateStr}.xlsx`
+
+      XLSX.writeFile(wb, fileName)
+      toast.success(`ส่งออกฐานข้อมูลพนักงานสำเร็จ (${filteredEmployeesForExport.length} คน)`)
+      setShowEmployeeExportModal(false)
+    } catch (err: any) {
+      toast.error('เกิดข้อผิดพลาดในการส่งออกไฟล์', { description: err.message })
+    } finally {
+      setIsExportingEmployees(false)
+    }
   }
 
   // ── PDF Slips ────────────────────────────────────────────────────────────────
@@ -1055,6 +1275,7 @@ body{margin:0;padding:0;background:#fff;font-family:'Sarabun',sans-serif}
 
   const allCards = [
     { icon: Grid3x3,      color: 'var(--vk-jade)',      title: 'ตาราง Payroll รวม',        desc: 'ดาวน์โหลดข้อมูล Payroll ทุกคนในรูปแบบ .xlsx',                      btn: 'Download Excel', loading: isExportingXlsx, onClick: handleExportPayroll, adminOnly: true  },
+    { icon: FileSpreadsheet, color: '#0284c7',          title: 'ฐานข้อมูลพนักงาน (Excel)',  desc: 'ส่งออกทะเบียนประวัติพนักงานทุกคน พร้อมตัวเลือกกรองสถานะ และแยก Sheet ตามสัญชาติ', btn: 'Export ฐานข้อมูล', loading: isExportingEmployees, onClick: () => setShowEmployeeExportModal(true), adminOnly: true },
     { icon: FileText,     color: 'var(--vk-crimson)',    title: 'PDF – Pay Slip รายบุคคล',  desc: 'สร้างไฟล์ PDF Pay Slip แยกตามรายชื่อพนักงาน หรือพิมพ์ทั้งบริษัท', btn: 'Download PDF',   loading: false,           onClick: ()=>setShowPdfModal(true), adminOnly: false },
     { icon: Users,        color: 'var(--vk-jade)',      title: 'สรุปภาพรวมพนักงาน',       desc: 'ส่งออกรายงานสรุปรายได้และบันทึกรายวัน (PDF/Excel) รายบุคคล หรือทั้งบริษัท', btn: 'ส่งออกข้อมูล',  loading: false,           onClick: ()=>setShowSummaryModal(true), adminOnly: false },
     { icon: ShieldCheck,  color: 'var(--vk-persimmon)',  title: 'ฟอร์มประกันสังคม',          desc: 'Export ข้อมูลเลขบัตร + ยอดประกันสังคม สำหรับยื่น สปส. รายเดือน',  btn: 'Download Excel', loading: isExportingSSO,  onClick: handleExportSSO,          adminOnly: true  },
@@ -1429,6 +1650,295 @@ body{margin:0;padding:0;background:#fff;font-family:'Sarabun',sans-serif}
                 ดาวน์โหลด Excel
               </button>
               <button className="vk-btn" onClick={() => setShowSummaryModal(false)}>ยกเลิก</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Employee Database Export Modal ────────────────────────────────────── */}
+      {showEmployeeExportModal && (
+        <div
+          className="vk-root"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 50,
+            background: 'rgba(22,19,17,0.6)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
+          }}
+          onClick={() => setShowEmployeeExportModal(false)}
+        >
+          <div
+            style={{
+              background: 'var(--vk-paper)',
+              border: '1px solid var(--vk-rule)',
+              width: '100%',
+              maxWidth: 540,
+              maxHeight: '92vh',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Modal header */}
+            <div
+              style={{
+                background: '#0284c7',
+                color: '#fff',
+                padding: '18px 24px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexShrink: 0,
+              }}
+            >
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <FileSpreadsheet style={{ width: 20, height: 20 }} />
+                  Export ฐานข้อมูลพนักงาน (Excel)
+                </div>
+                <div style={{ fontSize: 11, opacity: 0.85, marginTop: 3 }}>
+                  ส่งออกทะเบียนข้อมูลพนักงานทั้งหมด พร้อมตัวเลือกแยก Sheet ตามสัญชาติ
+                </div>
+              </div>
+              <button
+                onClick={() => setShowEmployeeExportModal(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: '#fff',
+                  opacity: 0.75,
+                  padding: 4,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <X style={{ width: 18, height: 18 }} />
+              </button>
+            </div>
+
+            {/* Modal body */}
+            <div
+              style={{
+                flex: 1,
+                overflowY: 'auto',
+                padding: '22px 24px',
+                background: 'var(--vk-bone)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 20,
+              }}
+            >
+              {/* Scope filter */}
+              <div>
+                <div className="vk-eyebrow" style={{ marginBottom: 8 }}>1. ขอบเขตพนักงาน</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                  {[
+                    { v: 'all', label: 'ทุกคน', sub: 'ทุกสถานะ' },
+                    { v: 'active', label: 'พนง. ปัจจุบัน', sub: 'ปฏิบัติงานอยู่' },
+                    { v: 'inactive', label: 'พ้นสภาพแล้ว', sub: 'ลาออก / สิ้นสุด' },
+                  ].map(opt => {
+                    const active = empStatusFilter === opt.v
+                    return (
+                      <div
+                        key={opt.v}
+                        onClick={() => setEmpStatusFilter(opt.v as any)}
+                        style={{
+                          padding: '12px 10px',
+                          border: `1px solid ${active ? '#0284c7' : 'var(--vk-rule)'}`,
+                          background: active ? '#0284c7' : 'var(--vk-paper)',
+                          cursor: 'pointer',
+                          transition: 'all 0.12s',
+                          textAlign: 'center',
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontWeight: 700,
+                            fontSize: 13,
+                            color: active ? '#fff' : 'var(--vk-ink)',
+                          }}
+                        >
+                          {opt.label}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 11,
+                            color: active ? 'rgba(255,255,255,0.85)' : 'var(--vk-ink-3)',
+                            marginTop: 2,
+                          }}
+                        >
+                          {opt.sub}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* Split by nationality checkbox */}
+              <div
+                style={{
+                  border: '1px solid var(--vk-rule)',
+                  background: 'var(--vk-paper)',
+                  padding: '14px 16px',
+                }}
+              >
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 12,
+                    cursor: 'pointer',
+                    userSelect: 'none',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={splitByNationality}
+                    onChange={e => setSplitByNationality(e.target.checked)}
+                    style={{
+                      marginTop: 2,
+                      accentColor: '#0284c7',
+                      width: 17,
+                      height: 17,
+                      cursor: 'pointer',
+                    }}
+                  />
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--vk-ink)' }}>
+                      แยกตามสัญชาติ (แยกออกเป็น Tab ใน Excel)
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--vk-ink-3)', marginTop: 3, lineHeight: 1.45 }}>
+                      สร้างชีตแยกตามแต่ละสัญชาติ (เช่น ชีตไทย, เมียนมา) และมีชีตรวมพนักงานทั้งหมดเป็นชีตแรก
+                    </div>
+                  </div>
+                </label>
+              </div>
+
+              {/* Nationality filter pills */}
+              <div>
+                <div className="vk-eyebrow" style={{ marginBottom: 8 }}>2. กรองเฉพาะสัญชาติ (ตัวเลือกเสริม)</div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {[
+                    { v: 'all', l: 'ทุกสัญชาติ' },
+                    { v: 'ไทย', l: '🇹🇭 ไทย' },
+                    { v: 'เมียนมา', l: '🇲🇲 เมียนมา' },
+                    { v: 'กัมพูชา', l: '🇰🇭 กัมพูชา' },
+                    { v: 'ลาว', l: '🇱🇦 ลาว' },
+                  ].map(nat => {
+                    const active = empNatFilter === nat.v
+                    return (
+                      <button
+                        key={nat.v}
+                        type="button"
+                        onClick={() => setEmpNatFilter(nat.v)}
+                        style={{
+                          padding: '6px 14px',
+                          fontSize: 12,
+                          fontFamily: 'var(--vk-sans)',
+                          fontWeight: active ? 700 : 400,
+                          border: `1px solid ${active ? '#0284c7' : 'var(--vk-rule)'}`,
+                          background: active ? '#0284c7' : 'var(--vk-paper)',
+                          color: active ? '#fff' : 'var(--vk-ink)',
+                          cursor: 'pointer',
+                          transition: 'all 0.1s',
+                        }}
+                      >
+                        {nat.l}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* Summary / Preview card */}
+              <div
+                style={{
+                  background: 'var(--vk-paper)',
+                  border: '1px solid var(--vk-rule)',
+                  padding: '14px 16px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 10,
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: 12, color: 'var(--vk-ink-3)' }}>จำนวนพนักงานที่จะนำออก:</span>
+                  <span style={{ fontFamily: 'var(--vk-mono)', fontWeight: 700, fontSize: 15, color: '#0284c7' }}>
+                    {isLoadingAllEmployees ? 'กำลังโหลด...' : `${filteredEmployeesForExport.length} คน`}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: 12, color: 'var(--vk-ink-3)' }}>โครงสร้างไฟล์ Excel:</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--vk-ink)', textAlign: 'right' }}>
+                    {splitByNationality
+                      ? `1 Tab รวม + ${exportNatsPresent.length} Tabs สัญชาติ (${exportNatsPresent.join(', ') || 'ไม่มี'})`
+                      : '1 Tab รวม (ไม่แยกแท็บสัญชาติ)'}
+                  </span>
+                </div>
+                {isTpi && (
+                  <div style={{ fontSize: 11, color: '#16a34a', borderTop: '1px dashed var(--vk-rule-soft)', paddingTop: 6, marginTop: 2 }}>
+                    ✓ รวมข้อมูลระดับค่าแรง TPI และวันที่เริ่มเป็นช่างฝีมือ
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Modal footer */}
+            <div
+              style={{
+                padding: '16px 24px',
+                borderTop: '1px solid var(--vk-rule)',
+                background: 'var(--vk-paper)',
+                display: 'flex',
+                gap: 10,
+                flexShrink: 0,
+              }}
+            >
+              <button
+                className="vk-btn"
+                onClick={handleExportEmployeeDatabase}
+                disabled={isExportingEmployees || isLoadingAllEmployees || filteredEmployeesForExport.length === 0}
+                style={{
+                  flex: 1,
+                  borderColor: '#0284c7',
+                  background: '#0284c7',
+                  color: '#fff',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6,
+                  height: 38,
+                  opacity: (isExportingEmployees || isLoadingAllEmployees || filteredEmployeesForExport.length === 0) ? 0.6 : 1,
+                }}
+              >
+                {isExportingEmployees ? (
+                  <>
+                    <Loader2 style={{ width: 14, height: 14 }} className="animate-spin" />
+                    กำลังสร้างไฟล์ Excel...
+                  </>
+                ) : (
+                  <>
+                    <FileSpreadsheet style={{ width: 15, height: 15 }} />
+                    ดาวน์โหลด Excel ({filteredEmployeesForExport.length} คน)
+                  </>
+                )}
+              </button>
+              <button
+                className="vk-btn"
+                onClick={() => setShowEmployeeExportModal(false)}
+                style={{ height: 38, padding: '0 18px' }}
+              >
+                ยกเลิก
+              </button>
             </div>
           </div>
         </div>
