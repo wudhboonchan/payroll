@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useMemo } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
@@ -10,7 +10,8 @@ import { UserPlus, X, AlertTriangle } from 'lucide-react'
 import { NATIONALITIES } from '@/lib/constants'
 import { normalizePrefix } from '@/lib/formatters'
 import '../styles/tokens.css'
-import { isTpiCompany } from '../features/tpi/model'
+import { isTpiCompany, type Job } from '../features/tpi/model'
+import { demoJobs } from '../features/tpi/demoData'
 import './TpiShiftEntry.css'
 
 const employeeSchema = z
@@ -110,6 +111,40 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
   // TPI specific wage tier state ('normal' | 'skilled')
   const [tpiRateTier, setTpiRateTier] = useState<'normal' | 'skilled'>('normal')
   const [tpiSkilledFrom, setTpiSkilledFrom] = useState<string>('')
+  const [tpiJobCode, setTpiJobCode] = useState<string>('')
+  const [tpiJobId, setTpiJobId] = useState<string>('')
+
+  // Query TPI Job Codes for selection
+  const { data: dbTpiJobs = [] } = useQuery<Job[]>({
+    queryKey: ['tpi-jobs-for-employee-form', user?.factory_id],
+    enabled: !!user?.factory_id && isOpen && isTpi,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('tpi_job_codes')
+        .select('*')
+        .eq('factory_id', user!.factory_id)
+        .order('code')
+      if (error) return []
+      return (data || []) as Job[]
+    },
+    staleTime: 30000,
+  })
+
+  // Filter only Active jobs (active === true and not expired)
+  const activeTpiJobs = useMemo(() => {
+    const list = dbTpiJobs.length > 0 ? dbTpiJobs : demoJobs
+    const todayStr = new Date().toISOString().split('T')[0]
+    return list.filter((j) => {
+      if (!j.active) return false
+      if (j.expires_on && j.expires_on < todayStr) return false
+      if (j.valid_from && j.valid_from > todayStr) return false
+      return true
+    })
+  }, [dbTpiJobs])
+
+  const selectedActiveJob = useMemo(() => {
+    return activeTpiJobs.find((j) => j.code.trim().toLowerCase() === tpiJobCode.trim().toLowerCase() || j.id === tpiJobId)
+  }, [activeTpiJobs, tpiJobCode, tpiJobId])
 
   const { register, handleSubmit, reset, watch, setValue, formState: { errors } } = useForm<EmployeeFormValues>({
     resolver: zodResolver(employeeSchema) as any,
@@ -204,12 +239,25 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
       if (tpiWageProfile) {
         setTpiRateTier((tpiWageProfile.rate_tier as any) || 'normal')
         setTpiSkilledFrom(tpiWageProfile.skilled_from || '')
+        const foundCode = (tpiWageProfile as any).job_code || employeeData?.job_title || ''
+        setTpiJobCode(foundCode)
+        const matched = activeTpiJobs.find((j) => j.code.trim().toLowerCase() === foundCode.trim().toLowerCase() || j.id === (tpiWageProfile as any).job_id)
+        setTpiJobId(matched?.id || (tpiWageProfile as any).job_id || '')
+      } else if (employeeData) {
+        setTpiRateTier('normal')
+        setTpiSkilledFrom('')
+        const foundCode = employeeData.job_title || ''
+        setTpiJobCode(foundCode)
+        const matched = activeTpiJobs.find((j) => j.code.trim().toLowerCase() === foundCode.trim().toLowerCase())
+        setTpiJobId(matched?.id || '')
       } else {
         setTpiRateTier('normal')
         setTpiSkilledFrom('')
+        setTpiJobCode('')
+        setTpiJobId('')
       }
     }
-  }, [tpiWageProfile, employeeId, isOpen, isTpi])
+  }, [tpiWageProfile, employeeData, employeeId, isOpen, isTpi, activeTpiJobs])
 
   useEffect(() => {
     if (employeeData && isOpen) {
@@ -232,23 +280,23 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
           if (b.includes('เกษตร') || b.includes('ธ.ก.ส') || b.includes('ธกส') || b.toLowerCase().includes('baac')) {
             return 'ธ.ก.ส.'
           }
-          return b
+          return employeeData.bank_name || ''
         })(),
         bank_account: employeeData.bank_account || '',
-        rate_per_12h: employeeData.rate_per_12h,
-        status: employeeData.status || 'active',
+        rate_per_12h: employeeData.rate_per_12h || 0,
+        status: (employeeData.status as any) || 'active',
         notes: employeeData.notes || '',
-        data_complete: employeeData.data_complete ?? false,
-        exempt_social_security: employeeData.exempt_social_security ?? false,
-        is_safety_officer: employeeData.is_safety_officer ?? false,
-        has_position_allowance: employeeData.has_position_allowance ?? false,
+        data_complete: employeeData.data_complete || false,
+        exempt_social_security: employeeData.exempt_social_security || false,
+        is_safety_officer: employeeData.is_safety_officer || false,
+        has_position_allowance: employeeData.has_position_allowance || false,
         social_security_number: employeeData.social_security_number || '',
       })
     } else if (!employeeId && isOpen) {
       prevNationalityRef.current = 'ไทย'
       reset({
         employee_code: '',
-        prefix: '',
+        prefix: 'นาย',
         first_name: '',
         last_name: '',
         national_id: '',
@@ -287,6 +335,7 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
         factory_id: user.factory_id,
         bank_name: values.payment_method === 'cash' ? null : values.bank_name,
         bank_account: values.payment_method === 'cash' ? null : values.bank_account,
+        job_title: isTpi && tpiRateTier === 'skilled' ? tpiJobCode : values.job_title,
         wage_type: isTpi ? 'daily' : values.wage_type,
         rate_per_12h: isTpi ? 0 : values.rate_per_12h,
       }
@@ -302,15 +351,29 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
 
       // Upsert TPI Wage Profile if in TPI factory
       if (isTpi && savedEmpId) {
-        const { error: profileErr } = await supabase
+        const profilePayload: any = {
+          employee_id: savedEmpId,
+          factory_id: user.factory_id,
+          rate_tier: tpiRateTier,
+          skilled_from: tpiRateTier === 'skilled' ? (tpiSkilledFrom || null) : null,
+          job_id: tpiRateTier === 'skilled' ? (tpiJobId || null) : null,
+          job_code: tpiRateTier === 'skilled' ? (tpiJobCode || null) : null,
+          updated_at: new Date().toISOString(),
+        }
+
+        let { error: profileErr } = await supabase
           .from('tpi_employee_wage_profiles')
-          .upsert({
-            employee_id: savedEmpId,
-            factory_id: user.factory_id,
-            rate_tier: tpiRateTier,
-            skilled_from: tpiRateTier === 'skilled' ? (tpiSkilledFrom || null) : null,
-            updated_at: new Date().toISOString(),
-          }, { onConflict: 'factory_id,employee_id' })
+          .upsert(profilePayload, { onConflict: 'factory_id,employee_id' })
+
+        // Graceful fallback if migration phase 8 columns not in db yet
+        if (profileErr && profileErr.message && (profileErr.message.includes('job_id') || profileErr.message.includes('job_code') || profileErr.message.includes('column'))) {
+          const { job_id, job_code, ...cleanPayload } = profilePayload
+          const { error: fallbackErr } = await supabase
+            .from('tpi_employee_wage_profiles')
+            .upsert(cleanPayload, { onConflict: 'factory_id,employee_id' })
+          profileErr = fallbackErr
+        }
+
         if (profileErr) {
           console.error('Error saving tpi wage profile:', profileErr)
         }
@@ -344,6 +407,10 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
 
   // Called by form submit — intercepts inactive + existing shifts case (synchronous, uses pre-fetched count)
   const handleSave = (values: EmployeeFormValues) => {
+    if (isTpi && tpiRateTier === 'skilled' && !tpiJobCode) {
+      toast.error('กรุณาเลือกรหัสงานที่ Active อยู่สำหรับพนักงานค่าแรงฝีมือ')
+      return
+    }
     if (values.status === 'inactive' && employeeId && employeeShiftCount > 0) {
       setInactiveConfirm({ shiftCount: employeeShiftCount, pendingValues: values })
       return
@@ -555,17 +622,67 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
                 </div>
 
                 {tpiRateTier === 'skilled' && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4, padding: '10px 14px', background: '#f0fdf4', borderRadius: 6, border: '1px solid #bbf7d0' }}>
-                    <label style={{ fontSize: 12, fontWeight: 600, color: '#166534', whiteSpace: 'nowrap' }}>
-                      วันที่เริ่มใช้เรทฝีมือ (ถ้ามี):
-                    </label>
-                    <input
-                      type="date"
-                      value={tpiSkilledFrom}
-                      onChange={(e) => setTpiSkilledFrom(e.target.value)}
-                      className="vk-input"
-                      style={{ height: 34, background: '#ffffff', borderColor: '#86efac', maxWidth: 200, fontSize: 12 }}
-                    />
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 4, padding: '14px 16px', background: '#f0fdf4', borderRadius: 8, border: '1px solid #bbf7d0' }}>
+                    {/* Job Code selector */}
+                    <div>
+                      <label style={{ fontSize: 12, fontWeight: 700, color: '#166534', display: 'block', marginBottom: 6 }}>
+                        รหัสงานประจำ (สำหรับค่าแรงฝีมือ) <span style={{ color: 'var(--vk-crimson)' }}>*</span>
+                      </label>
+                      {activeTpiJobs.length === 0 ? (
+                        <div style={{ fontSize: 12, color: '#b45309', background: '#fef9c3', padding: '8px 12px', borderRadius: 6, border: '1px solid #fde047' }}>
+                          ไม่พบรหัสงานที่ Active — กรุณาเพิ่มรหัสงานในหน้าจัดการรหัสงาน (TPI) ก่อน
+                        </div>
+                      ) : (
+                        <select
+                          className="vk-input"
+                          value={tpiJobCode}
+                          onChange={(e) => {
+                            const code = e.target.value
+                            setTpiJobCode(code)
+                            const matched = activeTpiJobs.find(j => j.code === code)
+                            setTpiJobId(matched?.id || '')
+                          }}
+                          style={{ borderColor: !tpiJobCode ? 'var(--vk-crimson)' : '#86efac', background: '#fff' }}
+                        >
+                          <option value="">— เลือกรหัสงานประจำ —</option>
+                          {activeTpiJobs.map(j => (
+                            <option key={j.id} value={j.code}>
+                              {j.code}{j.description ? ` – ${j.description}` : ''}{j.skilled_rate ? ` (ฝีมือ ฿${j.skilled_rate.toLocaleString()})` : ''}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                      {!tpiJobCode && (
+                        <span style={{ fontSize: 11, color: 'var(--vk-crimson)', marginTop: 4, display: 'block' }}>
+                          ⚠ กรุณาเลือกรหัสงานประจำก่อนบันทึก
+                        </span>
+                      )}
+                      {tpiJobCode && selectedActiveJob && (
+                        <span style={{ fontSize: 11, color: '#166534', marginTop: 4, display: 'block' }}>
+                          ✓ รหัสงาน <strong>{selectedActiveJob.code}</strong> — เรทฝีมือ ฿{(selectedActiveJob.skilled_rate || 0).toLocaleString()} / เรทปกติ ฿{(selectedActiveJob.normal_rate || 0).toLocaleString()}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Skilled from date */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <label style={{ fontSize: 12, fontWeight: 600, color: '#166534', whiteSpace: 'nowrap' }}>
+                        วันที่เริ่มใช้เรทฝีมือ (ถ้ามี):
+                      </label>
+                      <input
+                        type="date"
+                        value={tpiSkilledFrom}
+                        onChange={(e) => setTpiSkilledFrom(e.target.value)}
+                        className="vk-input"
+                        style={{ height: 34, background: '#ffffff', borderColor: '#86efac', maxWidth: 200, fontSize: 12 }}
+                      />
+                    </div>
+
+                    {/* Use-case explanation */}
+                    <div style={{ fontSize: 11, color: '#166534', background: 'rgba(22,163,74,0.07)', padding: '8px 12px', borderRadius: 6, borderLeft: '3px solid #86efac', lineHeight: 1.6 }}>
+                      <strong>หลักการค่าแรงฝีมือ:</strong> พนักงานจะได้รับ<strong>เรทฝีมือ</strong>เฉพาะวันที่ปฏิบัติงานในรหัสงานประจำที่เลือกไว้เท่านั้น
+                      หากมีการโยกย้ายไปทำงานรหัสอื่นชั่วคราว จะคิดเป็น<strong>เรทปกติ</strong>แทน
+                    </div>
                   </div>
                 )}
               </div>

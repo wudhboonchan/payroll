@@ -5,8 +5,25 @@ export type Job = {
   quota: number; planned_morning: number | null; planned_afternoon: number | null; planned_night: number | null
   normal_rate: number; skilled_rate: number | null; active: boolean; notes: string; updated_at: string
 }
-export type WageProfile = { employee_id: string; factory_id: string; rate_tier: RateTier; skilled_from: string | null; updated_at: string }
-export type Employee = { id: string; employee_code: string; first_name: string; last_name: string; nationality?: string | null; status?: string | null; position?: string | null }
+export type WageProfile = {
+  employee_id: string
+  factory_id: string
+  rate_tier: RateTier
+  skilled_from: string | null
+  job_id?: string | null
+  job_code?: string | null
+  updated_at: string
+}
+export type Employee = {
+  id: string
+  employee_code: string
+  first_name: string
+  last_name: string
+  nationality?: string | null
+  status?: string | null
+  position?: string | null
+  job_title?: string | null
+}
 export type Entry = {
   employee_id: string
   shift_index: number
@@ -57,14 +74,28 @@ export function calculateEntryOt(
   }
 }
 
-export function entryRate(entry: Entry, jobs: Job[], profiles: WageProfile[], date: string): number | null {
+export function entryRate(entry: Entry, jobs: Job[], profiles: WageProfile[], date: string, employees?: Employee[]): number | null {
   if (entry.rate_snapshot !== undefined) {
     const r = Number(entry.rate_snapshot)
     return entry.is_half_shift ? r / 2 : r
   }
   const job = jobs.find(j => j.id === entry.job_id)
   if (!job) return null
-  const baseRate = wageTier(profiles.find(p => p.employee_id === entry.employee_id), date) === 'skilled' ? job.skilled_rate : job.normal_rate
+  const profile = profiles.find(p => p.employee_id === entry.employee_id)
+  const emp = employees?.find(e => e.id === entry.employee_id)
+  const isSkilledTier = wageTier(profile, date) === 'skilled'
+
+  // Skilled rate applies ONLY if this is the employee's regular assigned job
+  const isRegularJob = isSkilledTier && (
+    (profile?.job_id && profile.job_id === entry.job_id) ||
+    (profile?.job_code && job.code.trim().toLowerCase() === profile.job_code.trim().toLowerCase()) ||
+    (emp?.job_title && (
+      job.code.trim().toLowerCase() === emp.job_title.trim().toLowerCase() ||
+      emp.job_title === entry.job_id
+    ))
+  )
+
+  const baseRate = isRegularJob ? (job.skilled_rate ?? job.normal_rate) : job.normal_rate
   if (baseRate === null) return null
   return entry.is_half_shift ? baseRate / 2 : baseRate
 }

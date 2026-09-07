@@ -169,6 +169,16 @@ export default function TpiPayrollEntry() {
   const [showDailyBreakdown, setShowDailyBreakdown] = useState<boolean>(true)
   const [selectedPeriodId, setSelectedPeriodId] = useState<string>('')
   const [isSimulated, setIsSimulated] = useState<boolean>(false)
+  // Inactive/expired job warning modal state
+  const [inactiveJobWarning, setInactiveJobWarning] = useState<{
+    empName: string
+    empCode: string
+    jobCode: string
+    jobDesc: string
+    reason: 'inactive' | 'expired'
+    expiredOn?: string
+  } | null>(null)
+  const dismissedWarningEmpIds = React.useRef<Set<string>>(new Set())
 
   // ── 1. Payroll Periods ──
   const { data: periods = [] } = useQuery<any[]>({
@@ -221,7 +231,37 @@ export default function TpiPayrollEntry() {
     }
   }, [employees, selectedEmpId])
 
-  // ── 3. TPI Shift Entries for Current Period ──
+  // ── 2b. TPI Job Codes (for checking active/expired status) ──
+  const { data: dbTpiJobCodes = [] } = useQuery<any[]>({
+    queryKey: ['tpi-job-codes-payroll', user?.factory_id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('tpi_job_codes')
+        .select('id,code,description,active,expires_on,valid_from,normal_rate,skilled_rate')
+        .eq('factory_id', user!.factory_id)
+      if (error) return []
+      return data || []
+    },
+    enabled: !!user?.factory_id,
+    staleTime: 60_000,
+  })
+
+  // ── 2c. TPI Employee Wage Profiles (for checking skilled tier + bound job) ──
+  const { data: dbWageProfiles = [] } = useQuery<any[]>({
+    queryKey: ['tpi-wage-profiles-payroll', user?.factory_id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('tpi_employee_wage_profiles')
+        .select('employee_id,rate_tier,job_id,job_code,skilled_from')
+        .eq('factory_id', user!.factory_id)
+      if (error) return []
+      return data || []
+    },
+    enabled: !!user?.factory_id,
+    staleTime: 60_000,
+  })
+
+
   const { data: dbShifts = [], isLoading: shiftsLoading } = useQuery<TpiShiftRow[]>({
     queryKey: ['all-tpi-period-shifts', currentPeriod?.id, user?.factory_id],
     queryFn: async () => {
@@ -379,6 +419,41 @@ export default function TpiPayrollEntry() {
     }
     return []
   }, [allAdvances, selectedEmpId, isSimulated, selectedEmp])
+
+  // ── Detect inactive/expired bound job on employee selection ──
+  useEffect(() => {
+    if (!selectedEmpId || !selectedEmp) return
+    // Already dismissed for this employee this session
+    if (dismissedWarningEmpIds.current.has(selectedEmpId)) return
+
+    const profile = dbWageProfiles.find(p => p.employee_id === selectedEmpId)
+    if (!profile || profile.rate_tier !== 'skilled') return
+
+    // Find the bound job — prefer profile.job_id/job_code, fallback to job_title
+    const boundCode = (profile.job_code || selectedEmp.job_title || '').trim().toLowerCase()
+    const boundId = profile.job_id || ''
+    const boundJob = dbTpiJobCodes.find(j =>
+      (boundId && j.id === boundId) ||
+      (boundCode && j.code.trim().toLowerCase() === boundCode)
+    )
+    if (!boundJob) return // Can't verify — skip warning
+
+    const today = new Date().toISOString().split('T')[0]
+    const isInactive = !boundJob.active
+    const isExpired = !!(boundJob.expires_on && boundJob.expires_on < today)
+
+    if (isInactive || isExpired) {
+      setInactiveJobWarning({
+        empName: `${selectedEmp.prefix || ''} ${selectedEmp.first_name} ${selectedEmp.last_name}`.trim(),
+        empCode: selectedEmp.employee_code,
+        jobCode: boundJob.code,
+        jobDesc: boundJob.description || '',
+        reason: isInactive ? 'inactive' : 'expired',
+        expiredOn: boundJob.expires_on || undefined,
+      })
+    }
+  }, [selectedEmpId, selectedEmp, dbWageProfiles, dbTpiJobCodes])
+
 
   const [overrideNormal, setOverrideNormal] = useState<number | null>(null)
   const [overrideShift, setOverrideShift] = useState<number | null>(null)
@@ -672,6 +747,76 @@ export default function TpiPayrollEntry() {
   return (
     <>
       <TopBar title="กรอกค่าจ้าง" subtitle={currentPeriod?.label} onMenuClick={onMenuClick} />
+
+      {/* ── Inactive / Expired Job Warning Modal ── */}
+      {inactiveJobWarning && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 9999,
+          background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+        }}>
+          <div style={{
+            background: '#fff', borderRadius: 12, padding: 28, maxWidth: 480, width: '100%',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.2)', border: '2px solid #fca5a5',
+          }}>
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+              <span style={{ fontSize: 28 }}>⚠️</span>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: '#dc2626' }}>
+                  แจ้งเตือน: รหัสงานฝีมือ{inactiveJobWarning.reason === 'inactive' ? 'ปิดใช้งานแล้ว' : 'หมดอายุแล้ว'}
+                </div>
+                <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
+                  กรุณาตรวจสอบก่อนบันทึกค่าจ้าง
+                </div>
+              </div>
+            </div>
+
+            {/* Body */}
+            <div style={{ background: '#fef2f2', borderRadius: 8, padding: '12px 16px', marginBottom: 16, border: '1px solid #fecaca' }}>
+              <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.7 }}>
+                <div><strong>พนักงาน:</strong> {inactiveJobWarning.empName} ({inactiveJobWarning.empCode})</div>
+                <div><strong>รหัสงานที่ผูกไว้:</strong> {inactiveJobWarning.jobCode}{inactiveJobWarning.jobDesc ? ` — ${inactiveJobWarning.jobDesc}` : ''}</div>
+                <div>
+                  <strong>สถานะ:</strong>{' '}
+                  <span style={{ color: '#dc2626', fontWeight: 700 }}>
+                    {inactiveJobWarning.reason === 'inactive'
+                      ? 'ปิดใช้งาน (Inactive)'
+                      : `หมดอายุ เมื่อ ${inactiveJobWarning.expiredOn}`}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 18, lineHeight: 1.6 }}>
+              พนักงานคนนี้ถูกตั้งค่าเป็น <strong>ค่าแรงฝีมือ</strong> แต่รหัสงานที่ผูกไว้ไม่สามารถใช้งานได้แล้ว
+              ระบบอาจคำนวณค่าจ้างผิดพลาด — แนะนำให้แก้ไขในหน้าฐานข้อมูลพนักงานก่อน
+            </div>
+
+            {/* Buttons */}
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => {
+                  dismissedWarningEmpIds.current.add(selectedEmpId || '')
+                  setInactiveJobWarning(null)
+                }}
+                style={{ fontSize: 13, padding: '8px 18px', borderRadius: 6, border: '1px solid #d1d5db', background: '#fff', color: '#374151', cursor: 'pointer', fontWeight: 600 }}
+              >
+                รับทราบ / ปิด
+              </button>
+              <button
+                onClick={() => {
+                  dismissedWarningEmpIds.current.add(selectedEmpId || '')
+                  setInactiveJobWarning(null)
+                  window.location.href = '/employees'
+                }}
+                style={{ fontSize: 13, padding: '8px 18px', borderRadius: 6, border: 'none', background: '#dc2626', color: '#fff', cursor: 'pointer', fontWeight: 700 }}
+              >
+                ไปที่หน้าฐานข้อมูลพนักงาน →
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Period Selector & Simulation Banner ── */}
       <div style={{ background: '#fff7ed', borderBottom: '1px solid #fed7aa', padding: '10px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
@@ -1061,6 +1206,32 @@ export default function TpiPayrollEntry() {
                   </div>
                 </div>
               )}
+
+              {/* ── Sticky Warning Banner: Inactive/Expired Skilled Job ── */}
+              {(() => {
+                const profile = dbWageProfiles.find(p => p.employee_id === selectedEmpId)
+                if (!profile || profile.rate_tier !== 'skilled') return null
+                const boundCode = (profile.job_code || selectedEmp?.job_title || '').trim().toLowerCase()
+                const boundId = profile.job_id || ''
+                const boundJob = dbTpiJobCodes.find(j =>
+                  (boundId && j.id === boundId) ||
+                  (boundCode && j.code.trim().toLowerCase() === boundCode)
+                )
+                if (!boundJob) return null
+                const today = new Date().toISOString().split('T')[0]
+                const isInactive = !boundJob.active
+                const isExpired = !!(boundJob.expires_on && boundJob.expires_on < today)
+                if (!isInactive && !isExpired) return null
+                return (
+                  <div style={{ background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: 8, padding: '10px 14px', marginBottom: 16, display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                    <AlertTriangle style={{ width: 16, height: 16, color: '#dc2626', flexShrink: 0, marginTop: 1 }} />
+                    <div style={{ fontSize: 12, color: '#991b1b', lineHeight: 1.5 }}>
+                      <strong>⚠ รหัสงานฝีมือ [{boundJob.code}] {isInactive ? 'ถูกปิดใช้งาน' : `หมดอายุแล้ว (${boundJob.expires_on})`}</strong>
+                      {' — '}ระบบอาจคำนวณค่าจ้างผิดพลาด กรุณาแก้ไขในหน้าฐานข้อมูลพนักงานก่อนบันทึก
+                    </div>
+                  </div>
+                )
+              })()}
 
               {calc && (
                 <>
