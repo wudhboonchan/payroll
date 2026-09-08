@@ -9,13 +9,13 @@ export const IMPORT_COLUMNS_TPI = [
   { key: 'last_name',              header: 'นามสกุล',                example: 'ใจดี',          required: false, note: 'บังคับสำหรับสัญชาติไทย (ต่างชาติเว้นว่างได้)' },
   { key: 'nationality',            header: 'สัญชาติ*',               example: 'ไทย',           required: true,  note: 'ไทย / เมียนมา / กัมพูชา / ลาว' },
   { key: 'national_id',            header: 'เลขบัตร / เลข ปกส',     example: '1234567890123', required: false, note: 'คนไทย: เลขบัตร 13 หลัก / ต่างชาติ: เลข ปกส เมื่อได้รับแล้ว' },
-  { key: 'position',               header: 'กลุ่มงาน*',              example: 'worker',        required: true,  note: 'worker (ทั่วไป) / clerk (เสมียน)' },
+  { key: 'position',               header: 'กลุ่มงาน*',              example: 'พนักงานทั่วไป', required: true,  note: 'พนักงานทั่วไป / เสมียน (หรือ worker / clerk)' },
   { key: 'job_title',              header: 'ตำแหน่งงาน',             example: 'ช่างเครื่อง',   required: false, note: 'เช่น หัวหน้าช่าง, พนักงานขับรถ, ช่างเชื่อม' },
   { key: 'rate_tier',              header: 'ประเภทค่าแรง*',          example: 'ปกติ',          required: true,  note: 'ปกติ / ฝีมือ (คิดค่าแรงอัตโนมัติตามรหัสงาน)' },
-  { key: 'payment_method',         header: 'วิธีรับเงิน*',           example: 'bank_transfer', required: true,  note: 'bank_transfer (โอนบัญชี) / cash (เงินสด)' },
-  { key: 'bank_name',              header: 'ธนาคาร',                example: 'กสิกรไทย',     required: false, note: 'บังคับถ้าวิธีรับเงิน = bank_transfer' },
-  { key: 'bank_account',           header: 'เลขที่บัญชี',           example: '1234567890',    required: false, note: 'บังคับถ้าวิธีรับเงิน = bank_transfer' },
-  { key: 'status',                 header: 'สถานะ',                 example: 'active',        required: false, note: 'active (ปกติ) / inactive (พ้นสภาพ)' },
+  { key: 'payment_method',         header: 'วิธีรับเงิน*',           example: 'โอนธนาคาร',     required: true,  note: 'โอนธนาคาร (หรือ โอนบัญชี / bank_transfer) / เงินสด (cash)' },
+  { key: 'bank_name',              header: 'ธนาคาร',                example: 'กสิกรไทย',     required: false, note: 'บังคับถ้าวิธีรับเงิน = โอนธนาคาร' },
+  { key: 'bank_account',           header: 'เลขที่บัญชี',           example: '1234567890',    required: false, note: 'บังคับถ้าวิธีรับเงิน = โอนธนาคาร' },
+  { key: 'status',                 header: 'สถานะ',                 example: 'ปกติ',          required: false, note: 'ปกติ (active) / พ้นสภาพ (inactive)' },
   { key: 'is_safety_officer',      header: 'เจ้าหน้าที่ จป.',        example: 'ไม่ใช่',        required: false, note: 'ใช่ / ไม่ใช่ (+500 บาท/เดือน)' },
   { key: 'has_position_allowance', header: 'ค่าตำแหน่ง',            example: 'ไม่ใช่',        required: false, note: 'ใช่ / ไม่ใช่ (+1,000 บาท/เดือน)' },
   { key: 'exempt_social_security', header: 'ยกเว้น ปกส',            example: 'ไม่ใช่',        required: false, note: 'ใช่ / ไม่ใช่ (สำหรับคนไทยที่ได้รับการยกเว้น)' },
@@ -30,13 +30,13 @@ export const IMPORT_COLUMNS_DIAMOND = [
   { key: 'last_name',              header: 'นามสกุล',               example: 'ใจดี',          required: false, note: 'บังคับสำหรับสัญชาติไทย' },
   { key: 'nationality',            header: 'สัญชาติ*',              example: 'ไทย',           required: true,  note: 'ไทย / เมียนมา / กัมพูชา / ลาว' },
   { key: 'national_id',            header: 'เลขบัตร / เลข ปกส',    example: '1234567890123', required: false, note: 'เลขบัตรประชาชน 13 หลัก (คนไทย) หรือเลข ปกส (ต่างชาติ)' },
-  { key: 'position',               header: 'ตำแหน่ง*',              example: 'worker',        required: true,  note: 'worker (ทั่วไป) / clerk (เสมียน)' },
+  { key: 'position',               header: 'ตำแหน่ง*',              example: 'พนักงานทั่วไป', required: true,  note: 'พนักงานทั่วไป / เสมียน (หรือ worker / clerk)' },
   { key: 'job_title',              header: 'ตำแหน่งงาน',            example: 'พนักงานขับรถ',  required: false, note: 'เช่น หัวหน้าช่าง, พนักงานขับรถ, ช่างเชื่อม' },
   { key: 'rate_per_12h',           header: 'ค่าแรง/วัน (บาท)*',    example: '320',           required: true,  note: 'ตัวเลขเท่านั้น เช่น 320' },
-  { key: 'payment_method',         header: 'วิธีรับเงิน*',          example: 'bank_transfer', required: true,  note: 'cash หรือ bank_transfer' },
-  { key: 'bank_name',              header: 'ธนาคาร',               example: 'กสิกรไทย',     required: false, note: 'บังคับถ้าวิธีรับเงิน = bank_transfer' },
-  { key: 'bank_account',           header: 'เลขที่บัญชี',          example: '1234567890',    required: false, note: 'บังคับถ้าวิธีรับเงิน = bank_transfer' },
-  { key: 'status',                 header: 'สถานะ',                example: 'active',        required: false, note: 'active (ค่าเริ่มต้น) / inactive' },
+  { key: 'payment_method',         header: 'วิธีรับเงิน*',          example: 'โอนธนาคาร',     required: true,  note: 'โอนธนาคาร (หรือ โอนบัญชี / bank_transfer) / เงินสด (cash)' },
+  { key: 'bank_name',              header: 'ธนาคาร',               example: 'กสิกรไทย',     required: false, note: 'บังคับถ้าวิธีรับเงิน = โอนธนาคาร' },
+  { key: 'bank_account',           header: 'เลขที่บัญชี',          example: '1234567890',    required: false, note: 'บังคับถ้าวิธีรับเงิน = โอนธนาคาร' },
+  { key: 'status',                 header: 'สถานะ',                example: 'ปกติ',          required: false, note: 'ปกติ (active) / พ้นสภาพ (inactive)' },
   { key: 'notes',                  header: 'หมายเหตุ',             example: '',              required: false, note: 'ข้อมูลเพิ่มเติม (ไม่บังคับ)' },
 ] as const
 
@@ -46,10 +46,10 @@ export const IMPORT_COLUMNS = IMPORT_COLUMNS_TPI
 // ─── Valid value lists (single source of truth for template + validator) ───────
 
 export const VALID_NATIONALITIES   = ['ไทย', 'เมียนมา', 'กัมพูชา', 'ลาว']
-export const VALID_POSITIONS       = ['worker', 'clerk', 'พนักงานทั่วไป', 'เสมียน']
+export const VALID_POSITIONS       = ['พนักงานทั่วไป', 'เสมียน', 'worker', 'clerk']
 export const VALID_RATE_TIERS      = ['ปกติ', 'ฝีมือ']
-export const VALID_PAYMENT_METHODS = ['bank_transfer', 'cash', 'โอนบัญชี', 'เงินสด']
-export const VALID_STATUSES        = ['active', 'inactive', 'ปกติ', 'พ้นสภาพ']
+export const VALID_PAYMENT_METHODS = ['โอนธนาคาร', 'เงินสด', 'โอนบัญชี', 'โอนผ่านธนาคาร', 'bank_transfer', 'cash']
+export const VALID_STATUSES        = ['ปกติ', 'ปฏิบัติงานอยู่', 'พ้นสภาพ', 'active', 'inactive']
 export const VALID_PREFIXES        = ['นาย', 'นาง', 'นางสาว', 'Mr.', 'Ms.', 'Mrs.']
 export const VALID_BANKS           = [
   'กสิกรไทย', 'ไทยพาณิชย์', 'กรุงเทพ', 'กรุงไทย',
@@ -83,11 +83,11 @@ export function downloadEmployeeTemplate(options?: TemplateOptions) {
   // ── Sheet 1: "ค่าอ้างอิง" — lookup lists used by Excel data validation ──────
   const refLists = [
     { title: 'สัญชาติ',        values: VALID_NATIONALITIES },
-    { title: 'วิธีรับเงิน',    values: ['bank_transfer', 'cash'] },
-    { title: 'สถานะ',          values: ['active', 'inactive'] },
+    { title: 'วิธีรับเงิน',    values: ['โอนธนาคาร', 'เงินสด', 'bank_transfer', 'cash'] },
+    { title: 'สถานะ',          values: ['ปกติ', 'ปฏิบัติงานอยู่', 'พ้นสภาพ', 'active', 'inactive'] },
     { title: 'คำนำหน้า',      values: VALID_PREFIXES },
     { title: 'ธนาคาร',        values: VALID_BANKS },
-    { title: 'กลุ่มงาน',       values: ['worker', 'clerk'] },
+    { title: 'กลุ่มงาน',       values: ['พนักงานทั่วไป', 'เสมียน', 'worker', 'clerk'] },
     { title: 'ประเภทค่าแรง',   values: VALID_RATE_TIERS },
     { title: 'ใช่_ไม่ใช่',     values: VALID_YES_NO },
   ]
@@ -113,16 +113,16 @@ export function downloadEmployeeTemplate(options?: TemplateOptions) {
   if (isTpi) {
     exRows = [
       // Example 1: Thai, worker, normal rate tier, complete profile
-      ['001', 'นาย', 'สมชาย', 'ใจดี', 'ไทย', '1234567890123', 'worker', 'พนักงานฝ่ายผลิต', 'ปกติ', 'bank_transfer', 'กสิกรไทย', '1234567890', 'active', 'ไม่ใช่', 'ไม่ใช่', 'ไม่ใช่', 'ใช่', ''],
+      ['001', 'นาย', 'สมชาย', 'ใจดี', 'ไทย', '1234567890123', 'พนักงานทั่วไป', 'พนักงานฝ่ายผลิต', 'ปกติ', 'โอนธนาคาร', 'กสิกรไทย', '1234567890', 'ปกติ', 'ไม่ใช่', 'ไม่ใช่', 'ไม่ใช่', 'ใช่', ''],
       // Example 2: Foreigner (Myanmar), worker, skilled rate tier, cash, waiting for SSN
-      ['002', 'Mr.', 'Kyaw', '', 'เมียนมา', '', 'worker', 'ช่างเชื่อม', 'ฝีมือ', 'cash', '', '', 'active', 'ไม่ใช่', 'ไม่ใช่', 'ไม่ใช่', 'ไม่ใช่', 'รอเลข ปกส'],
+      ['002', 'Mr.', 'Kyaw', '', 'เมียนมา', '', 'พนักงานทั่วไป', 'ช่างเชื่อม', 'ฝีมือ', 'เงินสด', '', '', 'ปกติ', 'ไม่ใช่', 'ไม่ใช่', 'ไม่ใช่', 'ไม่ใช่', 'รอเลข ปกส'],
       // Example 3: Thai, clerk, normal, จป. + ค่าตำแหน่ง
-      ['1267', 'นางสาว', 'จุฑาทิพย์', 'มีสุข', 'ไทย', '3100500123456', 'clerk', 'เสมียนประสานงาน', 'ปกติ', 'bank_transfer', 'ไทยพาณิชย์', '9876543210', 'active', 'ใช่', 'ใช่', 'ไม่ใช่', 'ใช่', ''],
+      ['1267', 'นางสาว', 'จุฑาทิพย์', 'มีสุข', 'ไทย', '3100500123456', 'เสมียน', 'เสมียนประสานงาน', 'ปกติ', 'โอนธนาคาร', 'ไทยพาณิชย์', '9876543210', 'ปกติ', 'ใช่', 'ใช่', 'ไม่ใช่', 'ใช่', ''],
     ]
   } else {
     exRows = [
-      ['001', 'นาย', 'สมชาย', 'ใจดี', 'ไทย', '1234567890123', 'worker', 'พนักงานฝ่ายผลิต', 350, 'bank_transfer', 'กสิกรไทย', '1234567890', 'active', ''],
-      ['003', 'นางสาว', 'ขยัน', 'รอบคอบ', 'ไทย', '5555555555555', 'clerk', 'การเงิน', 15000, 'bank_transfer', 'ไทยพาณิชย์', '1112223334', 'active', ''],
+      ['001', 'นาย', 'สมชาย', 'ใจดี', 'ไทย', '1234567890123', 'พนักงานทั่วไป', 'พนักงานฝ่ายผลิต', 350, 'โอนธนาคาร', 'กสิกรไทย', '1234567890', 'ปกติ', ''],
+      ['003', 'นางสาว', 'ขยัน', 'รอบคอบ', 'ไทย', '5555555555555', 'เสมียน', 'การเงิน', 15000, 'โอนธนาคาร', 'ไทยพาณิชย์', '1112223334', 'ปกติ', ''],
     ]
   }
 
@@ -178,15 +178,15 @@ export function downloadEmployeeTemplate(options?: TemplateOptions) {
     validations.push({
       sqref: sqref(colKeyToIdx.position),
       type: 'list',
-      formula1: refRange(5, 2),
+      formula1: refRange(5, refLists[5].values.length),
       showDropDown: false,
       showErrorMessage: true,
       errorStyle: 'stop',
-      error: 'ใช้: worker หรือ clerk',
+      error: 'กรุณาเลือก: พนักงานทั่วไป หรือ เสมียน (หรือ worker / clerk)',
       errorTitle: 'กลุ่มงานไม่ถูกต้อง',
       showInputMessage: true,
       promptTitle: 'กลุ่มงาน',
-      prompt: 'worker = พนักงานทั่วไป | clerk = เสมียน',
+      prompt: 'พนักงานทั่วไป หรือ เสมียน (หรือ worker / clerk)',
     })
   }
 
@@ -210,15 +210,15 @@ export function downloadEmployeeTemplate(options?: TemplateOptions) {
     validations.push({
       sqref: sqref(colKeyToIdx.payment_method),
       type: 'list',
-      formula1: refRange(1, 2),
+      formula1: refRange(1, refLists[1].values.length),
       showDropDown: false,
       showErrorMessage: true,
       errorStyle: 'stop',
-      error: 'ใช้: bank_transfer หรือ cash',
+      error: 'กรุณาเลือก: โอนธนาคาร หรือ เงินสด (หรือ bank_transfer / cash)',
       errorTitle: 'วิธีรับเงินไม่ถูกต้อง',
       showInputMessage: true,
       promptTitle: 'วิธีรับเงิน',
-      prompt: 'bank_transfer = โอนบัญชี | cash = เงินสด',
+      prompt: 'โอนธนาคาร หรือ เงินสด (หรือ bank_transfer / cash)',
     })
   }
 
@@ -240,15 +240,15 @@ export function downloadEmployeeTemplate(options?: TemplateOptions) {
     validations.push({
       sqref: sqref(colKeyToIdx.status),
       type: 'list',
-      formula1: refRange(2, 2),
+      formula1: refRange(2, refLists[2].values.length),
       showDropDown: false,
       showErrorMessage: true,
       errorStyle: 'stop',
-      error: 'ใช้: active หรือ inactive',
+      error: 'กรุณาเลือก: ปกติ หรือ พ้นสภาพ (หรือ active / inactive)',
       errorTitle: 'สถานะไม่ถูกต้อง',
       showInputMessage: true,
       promptTitle: 'สถานะ',
-      prompt: 'active = ปกติ | inactive = พ้นสภาพ',
+      prompt: 'ปกติ หรือ พ้นสภาพ (หรือ active / inactive)',
     })
   }
 
@@ -298,10 +298,10 @@ export function downloadEmployeeTemplate(options?: TemplateOptions) {
     ]),
     ['', '', ''],
     ['ค่าที่ยอมรับ — สัญชาติ',      '', VALID_NATIONALITIES.join(', ')],
-    ['ค่าที่ยอมรับ — กลุ่มงาน',     '', 'worker (ทั่วไป), clerk (เสมียน)'],
+    ['ค่าที่ยอมรับ — กลุ่มงาน',     '', 'พนักงานทั่วไป, เสมียน (หรือ worker, clerk)'],
     ...(isTpi ? [['ค่าที่ยอมรับ — ประเภทค่าแรง', '', 'ปกติ, ฝีมือ (คำนวณค่าแรงอัตโนมัติตามรหัสงาน)']] : []),
-    ['ค่าที่ยอมรับ — วิธีรับเงิน',  '', 'bank_transfer (โอนบัญชี), cash (เงินสด)'],
-    ['ค่าที่ยอมรับ — สถานะ',        '', 'active (พนักงานปัจจุบัน), inactive (พ้นสภาพ)'],
+    ['ค่าที่ยอมรับ — วิธีรับเงิน',  '', 'โอนธนาคาร, เงินสด (หรือ bank_transfer, cash)'],
+    ['ค่าที่ยอมรับ — สถานะ',        '', 'ปกติ, พ้นสภาพ (หรือ active, inactive)'],
     ['ค่าที่ยอมรับ — ธนาคาร',      '', VALID_BANKS.join(', ')],
     ['ค่าที่ยอมรับ — คำนำหน้า',    '', VALID_PREFIXES.join(', ')],
   ]
@@ -355,10 +355,7 @@ export function parseEmployeeExcel(file: File, options?: { isTpi?: boolean }): P
 
         const headerRow = (rows[headerRowIdx] as string[]).map((h: unknown) => String(h).trim())
 
-        // Skip example codes
-        const EXAMPLE_CODES = new Set(['001', '002', '003', '1267'])
-
-        // Smart header mapping
+        // Smart header mapping (supports both import template and exported employee Excel files)
         const colKeyMap: Record<number, string> = {}
 
         headerRow.forEach((h, idx) => {
@@ -375,13 +372,13 @@ export function parseEmployeeExcel(file: File, options?: { isTpi?: boolean }): P
             colKeyMap[idx] = 'last_name'
           } else if (raw.includes('สัญชาติ') || raw === 'nationality') {
             colKeyMap[idx] = 'nationality'
-          } else if (raw.includes('เลขบัตร') || raw.includes('ปกส') || raw.includes('passport') || raw === 'nationalid') {
+          } else if (raw.includes('เลขบัตร') || raw.includes('ประชาชน') || raw.includes('พาสปอร์ต') || raw.includes('ปกส') || raw.includes('passport') || raw === 'nationalid') {
             colKeyMap[idx] = 'national_id'
           } else if (raw.includes('กลุ่มงาน') || raw === 'position' || (raw.includes('ตำแหน่ง') && !raw.includes('ตำแหน่งงาน') && !raw.includes('ค่าตำแหน่ง'))) {
             colKeyMap[idx] = 'position'
-          } else if (raw.includes('ตำแหน่งงาน') || raw === 'jobtitle') {
+          } else if (raw.includes('ตำแหน่งงาน') || raw.includes('หน้าที่') || raw.includes('แผนก') || raw === 'jobtitle') {
             colKeyMap[idx] = 'job_title'
-          } else if (raw.includes('ประเภทค่าแรง') || raw.includes('ประเภทค่าจ้าง') || raw === 'ratetier') {
+          } else if (raw.includes('ประเภทค่าแรง') || raw.includes('ประเภทค่าจ้าง') || raw.includes('ระดับค่าแรง') || raw === 'ratetier') {
             colKeyMap[idx] = 'rate_tier'
           } else if (raw.includes('ค่าแรง') || raw.includes('ค่าจ้าง') || raw === 'rateper12h' || raw === 'rate') {
             colKeyMap[idx] = 'rate_per_12h'
@@ -399,7 +396,7 @@ export function parseEmployeeExcel(file: File, options?: { isTpi?: boolean }): P
             colKeyMap[idx] = 'has_position_allowance'
           } else if (raw.includes('ยกเว้นปกส') || raw.includes('ยกเว้นประกัน') || raw === 'exemptsocialsecurity') {
             colKeyMap[idx] = 'exempt_social_security'
-          } else if (raw.includes('ข้อมูลสมบูรณ์') || raw === 'datacomplete') {
+          } else if (raw.includes('ข้อมูลสมบูรณ์') || raw.includes('สมบูรณ์') || raw === 'datacomplete') {
             colKeyMap[idx] = 'data_complete'
           } else if (raw.includes('หมายเหตุ') || raw === 'notes' || raw === 'note') {
             colKeyMap[idx] = 'notes'
@@ -423,8 +420,14 @@ export function parseEmployeeExcel(file: File, options?: { isTpi?: boolean }): P
           const rawCode = String(row[empCodeColIdx] ?? '').trim()
           if (!rawCode) return
 
-          // Skip example rows
-          if (EXAMPLE_CODES.has(rawCode) && (i < 5)) return
+          // Skip example rows only if both code and sample dummy names match template mockups
+          const isSampleRow = (
+            (rawCode === '001' && String(row[2] ?? '').includes('สมชาย')) ||
+            (rawCode === '002' && String(row[2] ?? '').includes('Kyaw')) ||
+            (rawCode === '003' && String(row[2] ?? '').includes('ขยัน')) ||
+            (rawCode === '1267' && String(row[2] ?? '').includes('จุฑาทิพย์'))
+          ) && (i < 5)
+          if (isSampleRow) return
 
           const data: Record<string, string> = {}
           Object.entries(colKeyMap).forEach(([idxStr, key]) => {
@@ -462,7 +465,7 @@ export function parseEmployeeExcel(file: File, options?: { isTpi?: boolean }): P
             data.rate_tier = 'normal'
           }
 
-          // Payment method
+          // Payment method: supports Thai (โอนธนาคาร / เงินสด / โอนบัญชี) & English (bank_transfer / cash)
           if (!data.payment_method) {
             data.payment_method = 'bank_transfer'
           } else if (data.payment_method.includes('สด') || data.payment_method.toLowerCase().includes('cash')) {
@@ -471,7 +474,7 @@ export function parseEmployeeExcel(file: File, options?: { isTpi?: boolean }): P
             data.payment_method = 'bank_transfer'
           }
 
-          // Status
+          // Status: supports Thai (ปกติ / ปฏิบัติงานอยู่ / พ้นสภาพ) & English (active / inactive)
           if (!data.status) {
             data.status = 'active'
           } else if (data.status.includes('พ้น') || data.status.includes('ออก') || data.status.toLowerCase().includes('inactive')) {
@@ -480,16 +483,23 @@ export function parseEmployeeExcel(file: File, options?: { isTpi?: boolean }): P
             data.status = 'active'
           }
 
-          // Booleans
-          const parseBool = (val?: string) => {
+          // Booleans: supports 'ใช่' / 'ไม่ใช่', 'เป็น จป.', 'มี', 'ยกเว้น', 'สมบูรณ์'
+          const parseBoolField = (val: string | undefined, truthyMatches: string[]): string => {
             if (!val) return 'false'
             const s = val.trim().toLowerCase()
-            return (s === 'ใช่' || s === 'yes' || s === 'true' || s === '1') ? 'true' : 'false'
+            if (s === 'ใช่' || s === 'yes' || s === 'true' || s === '1') return 'true'
+            if (s === 'ไม่ใช่' || s === 'no' || s === 'false' || s === '0' || s === '-') return 'false'
+            return truthyMatches.some(m => s.includes(m)) ? 'true' : 'false'
           }
-          data.is_safety_officer = parseBool(data.is_safety_officer)
-          data.has_position_allowance = parseBool(data.has_position_allowance)
-          data.exempt_social_security = parseBool(data.exempt_social_security)
-          data.data_complete = parseBool(data.data_complete)
+          data.is_safety_officer = parseBoolField(data.is_safety_officer, ['จป', 'เป็น'])
+          data.has_position_allowance = parseBoolField(data.has_position_allowance, ['มี'])
+          data.exempt_social_security = parseBoolField(data.exempt_social_security, ['ยกเว้น'])
+          data.data_complete = parseBoolField(data.data_complete, ['สมบูรณ์'])
+
+          // Clean rate_per_12h (remove any formatting commas)
+          if (data.rate_per_12h) {
+            data.rate_per_12h = data.rate_per_12h.replace(/,/g, '').trim()
+          }
 
           // Auto-assign wage_type based on position & factory
           data.wage_type = isTpi ? 'daily' : (data.position === 'clerk' ? 'monthly' : 'daily')
