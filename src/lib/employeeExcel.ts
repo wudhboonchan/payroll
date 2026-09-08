@@ -53,7 +53,7 @@ export const VALID_STATUSES        = ['ปกติ', 'ปฏิบัติง�
 export const VALID_PREFIXES        = ['นาย', 'นาง', 'นางสาว', 'Mr.', 'Ms.', 'Mrs.']
 export const VALID_BANKS           = [
   'กสิกรไทย', 'ไทยพาณิชย์', 'กรุงเทพ', 'กรุงไทย',
-  'กรุงศรี', 'ทหารไทยธนชาต', 'ออมสิน', 'ธ.ก.ส.', 'เพื่อการเกษตรและสหกรณ์การเกษตร', 'อื่นๆ',
+  'กรุงศรี', 'ทหารไทยธนชาต', 'ออมสิน', 'ธ.ก.ส.', 'อื่นๆ',
 ]
 export const VALID_YES_NO          = ['ใช่', 'ไม่ใช่']
 
@@ -472,6 +472,28 @@ export function parseEmployeeExcel(file: File, options?: { isTpi?: boolean }): P
             data.payment_method = 'cash'
           } else {
             data.payment_method = 'bank_transfer'
+          }
+
+          // Bank name normalization: normalize to standard database values
+          if (data.bank_name) {
+            const b = data.bank_name.trim()
+            if (b.includes('เพื่อการเกษตร') || b.includes('ธ.ก.ส') || b.includes('ธกส') || b.toLowerCase().includes('baac')) {
+              data.bank_name = 'ธ.ก.ส.'
+            } else if (b.includes('ทหารไทย') || b.includes('ธนชาต') || b.toLowerCase() === 'ttb' || b.toLowerCase() === 'tmb') {
+              data.bank_name = 'ทหารไทยธนชาต'
+            } else if (b.includes('กสิกร') || b.toLowerCase() === 'kbank') {
+              data.bank_name = 'กสิกรไทย'
+            } else if (b.includes('ไทยพาณิชย์') || b.toLowerCase() === 'scb') {
+              data.bank_name = 'ไทยพาณิชย์'
+            } else if (b.includes('กรุงเทพ') || b.toLowerCase() === 'bbl') {
+              data.bank_name = 'กรุงเทพ'
+            } else if (b.includes('กรุงไทย') || b.toLowerCase() === 'ktb') {
+              data.bank_name = 'กรุงไทย'
+            } else if (b.includes('กรุงศรี') || b.toLowerCase() === 'bay') {
+              data.bank_name = 'กรุงศรี'
+            } else if (b.includes('ออมสิน') || b.toLowerCase() === 'gsb') {
+              data.bank_name = 'ออมสิน'
+            }
           }
 
           // Status: supports Thai (ปกติ / ปฏิบัติงานอยู่ / พ้นสภาพ) & English (active / inactive)
