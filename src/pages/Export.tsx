@@ -1538,10 +1538,11 @@ body{margin:0;padding:0;background:#fff;font-family:'Sarabun',sans-serif}
   const cards = isNormalUser ? allCards.filter(c => !c.adminOnly) : allCards
 
   return (
-    <>
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
       <TopBar title="ส่งออกข้อมูล" subtitle={label} onMenuClick={onMenuClick} />
 
-      <div className="vk-page">
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+        <div className="vk-page">
         <div className="vk-eyebrow" style={{ marginBottom: 6 }}>EXPORT · ส่งออกข้อมูล</div>
         <div style={{ fontFamily: 'var(--vk-sans)', fontWeight: 700, fontSize: 26, letterSpacing: '-0.02em', marginBottom: 28 }}>ดาวน์โหลดไฟล์</div>
 
@@ -1600,6 +1601,7 @@ body{margin:0;padding:0;background:#fff;font-family:'Sarabun',sans-serif}
             )
           })}
         </div>
+      </div>
       </div>
 
       {/* ── PDF Modal ─────────────────────────────────────────────────────────── */}
@@ -2198,6 +2200,6 @@ body{margin:0;padding:0;background:#fff;font-family:'Sarabun',sans-serif}
           </div>
         </div>
       )}
-    </>
+    </div>
   )
 }

@@ -253,10 +253,11 @@ export default function ShareLinks() {
   const isAdmin = user?.role === 'admin' || user?.role === 'superUser'
 
   return (
-    <>
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
       <TopBar title="ลิงก์สลิปพนักงาน" subtitle={activePeriod?.label} onMenuClick={onMenuClick} />
 
-      <div className="vk-page vk-page--wide">
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+        <div className="vk-page vk-page--wide">
 
         {/* Header row */}
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 28, flexWrap: 'wrap' }}>
@@ -451,6 +452,7 @@ export default function ShareLinks() {
           </table>
         )}
       </div>
+      </div>
 
       {/* Reset confirm dialog */}
       {showResetConfirm && (
@@ -476,6 +478,6 @@ export default function ShareLinks() {
           </div>
         </div>
       )}
-    </>
+    </div>
   )
 }

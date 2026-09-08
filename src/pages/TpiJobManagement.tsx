@@ -363,11 +363,12 @@ export default function TpiJobManagement() {
   }
 
   return (
-    <div className="vk-root" style={{ background: 'var(--vk-paper)', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+    <div className="vk-root" style={{ background: 'var(--vk-paper)', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
       {/* 1. Header Bar */}
       <TopBar title="จัดการรหัสงาน" onMenuClick={onMenuClick} />
 
-      <div style={{ flex: 1, padding: '16px 24px 60px', maxWidth: 1400, width: '100%', margin: '0 auto' }}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+        <div style={{ padding: '16px 24px 60px', maxWidth: 1400, width: '100%', margin: '0 auto' }}>
         {/* Page Title & Main Actions */}
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16, marginBottom: 20 }}>
           <div>
@@ -810,6 +811,7 @@ export default function TpiJobManagement() {
             </table>
           </div>
         </div>
+      </div>
       </div>
 
       {/* ── 5. Add / Edit Modal ─────────────────────────────────────── */}

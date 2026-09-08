@@ -415,10 +415,11 @@ export default function Dashboard() {
   const completionPct = stats && stats.totalDays > 0 ? Math.round((stats.uniqueDays / stats.totalDays) * 100) : 0
 
   return (
-    <>
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
       <TopBar title="Dashboard" subtitle={activePeriod?.label} onMenuClick={onMenuClick} />
 
-      <div className="vk-page">
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+        <div className="vk-page">
 
         {/* Period selector + actions */}
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 32, flexWrap: 'wrap' }}>
@@ -897,6 +898,7 @@ export default function Dashboard() {
           </>
         )}
       </div>
+      </div>
 
       {/* Custom cancel-approval confirm dialog */}
       {showCancelConfirm && (
@@ -1010,6 +1012,6 @@ export default function Dashboard() {
           </div>
         </div>
       )}
-    </>
+    </div>
   )
 }

@@ -19,6 +19,9 @@ export function TopBar({ title, subtitle, onMenuClick }: TopBarProps) {
       position: 'sticky',
       top: 0,
       zIndex: 30,
+      flexShrink: 0,
+      width: '100%',
+      boxSizing: 'border-box',
     }}>
       <button
         onClick={onMenuClick}

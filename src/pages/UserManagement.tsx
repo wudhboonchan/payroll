@@ -98,10 +98,11 @@ export default function UserManagement() {
   if (user?.role !== 'admin' && user?.role !== 'superUser') return null
 
   return (
-    <>
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
       <TopBar title="จัดการผู้ใช้งาน" onMenuClick={onMenuClick} />
 
-      <div className="vk-page" style={{ maxWidth: 760 }}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+        <div className="vk-page" style={{ maxWidth: 760 }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 28 }}>
           <div>
             <div className="vk-eyebrow" style={{ marginBottom: 4 }}>USER MANAGEMENT · จัดการผู้ใช้งาน</div>
@@ -141,6 +142,7 @@ export default function UserManagement() {
             </div>
           ))}
         </div>
+      </div>
       </div>
 
       {isModalOpen && (
@@ -235,6 +237,6 @@ export default function UserManagement() {
           </div>
         </div>
       )}
-    </>
+    </div>
   )
 }
