@@ -18,6 +18,21 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/supabase-api/, ''),
         ws: true, // proxy WebSocket สำหรับ Realtime
+        configure: (proxy) => {
+          proxy.on('error', (err) => {
+            console.error('[vite-proxy error]', err);
+          });
+        },
+      },
+    },
+  },
+  preview: {
+    proxy: {
+      '/supabase-api': {
+        target: 'https://nlyumhbzlruhpcorwswk.supabase.co',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/supabase-api/, ''),
+        ws: true,
       },
     },
   },

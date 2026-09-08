@@ -21,9 +21,24 @@ export default function Login() {
     setLoading(true)
     try {
       const { error } = await supabase.auth.signInWithPassword({ email, password })
-      if (error) { toast.error('เข้าสู่ระบบล้มเหลว', { description: error.message }); return }
+      if (error) {
+        console.error('Sign-in error:', error)
+        let desc = error.message
+        if (!desc || desc === '{}') {
+          desc = 'ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้ หรืออีเมล/รหัสผ่านไม่ถูกต้อง'
+        } else if (desc === 'Invalid login credentials') {
+          desc = 'อีเมลหรือรหัสผ่านไม่ถูกต้อง'
+        }
+        toast.error('เข้าสู่ระบบล้มเหลว', { description: desc })
+        return
+      }
       toast.success('เข้าสู่ระบบสำเร็จ')
-    } catch { toast.error('เกิดข้อผิดพลาด') } finally { setLoading(false) }
+    } catch (err) {
+      console.error('Unexpected login exception:', err)
+      toast.error('เกิดข้อผิดพลาดในการเชื่อมต่อ')
+    } finally {
+      setLoading(false)
+    }
   }
 
   const Logo = () => (

@@ -50,6 +50,14 @@ function formatOverrideSummary(row: any) {
   return parts.length > 0 ? parts.join(' · ') : 'มีการแก้ไขยอดเงิน'
 }
 
+function getSpecialAmount(e: any): number {
+  const amt = Number(e.amount_special || 0)
+  const ovr = e.override_special != null ? Number(e.override_special) : null
+  if (ovr != null && amt > 0 && ovr === amt) return amt
+  if (ovr != null && amt > 0) return amt >= ovr ? amt : (amt + ovr)
+  return ovr != null ? ovr : amt
+}
+
 export default function Dashboard() {
   const { onMenuClick } = useOutletContext<{ onMenuClick: () => void }>()
   const navigate = useNavigate()
@@ -113,21 +121,29 @@ export default function Dashboard() {
       if (!activePeriod) return []
       const { data, error } = await supabase
         .from('payroll_entries')
-        .select('amount_normal,amount_shift,amount_ot,amount_wood_excess,amount_film,amount_special,amount_diligence,amount_position,deduct_social_security,deduct_advance,deduct_safety_equipment,deduct_uniform,override_special,employee:employees(payment_method,bank_name)')
+        .select('amount_normal,override_normal,amount_shift,override_shift,amount_ot,override_ot,amount_wood_excess,amount_film,amount_special,amount_diligence,amount_position,deduct_social_security,deduct_advance,deduct_safety_equipment,deduct_uniform,override_special,employee:employees(payment_method,bank_name)')
         .eq('period_id', activePeriod.id)
         .limit(10000)
       if (error) throw error
       const map = new Map<string, { count: number; total: number }>()
       for (const e of data ?? []) {
+        const normal = (e as any).override_normal != null ? Number((e as any).override_normal) : Number(e.amount_normal || 0)
+        const shift = (e as any).override_shift != null ? Number((e as any).override_shift) : Number(e.amount_shift || 0)
+        const ot = (e as any).override_ot != null ? Number((e as any).override_ot) : Number(e.amount_ot || 0)
+        const special = getSpecialAmount(e)
+        const income = normal + shift + ot
+          + Number(e.amount_wood_excess || 0) + Number(e.amount_film || 0)
+          + special
+          + Number(e.amount_diligence || 0) + Number(e.amount_position || 0)
+
+        // ข้ามพนักงานที่ยอดรายรับเป็น 0 บาท (ไม่ได้มาทำงานทั้งเดือน) เพื่อให้นับเฉพาะคนที่มีรายรับจริง
+        if (income <= 0) continue
+
         const emp = (e as any).employee
         const method: string = emp?.payment_method ?? 'bank_transfer'
         const bank: string | null = emp?.bank_name ?? null
         const key = method === 'cash' ? 'เงินสด' : (bank || 'ไม่ระบุธนาคาร')
-        const income = Number(e.amount_normal||0) + Number(e.amount_shift||0) + Number(e.amount_ot||0)
-          + Number(e.amount_wood_excess||0) + Number(e.amount_film||0)
-          + Number((e as any).override_special ?? e.amount_special ?? 0)
-          + Number(e.amount_diligence||0) + Number(e.amount_position||0)
-        const deduct = Number(e.deduct_social_security||0) + Number(e.deduct_advance||0) + Number(e.deduct_safety_equipment||0) + Number(e.deduct_uniform||0)
+        const deduct = Number(e.deduct_social_security || 0) + Number(e.deduct_advance || 0) + Number(e.deduct_safety_equipment || 0) + Number(e.deduct_uniform || 0)
         const net = Math.max(0, income - deduct)
         const prev = map.get(key) ?? { count: 0, total: 0 }
         map.set(key, { count: prev.count + 1, total: prev.total + net })
@@ -188,7 +204,7 @@ export default function Dashboard() {
     queryFn: async () => {
       if (!activePeriod) return null
       const [payroll, advances] = await Promise.all([
-        supabase.from('payroll_entries').select('employee_id,amount_normal,amount_shift,amount_ot,amount_wood_excess,amount_film,amount_special,amount_diligence,amount_position,deduct_social_security,deduct_advance,deduct_safety_equipment,deduct_uniform,override_special,employee:employees(employee_code,first_name,last_name)').eq('period_id', activePeriod.id).limit(10000),
+        supabase.from('payroll_entries').select('employee_id,amount_normal,override_normal,amount_shift,override_shift,amount_ot,override_ot,amount_wood_excess,amount_film,amount_special,amount_diligence,amount_position,deduct_social_security,deduct_advance,deduct_safety_equipment,deduct_uniform,override_special,employee:employees(employee_code,first_name,last_name)').eq('period_id', activePeriod.id).limit(10000),
         supabase.from('advance_payments').select('amount').eq('period_id', activePeriod.id),
       ])
 
@@ -221,11 +237,19 @@ export default function Dashboard() {
       }
 
       const entries = payroll.data ?? []
+      let paidEmployeeCount = 0
       const gross = entries.reduce((s, e) => {
-        const income = Number(e.amount_normal||0) + Number(e.amount_shift||0) + Number(e.amount_ot||0)
-          + Number(e.amount_wood_excess||0) + Number(e.amount_film||0)
-          + Number(e.override_special ?? e.amount_special ?? 0)
-          + Number(e.amount_diligence||0) + Number(e.amount_position||0)
+        const normal = (e as any).override_normal != null ? Number((e as any).override_normal) : Number(e.amount_normal || 0)
+        const shift = (e as any).override_shift != null ? Number((e as any).override_shift) : Number(e.amount_shift || 0)
+        const ot = (e as any).override_ot != null ? Number((e as any).override_ot) : Number(e.amount_ot || 0)
+        const special = getSpecialAmount(e)
+        const income = normal + shift + ot
+          + Number(e.amount_wood_excess || 0) + Number(e.amount_film || 0)
+          + special
+          + Number(e.amount_diligence || 0) + Number(e.amount_position || 0)
+        if (income > 0) {
+          paidEmployeeCount++
+        }
         return s + income
       }, 0)
       const ss = entries.reduce((s, e) => s + Number(e.deduct_social_security||0), 0)
@@ -236,11 +260,15 @@ export default function Dashboard() {
       let net = 0, carryOver = 0
       const carryOverDetails: { employee_code: string; first_name: string; last_name: string; deficit: number }[] = []
       for (const e of entries) {
-        const income = Number(e.amount_normal||0) + Number(e.amount_shift||0) + Number(e.amount_ot||0)
-          + Number(e.amount_wood_excess||0) + Number(e.amount_film||0)
-          + Number(e.override_special ?? e.amount_special ?? 0)
-          + Number(e.amount_diligence||0) + Number(e.amount_position||0)
-        const deduct = Number(e.deduct_social_security||0) + Number(e.deduct_advance||0) + Number(e.deduct_safety_equipment||0) + Number(e.deduct_uniform||0)
+        const normal = (e as any).override_normal != null ? Number((e as any).override_normal) : Number(e.amount_normal || 0)
+        const shift = (e as any).override_shift != null ? Number((e as any).override_shift) : Number(e.amount_shift || 0)
+        const ot = (e as any).override_ot != null ? Number((e as any).override_ot) : Number(e.amount_ot || 0)
+        const special = getSpecialAmount(e)
+        const income = normal + shift + ot
+          + Number(e.amount_wood_excess || 0) + Number(e.amount_film || 0)
+          + special
+          + Number(e.amount_diligence || 0) + Number(e.amount_position || 0)
+        const deduct = Number(e.deduct_social_security || 0) + Number(e.deduct_advance || 0) + Number(e.deduct_safety_equipment || 0) + Number(e.deduct_uniform || 0)
         const entryNet = income - deduct
         if (entryNet < 0) {
           carryOver += Math.abs(entryNet)
@@ -254,7 +282,7 @@ export default function Dashboard() {
       const uniqueDays = new Set(allShiftDates.filter(Boolean)).size
       const start = parseLocal(activePeriod.period_start), end = parseLocal(activePeriod.period_end)
       const totalDays = Math.ceil((end.getTime()-start.getTime())/86400000)+1
-      return { gross, ss, ssCount, net, carryOver, carryOverDetails, adv, advCount, uniqueDays, totalDays }
+      return { gross, ss, ssCount, net, carryOver, carryOverDetails, adv, advCount, uniqueDays, totalDays, paidEmployeeCount }
     },
     enabled: !!activePeriod,
     staleTime: 0,
@@ -448,7 +476,7 @@ export default function Dashboard() {
             {/* Stats row */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', marginBottom: (stats?.carryOver ?? 0) > 0 ? 0 : 36 }}>
               {[
-                { eyebrow: 'พนักงานทั้งหมด', value: String(activeEmployeeCount), sub: 'คน (สถานะปกติ)', color: 'var(--vk-ink)' },
+                { eyebrow: 'พนักงานที่มีรายรับ', value: String(stats?.paidEmployeeCount ?? 0), sub: `คน (จากทั้งหมด ${activeEmployeeCount} คน)`, color: 'var(--vk-ink)' },
                 { eyebrow: 'ยอดจ่ายรวม',    value: (stats?.gross ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 }), sub: 'บาท', color: 'var(--vk-jade)' },
                 { eyebrow: 'ประกันสังคม',    value: (stats?.ss   ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 }), sub: 'บาท', color: 'var(--vk-ink-3)' },
                 { eyebrow: 'ยอดจ่ายสุทธิ',  value: (stats?.net  ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 }), sub: 'บาท', color: 'var(--vk-persimmon)' },
@@ -485,10 +513,10 @@ export default function Dashboard() {
 
             {/* Progress + Status */}
             <div className="vk-grid-2">
-              <div>
+              <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
                 <div className="vk-eyebrow" style={{ marginBottom: 8 }}>PROGRESS · ความคืบหน้าการบันทึกกะ</div>
                 <hr className="vk-rule" />
-                <div style={{ padding: '20px 0' }}>
+                <div style={{ padding: '20px 0', flex: 1, display: 'flex', flexDirection: 'column' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
                     <span style={{ fontFamily: 'var(--vk-sans)', fontSize: 14, color: 'var(--vk-ink-2)' }}>วันที่บันทึกแล้ว</span>
                     <span style={{ fontFamily: 'var(--vk-sans)', fontWeight: 600, fontSize: 16 }}>
@@ -501,14 +529,45 @@ export default function Dashboard() {
                   <div className="vk-small" style={{ color: 'var(--vk-ink-3)' }}>
                     {completionPct === 100 ? 'บันทึกครบทุกวันแล้ว ✓' : `เหลืออีก ${(stats?.totalDays ?? 0) - (stats?.uniqueDays ?? 0)} วัน`}
                   </div>
+
+                  {/* Pending profile alert */}
+                  {pendingProfileCount > 0 && (
+                    <div
+                      onClick={() => navigate('/employees')}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        gap: 10,
+                        background: 'var(--vk-marigold-tint)',
+                        border: '1px solid var(--vk-marigold)',
+                        borderRadius: 4,
+                        padding: '10px 14px',
+                        marginTop: 16,
+                        cursor: 'pointer',
+                        transition: 'background 150ms ease'
+                      }}
+                      title="คลิกเพื่อไปที่หน้าพนักงาน"
+                    >
+                      <span style={{ fontSize: 15, flexShrink: 0, marginTop: 1 }}>⚠️</span>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontWeight: 700, fontSize: 13, color: '#7a5c00' }}>ข้อมูลพนักงานไม่ครบ</span>
+                          <span style={{ fontSize: 11, fontWeight: 600, color: '#9a7500', textDecoration: 'underline' }}>ไปที่หน้าพนักงาน →</span>
+                        </div>
+                        <div style={{ fontSize: 12, color: '#9a7500', marginTop: 3, lineHeight: 1.4 }}>
+                          มีพนักงาน <strong>{pendingProfileCount} คน</strong> ที่ยังกรอกข้อมูลไม่ครบถ้วน กรุณาตรวจสอบที่หน้าพนักงาน
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
-                <hr className="vk-rule" />
+                <hr className="vk-rule" style={{ marginTop: 'auto' }} />
               </div>
 
-              <div>
+              <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
                 <div className="vk-eyebrow" style={{ marginBottom: 8 }}>STATUS · สถานะงวด</div>
                 <hr className="vk-rule" />
-                <div style={{ padding: '20px 0', display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <div style={{ padding: '20px 0', flex: 1, display: 'flex', flexDirection: 'column', gap: 14 }}>
                   {/* Status */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontFamily: 'var(--vk-sans)', fontSize: 14, color: 'var(--vk-ink-2)' }}>สถานะงวด</span>
@@ -581,19 +640,8 @@ export default function Dashboard() {
                     </span>
                     <span style={{ fontFamily: 'var(--vk-mono)', fontSize: 14, color: 'var(--vk-crimson)', fontVariantNumeric: 'tabular-nums' }}>฿ {(stats?.adv ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
                   </div>
-
-                  {/* Pending profile alert */}
-                  {pendingProfileCount > 0 && (
-                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, background: 'var(--vk-marigold-tint)', border: '1px solid var(--vk-marigold)', padding: '10px 14px', marginTop: 4 }}>
-                      <span style={{ fontSize: 15, flexShrink: 0 }}>⚠️</span>
-                      <div>
-                        <div style={{ fontWeight: 700, fontSize: 13, color: '#7a5c00' }}>ข้อมูลพนักงานไม่ครบ</div>
-                        <div style={{ fontSize: 12, color: '#9a7500', marginTop: 2 }}>มีพนักงาน <strong>{pendingProfileCount} คน</strong> ที่ยังกรอกข้อมูลไม่ครบถ้วน กรุณาตรวจสอบที่หน้าพนักงาน</div>
-                      </div>
-                    </div>
-                  )}
                 </div>
-                <hr className="vk-rule" />
+                <hr className="vk-rule" style={{ marginTop: 'auto' }} />
               </div>
             </div>
 

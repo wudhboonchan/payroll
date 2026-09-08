@@ -69,13 +69,18 @@ export function cleanJobNotes(rawNotes?: string | null): string {
   return s
 }
 
+export const CLERK_JOB_CODES = new Set(['692021', '692032', '692041', '692050'])
+
 export const referenceJobs: Job[] = rows.map(([code,department,description,quota,plan,source,expiry,notes],i)=>{
  const isPaused = ['P315/69VRK','P322/69VRK','P422/69','Q121/69','Q131/69'].includes(code)
+ const isClerk = CLERK_JOB_CODES.has(code)
  return {
   id:`reference-${i}`,factory_id:'preview',code,department,description,quota,
   planned_morning:plan?.[0] ?? null,planned_afternoon:plan?.[1] ?? null,planned_night:plan?.[2] ?? null,
   job_type:expiry?'temporary':'regular',valid_from:null,expires_on:expiry,
-  normal_rate:357,skilled_rate:null,
+  job_group: isClerk ? 'clerk' : 'general',
+  normal_rate: 357,
+  skilled_rate: isClerk ? 377 : null,
   active: !isPaused,
   updated_at:'',
   notes: notes ? cleanJobNotes(notes) : '',

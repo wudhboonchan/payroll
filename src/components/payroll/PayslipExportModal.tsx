@@ -288,7 +288,7 @@ export default function PayslipExportModal({ isOpen, onClose, uniqueMonths }: Pr
             const thaiDate = m ? formatThaiDateDDMMYYYY(m[1]) : ''
 
             let baseRate = 0
-            const rateMatch = (d.notes || '').match(/(?:ปกติ|ช่างฝีมือ)\s*฿([\d,]+(?:\.\d+)?)/)
+            const rateMatch = (d.notes || '').match(/(?:ปกติ|ช่างฝีมือ|ค่าแรงฝีมือ)\s*฿([\d,]+(?:\.\d+)?)/)
             if (rateMatch) {
               baseRate = parseFloat(rateMatch[1].replace(/,/g, ''))
             } else if (d.amount) {

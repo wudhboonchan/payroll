@@ -33,6 +33,7 @@ export default function TpiJobManagement() {
 
   const [searchTerm, setSearchTerm] = useState('')
   const [typeFilter, setTypeFilter] = useState<'all' | 'regular' | 'temporary'>('all')
+  const [groupFilter, setGroupFilter] = useState<'all' | 'clerk' | 'general'>('all')
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
 
   // Modal State for Add / Edit Job
@@ -45,6 +46,7 @@ export default function TpiJobManagement() {
     department: '',
     description: '',
     job_type: 'regular',
+    job_group: 'general',
     quota: 1,
     planned_morning: 1,
     planned_afternoon: 0,
@@ -118,6 +120,8 @@ export default function TpiJobManagement() {
   // ── 2. Summary Statistics ──────────────────────────────────────────
   const stats = useMemo(() => {
     const totalJobs = jobs.length
+    const clerkJobs = jobs.filter((j) => j.job_group === 'clerk' || ['692021', '692032', '692041', '692050'].includes(j.code.trim()))
+    const generalJobs = jobs.filter((j) => !clerkJobs.includes(j))
     const regularJobs = jobs.filter((j) => j.job_type === 'regular')
     const tempJobs = jobs.filter((j) => j.job_type === 'temporary')
     const activeJobs = jobs.filter((j) => j.active)
@@ -128,6 +132,8 @@ export default function TpiJobManagement() {
 
     return {
       totalJobs,
+      clerkJobsCount: clerkJobs.length,
+      generalJobsCount: generalJobs.length,
       regularJobsCount: regularJobs.length,
       tempJobsCount: tempJobs.length,
       activeJobsCount: activeJobs.length,
@@ -147,14 +153,20 @@ export default function TpiJobManagement() {
         j.description.toLowerCase().includes(searchTerm.toLowerCase())
 
       const matchType = typeFilter === 'all' || j.job_type === typeFilter
+      const isClerk = j.job_group === 'clerk' || ['692021', '692032', '692041', '692050'].includes(j.code.trim())
+      const matchGroup =
+        groupFilter === 'all' ||
+        (groupFilter === 'clerk' && isClerk) ||
+        (groupFilter === 'general' && !isClerk)
+
       const matchStatus =
         statusFilter === 'all' ||
         (statusFilter === 'active' && j.active) ||
         (statusFilter === 'inactive' && !j.active)
 
-      return matchSearch && matchType && matchStatus
+      return matchSearch && matchType && matchGroup && matchStatus
     })
-  }, [jobs, searchTerm, typeFilter, statusFilter])
+  }, [jobs, searchTerm, typeFilter, groupFilter, statusFilter])
 
   // ── 4. Open Modal for Create / Edit ────────────────────────────────
   const handleOpenCreate = () => {
@@ -164,6 +176,7 @@ export default function TpiJobManagement() {
       department: '',
       description: '',
       job_type: 'regular',
+      job_group: 'general',
       quota: 1,
       planned_morning: 1,
       planned_afternoon: 0,
@@ -180,7 +193,13 @@ export default function TpiJobManagement() {
 
   const handleOpenEdit = (job: Job) => {
     setEditingJob(job)
-    setFormData({ ...job, notes: cleanJobNotes(job.notes) })
+    const isClerk = job.job_group === 'clerk' || ['692021', '692032', '692041', '692050'].includes(job.code.trim())
+    setFormData({
+      ...job,
+      job_group: isClerk ? 'clerk' : 'general',
+      skilled_rate: isClerk ? (job.skilled_rate ?? 377) : job.skilled_rate,
+      notes: cleanJobNotes(job.notes),
+    })
     setIsModalOpen(true)
   }
 
@@ -198,18 +217,25 @@ export default function TpiJobManagement() {
       const pn = payload.planned_night !== null && payload.planned_night !== undefined ? Number(payload.planned_night) : null
       const isPlanValid = pm !== null && pa !== null && pn !== null && (pm + pa + pn === quota)
 
-      const jobPayload = {
+      const isClerk = payload.job_group === 'clerk' || ['692021', '692032', '692041', '692050'].includes((payload.code || '').trim())
+      const jobGroup = isClerk ? 'clerk' : 'general'
+      const skilledRate = payload.skilled_rate !== null && payload.skilled_rate !== undefined && payload.skilled_rate !== ''
+        ? Number(payload.skilled_rate)
+        : (isClerk ? 377 : null)
+
+      const jobPayload: any = {
         factory_id: user.factory_id,
         code: (payload.code || '').trim(),
         department: (payload.department || '').trim(),
         description: (payload.description || '').trim(),
         job_type: payload.job_type || 'regular',
+        job_group: jobGroup,
         quota,
         planned_morning: isPlanValid ? pm : null,
         planned_afternoon: isPlanValid ? pa : null,
         planned_night: isPlanValid ? pn : null,
         normal_rate: Number(payload.normal_rate) || 357,
-        skilled_rate: payload.skilled_rate !== null && payload.skilled_rate !== undefined && payload.skilled_rate !== '' ? Number(payload.skilled_rate) : null,
+        skilled_rate: skilledRate,
         valid_from: payload.valid_from || null,
         expires_on: payload.expires_on || null,
         active: payload.active ?? true,
@@ -217,22 +243,23 @@ export default function TpiJobManagement() {
         updated_at: new Date().toISOString(),
       }
 
-      if (editingJob && editingJob.id && !editingJob.id.startsWith('reference-')) {
-        // Update existing record by ID in Supabase
-        const { error } = await supabase
-          .from('tpi_job_codes')
-          .update(jobPayload)
-          .eq('id', editingJob.id)
-
-        if (error) throw error
-      } else {
-        // Insert / Upsert record by (factory_id, code) in Supabase
-        const { error } = await supabase
-          .from('tpi_job_codes')
-          .upsert(jobPayload, { onConflict: 'factory_id,code' })
-
-        if (error) throw error
+      const doSave = (p: any) => {
+        if (editingJob && editingJob.id && !editingJob.id.startsWith('reference-')) {
+          return supabase.from('tpi_job_codes').update(p).eq('id', editingJob.id)
+        } else {
+          return supabase.from('tpi_job_codes').upsert(p, { onConflict: 'factory_id,code' })
+        }
       }
+
+      let { error } = await doSave(jobPayload)
+      // Graceful fallback if job_group column is not yet migrated in remote Supabase
+      if (error && error.message?.includes('job_group')) {
+        delete jobPayload.job_group
+        const retry = await doSave(jobPayload)
+        error = retry.error
+      }
+
+      if (error) throw error
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['tpi-jobs-manager'] })
@@ -288,6 +315,7 @@ export default function TpiJobManagement() {
         const pa = ref.planned_afternoon ?? null
         const pn = ref.planned_night ?? null
         const isPlanValid = pm !== null && pa !== null && pn !== null && (pm + pa + pn === quota)
+        const isClerk = ref.job_group === 'clerk' || ['692021', '692032', '692041', '692050'].includes(ref.code.trim())
 
         return {
           factory_id: user.factory_id,
@@ -295,12 +323,13 @@ export default function TpiJobManagement() {
           department: ref.department.trim(),
           description: ref.description.trim(),
           job_type: ref.job_type || 'regular',
+          job_group: isClerk ? 'clerk' : 'general',
           quota,
           planned_morning: isPlanValid ? pm : null,
           planned_afternoon: isPlanValid ? pa : null,
           planned_night: isPlanValid ? pn : null,
           normal_rate: ref.normal_rate || 357,
-          skilled_rate: ref.skilled_rate ?? null,
+          skilled_rate: isClerk ? 377 : (ref.skilled_rate ?? null),
           valid_from: ref.valid_from || null,
           expires_on: ref.expires_on || null,
           active: ref.active ?? true,
@@ -309,9 +338,16 @@ export default function TpiJobManagement() {
         }
       })
 
-      const { error } = await supabase
+      let { error } = await supabase
         .from('tpi_job_codes')
         .upsert(payload, { onConflict: 'factory_id,code' })
+
+      if (error && error.message?.includes('job_group')) {
+        // Fallback if column not yet in DB
+        const strippedPayload = payload.map(({ job_group, ...rest }: any) => rest)
+        const retry = await supabase.from('tpi_job_codes').upsert(strippedPayload, { onConflict: 'factory_id,code' })
+        error = retry.error
+      }
 
       if (error) throw error
 
@@ -490,16 +526,121 @@ export default function TpiJobManagement() {
               </button>
             </div>
 
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as any)}
-              className="vk-input"
-              style={{ height: 36, fontSize: 12.5, fontWeight: 600, padding: '0 32px 0 10px', background: '#ffffff', borderColor: 'var(--vk-rule-soft)' }}
-            >
-              <option value="all">สถานะ: ทั้งหมด</option>
-              <option value="active">เปิดใช้งานอยู่</option>
-              <option value="inactive">งดจัดกะ</option>
-            </select>
+            {/* Filter: Job Group */}
+            <div style={{ display: 'flex', background: 'var(--vk-paper)', border: '1px solid var(--vk-rule-soft)', borderRadius: 6, padding: 2 }}>
+              <button
+                type="button"
+                onClick={() => setGroupFilter('all')}
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: 4,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  border: 'none',
+                  cursor: 'pointer',
+                  background: groupFilter === 'all' ? '#ffffff' : 'transparent',
+                  color: groupFilter === 'all' ? 'var(--vk-ink)' : 'var(--vk-ink-3)',
+                  boxShadow: groupFilter === 'all' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                ทุกกลุ่มงาน ({jobs.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setGroupFilter('clerk')}
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: 4,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  border: 'none',
+                  cursor: 'pointer',
+                  background: groupFilter === 'clerk' ? '#ffffff' : 'transparent',
+                  color: groupFilter === 'clerk' ? 'var(--vk-ink)' : 'var(--vk-ink-3)',
+                  boxShadow: groupFilter === 'clerk' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                🏢 กลุ่มเสมียน ({stats.clerkJobsCount})
+              </button>
+              <button
+                type="button"
+                onClick={() => setGroupFilter('general')}
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: 4,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  border: 'none',
+                  cursor: 'pointer',
+                  background: groupFilter === 'general' ? '#ffffff' : 'transparent',
+                  color: groupFilter === 'general' ? 'var(--vk-ink)' : 'var(--vk-ink-3)',
+                  boxShadow: groupFilter === 'general' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                🏭 กลุ่มทั่วไป ({stats.generalJobsCount})
+              </button>
+            </div>
+
+            {/* Filter: Active Status */}
+            <div style={{ display: 'flex', background: 'var(--vk-paper)', border: '1px solid var(--vk-rule-soft)', borderRadius: 6, padding: 2 }}>
+              <button
+                type="button"
+                onClick={() => setStatusFilter('all')}
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: 4,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  border: 'none',
+                  cursor: 'pointer',
+                  background: statusFilter === 'all' ? '#ffffff' : 'transparent',
+                  color: statusFilter === 'all' ? 'var(--vk-ink)' : 'var(--vk-ink-3)',
+                  boxShadow: statusFilter === 'all' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                ทุกสถานะ
+              </button>
+              <button
+                type="button"
+                onClick={() => setStatusFilter('active')}
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: 4,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  border: 'none',
+                  cursor: 'pointer',
+                  background: statusFilter === 'active' ? '#ffffff' : 'transparent',
+                  color: statusFilter === 'active' ? '#16a34a' : 'var(--vk-ink-3)',
+                  boxShadow: statusFilter === 'active' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                เปิดใช้งาน ({stats.activeJobsCount})
+              </button>
+              <button
+                type="button"
+                onClick={() => setStatusFilter('inactive')}
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: 4,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  border: 'none',
+                  cursor: 'pointer',
+                  background: statusFilter === 'inactive' ? '#ffffff' : 'transparent',
+                  color: statusFilter === 'inactive' ? '#dc2626' : 'var(--vk-ink-3)',
+                  boxShadow: statusFilter === 'inactive' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                งดจัดกะ ({stats.totalJobs - stats.activeJobsCount})
+              </button>
+            </div>
           </div>
         </div>
 
@@ -513,6 +654,7 @@ export default function TpiJobManagement() {
                   <th style={{ padding: '10px 14px', width: 140, whiteSpace: 'nowrap' }}>แผนก / ฝ่าย</th>
                   <th style={{ padding: '10px 14px', minWidth: 220 }}>รายละเอียดงาน</th>
                   <th style={{ padding: '10px 12px', width: 95, textAlign: 'center', whiteSpace: 'nowrap' }}>ประเภท</th>
+                  <th style={{ padding: '10px 12px', width: 95, textAlign: 'center', whiteSpace: 'nowrap' }}>กลุ่มงาน</th>
                   <th style={{ padding: '10px 12px', width: 85, textAlign: 'center', whiteSpace: 'nowrap' }}>ยอดเต็ม</th>
                   <th style={{ padding: '10px 12px', width: 100, textAlign: 'right', whiteSpace: 'nowrap' }}>ค่าแรงปกติ</th>
                   <th style={{ padding: '10px 12px', width: 100, textAlign: 'right', whiteSpace: 'nowrap' }}>ค่าแรงฝีมือ</th>
@@ -524,12 +666,13 @@ export default function TpiJobManagement() {
               <tbody>
                 {filteredJobs.length === 0 ? (
                   <tr>
-                    <td colSpan={10} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--vk-ink-3)' }}>
+                    <td colSpan={11} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--vk-ink-3)' }}>
                       ไม่พบรหัสงานที่ตรงกับเงื่อนไขการค้นหา
                     </td>
                   </tr>
                 ) : (
                   filteredJobs.map((job) => {
+                    const isClerk = job.job_group === 'clerk' || ['692021', '692032', '692041', '692050'].includes(job.code.trim())
                     return (
                       <tr
                         key={job.id}
@@ -576,6 +719,38 @@ export default function TpiJobManagement() {
                           >
                             {job.job_type === 'regular' ? 'งานประจำ' : 'งานชั่วคราว'}
                           </span>
+                        </td>
+
+                        {/* กลุ่มงาน */}
+                        <td style={{ padding: '12px 12px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                          {isClerk ? (
+                            <span
+                              style={{
+                                fontSize: 11,
+                                fontWeight: 700,
+                                padding: '2px 8px',
+                                borderRadius: 4,
+                                background: '#e0e7ff',
+                                color: '#3730a3',
+                                border: '1px solid #c7d2fe',
+                              }}
+                            >
+                              🏢 เสมียน
+                            </span>
+                          ) : (
+                            <span
+                              style={{
+                                fontSize: 11,
+                                fontWeight: 600,
+                                padding: '2px 8px',
+                                borderRadius: 4,
+                                background: '#f1f5f9',
+                                color: '#475569',
+                              }}
+                            >
+                              🏭 ทั่วไป
+                            </span>
+                          )}
                         </td>
 
                         {/* ยอดเต็ม */}
@@ -730,8 +905,30 @@ export default function TpiJobManagement() {
                   />
                 </div>
 
-                {/* Line 3: Type & Quota */}
+                {/* Line 3: Group & Type */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div className="vk-field-group">
+                    <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--vk-ink-2)' }}>
+                      กลุ่มงาน <span style={{ color: 'var(--vk-crimson)' }}>*</span>
+                    </label>
+                    <select
+                      value={formData.job_group || 'general'}
+                      onChange={(e) => {
+                        const newGroup = e.target.value as 'clerk' | 'general'
+                        setFormData({
+                          ...formData,
+                          job_group: newGroup,
+                          skilled_rate: newGroup === 'clerk' && (!formData.skilled_rate || formData.skilled_rate === 400) ? 377 : formData.skilled_rate,
+                        })
+                      }}
+                      className="vk-modal-select"
+                      style={{ background: '#ffffff', borderColor: '#cbd5e1' }}
+                    >
+                      <option value="general">🏭 กลุ่มงานทั่วไป (General)</option>
+                      <option value="clerk">🏢 กลุ่มงานเสมียน (Clerk - หมุนเวียนตำแหน่ง)</option>
+                    </select>
+                  </div>
+
                   <div className="vk-field-group">
                     <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--vk-ink-2)' }}>
                       ประเภทงาน <span style={{ color: 'var(--vk-crimson)' }}>*</span>
@@ -746,25 +943,26 @@ export default function TpiJobManagement() {
                       <option value="temporary">2. งานชั่วคราว (Temporary)</option>
                     </select>
                   </div>
-
-                  <div className="vk-field-group">
-                    <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--vk-ink-2)' }}>
-                      ยอดเต็มที่ต้องการ (คน/วัน) <span style={{ color: 'var(--vk-crimson)' }}>*</span>
-                    </label>
-                    <input
-                      type="number"
-                      required
-                      min={0}
-                      step={1}
-                      value={formData.quota || 0}
-                      onChange={(e) => setFormData({ ...formData, quota: Number(e.target.value) })}
-                      className="vk-input"
-                      style={{ background: '#ffffff', borderColor: '#cbd5e1', fontFamily: 'var(--vk-mono)' }}
-                    />
-                  </div>
                 </div>
 
-                {/* Line 4: Wage Rates */}
+                {/* Line 4: Quota */}
+                <div className="vk-field-group">
+                  <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--vk-ink-2)' }}>
+                    ยอดเต็มที่ต้องการ (คน/วัน) <span style={{ color: 'var(--vk-crimson)' }}>*</span>
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    min={0}
+                    step={1}
+                    value={formData.quota || 0}
+                    onChange={(e) => setFormData({ ...formData, quota: Number(e.target.value) })}
+                    className="vk-input"
+                    style={{ background: '#ffffff', borderColor: '#cbd5e1', fontFamily: 'var(--vk-mono)' }}
+                  />
+                </div>
+
+                {/* Line 5: Wage Rates */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                   <div className="vk-field-group">
                     <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--vk-ink-2)' }}>
@@ -783,12 +981,15 @@ export default function TpiJobManagement() {
                   </div>
 
                   <div className="vk-field-group">
-                    <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--vk-ink-2)' }}>ค่าแรงฝีมือ (บาท/กะ - ถ้ามี)</label>
+                    <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--vk-ink-2)' }}>
+                      ค่าแรงฝีมือ (บาท/กะ - ถ้ามี)
+                      {formData.job_group === 'clerk' && <span style={{ color: '#4338ca', marginLeft: 4 }}>(มาตรฐานเสมียน ฿377)</span>}
+                    </label>
                     <input
                       type="number"
                       min={0}
                       step={1}
-                      placeholder="เช่น 400, 450 (เว้นว่างได้)"
+                      placeholder={formData.job_group === 'clerk' ? '377' : 'เช่น 400, 450 (เว้นว่างได้)'}
                       value={formData.skilled_rate ?? ''}
                       onChange={(e) => setFormData({ ...formData, skilled_rate: e.target.value === '' ? null : Number(e.target.value) })}
                       className="vk-input"
@@ -796,6 +997,11 @@ export default function TpiJobManagement() {
                     />
                   </div>
                 </div>
+                {formData.job_group === 'clerk' && (
+                  <div style={{ fontSize: 11, color: '#3730a3', background: '#eef2ff', padding: '8px 12px', borderRadius: 6, borderLeft: '3px solid #6366f1', lineHeight: 1.5 }}>
+                    <strong>กลุ่มงานเสมียน (Clerk Group):</strong> พนักงานตำแหน่งเสมียนที่ตั้งค่าเรทฝีมือไว้ จะได้รับค่าแรงเรทฝีมือ <strong>฿{formData.skilled_rate || 377}</strong> อัตโนมัติเมื่อหมุนเวียนมาปฏิบัติงานในรหัสนี้ ส่วนพนักงานเรทปกติจะได้รับค่าแรงปกติ <strong>฿{formData.normal_rate || 357}</strong>
+                  </div>
+                )}
 
                 {/* Line 5: Dates */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>

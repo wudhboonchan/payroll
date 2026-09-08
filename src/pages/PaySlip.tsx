@@ -8,6 +8,8 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { Printer, Search, X, AlertTriangle } from 'lucide-react'
 import { calculatePayroll } from '../lib/payrollCalc'
 import { calculateTpiPayroll, type TpiShiftRow, type TpiPayrollCalculationResult } from '../features/tpi/payrollCalc'
+import { employeeWageForm } from '../features/tpi/employeeWageForm'
+import { referenceJobs } from '../features/tpi/referenceJobs'
 import { VKSlipDocument } from '../components/VKSlipDocument'
 import { formatEmployeeFullName, compareEmployeeCode, formatThaiDateDDMMYYYY } from '../lib/formatters'
 import { isTpiCompany } from '../features/tpi/model'
@@ -202,6 +204,50 @@ export default function PaySlip() {
                 isTpiCompany(companyContext?.name) ||
                 isTpiCompany(companyName) ||
                 isTpiCompany(branchName)
+
+  // Query TPI Wage Profiles
+  const { data: dbWageProfiles = [] } = useQuery<any[]>({
+    queryKey: ['tpi-profiles', user?.factory_id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('tpi_employee_wage_profiles')
+        .select('*')
+        .eq('factory_id', user?.factory_id ?? '')
+      if (error) return []
+      return data || []
+    },
+    enabled: !!user?.factory_id && isTpi,
+  })
+
+  // Query TPI Job Codes for fallback identification
+  const { data: dbTpiJobCodes = [] } = useQuery<any[]>({
+    queryKey: ['tpi-job-codes', user?.factory_id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('tpi_job_codes')
+        .select('*')
+        .eq('factory_id', user?.factory_id ?? '')
+      if (error) return []
+      return data || []
+    },
+    enabled: !!user?.factory_id && isTpi,
+  })
+
+  const isSkilledEmp = useMemo(() => {
+    if (!isTpi) return (_emp?: any) => false
+    const profileMap = new Map<string, any>()
+    for (const p of dbWageProfiles) {
+      profileMap.set(p.employee_id, p)
+    }
+    const jobsList = dbTpiJobCodes.length > 0 ? dbTpiJobCodes : referenceJobs
+    return (emp?: any) => {
+      if (!emp) return false
+      const profile = profileMap.get(emp.id)
+      if (profile?.rate_tier === 'skilled') return true
+      const form = employeeWageForm(emp.job_title, profile, jobsList)
+      return form.rateTier === 'skilled'
+    }
+  }, [isTpi, dbWageProfiles, dbTpiJobCodes])
 
   const { data: entry } = useQuery<any>({
     queryKey: ['payslip-entry', currentPeriod?.id, selectedEmpId],
@@ -664,7 +710,7 @@ export default function PaySlip() {
           const thaiDate = m ? formatThaiDateDDMMYYYY(m[1]) : ''
 
           let baseRate = 0
-          const rateMatch = (d.notes || '').match(/(?:ปกติ|ช่างฝีมือ)\s*฿([\d,]+(?:\.\d+)?)/)
+          const rateMatch = (d.notes || '').match(/(?:ปกติ|ช่างฝีมือ|ค่าแรงฝีมือ)\s*฿([\d,]+(?:\.\d+)?)/)
           if (rateMatch) {
             baseRate = parseFloat(rateMatch[1].replace(/,/g, ''))
           } else if (d.amount) {
@@ -840,9 +886,16 @@ export default function PaySlip() {
                   <span style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, background: hasOvr ? '#f59e0b' : (hasSaved ? 'var(--vk-jade)' : '#d4cfc9') }} />
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
-                      <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--vk-ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {formatEmployeeFullName(emp, isTpi)}{n ? ` (${n})` : ''}
-                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', minWidth: 0, gap: 4 }}>
+                        <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--vk-ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {formatEmployeeFullName(emp, isTpi)}{n ? ` (${n})` : ''}
+                        </span>
+                        {isSkilledEmp(emp) && (
+                          <span title="พนักงานค่าแรงฝีมือ" style={{ flexShrink: 0, fontSize: 13 }}>
+                            ⭐
+                          </span>
+                        )}
+                      </div>
                       {hasOvr && (
                         <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 4, background: '#fffbeb', color: '#b45309', border: '1px solid #fcd34d', flexShrink: 0 }}>
                           Override
@@ -957,6 +1010,7 @@ export default function PaySlip() {
                       branchName={branchName ? fullCompanyName(branchName) : undefined}
                       employeeName={formatEmployeeFullName(selectedEmp, isTpi)}
                       employeeCode={selectedEmp.employee_code}
+                      isSkilled={isSkilledEmp(selectedEmp)}
                       positionLabel={posLabel}
                       jobTitle={selectedEmp.job_title}
                       periodLabel={currentPeriod ? thaiPeriod(currentPeriod.period_start, currentPeriod.period_end) : '—'}

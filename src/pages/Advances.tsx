@@ -518,7 +518,7 @@ export default function Advances() {
       const job = jobs.find((j) => j.id === scanForm.job_id)
       const jobCode = job?.code || scanLookupResult?.job_code || ''
       const jobDesc = job?.description ? ` — ${job.description}` : (scanLookupResult?.job_desc ? ` — ${scanLookupResult.job_desc}` : '')
-      const tierLabel = scanForm.rate_tier === 'skilled' ? 'ช่างฝีมือ' : scanForm.rate_tier === 'custom' ? 'กำหนดเอง' : 'ปกติ'
+      const tierLabel = scanForm.rate_tier === 'skilled' ? 'ค่าแรงฝีมือ' : scanForm.rate_tier === 'custom' ? 'กำหนดเอง' : 'ปกติ'
       const shiftInfo = scanLookupResult?.source === 'shift' && scanLookupResult.shift_name ? ` (${scanLookupResult.shift_name})` : ''
       const formattedWorkDate = formatThaiDateDDMMYYYY(scanForm.work_date)
       const noteStr = `[สแกนหน้าไม่สำเร็จ] วันที่: ${formattedWorkDate} | กะแรก: ${jobCode}${jobDesc}${shiftInfo} (${tierLabel} ฿${scanForm.base_rate}) (หัก 50% = ฿${scanForm.amount})${scanForm.custom_notes ? ` | ${scanForm.custom_notes}` : ''}`
@@ -629,7 +629,7 @@ export default function Advances() {
       const job = jobs.find((j) => j.id === discForm.job_id)
       const jobCode = job?.code || discLookupResult?.job_code || ''
       const jobDesc = job?.description ? ` — ${job.description}` : (discLookupResult?.job_desc ? ` — ${discLookupResult.job_desc}` : '')
-      const tierLabel = discForm.rate_tier === 'skilled' ? 'ช่างฝีมือ' : discForm.rate_tier === 'custom' ? 'กำหนดเอง' : 'ปกติ'
+      const tierLabel = discForm.rate_tier === 'skilled' ? 'ค่าแรงฝีมือ' : discForm.rate_tier === 'custom' ? 'กำหนดเอง' : 'ปกติ'
       const shiftInfo = discLookupResult?.source === 'shift' && discLookupResult.shift_name ? ` (${discLookupResult.shift_name})` : ''
       const formattedWorkDate = formatThaiDateDDMMYYYY(discForm.work_date)
       const noteStr = `[ลงโทษ ขาดงานไม่มีคนแทน] วันที่: ${formattedWorkDate} | กะแรก: ${jobCode}${jobDesc}${shiftInfo} (${tierLabel} ฿${discForm.base_rate}) (หัก 2 เท่า = ฿${discForm.amount})${discForm.custom_notes ? ` | ${discForm.custom_notes}` : ''}`
@@ -1261,7 +1261,7 @@ export default function Advances() {
                                   borderRadius: 4,
                                 }}
                               >
-                                ช่างฝีมือ
+                                ค่าแรงฝีมือ
                               </span>
                             )}
                             {selected && <span style={{ fontSize: 12, color: '#b91c1c', fontWeight: 700 }}>✓</span>}
@@ -1401,7 +1401,7 @@ export default function Advances() {
                         </span>
                       </div>
                       <span style={{ fontSize: 11, color: 'var(--vk-ink-3)' }}>
-                        {scanForm.rate_tier === 'skilled' ? 'ระดับช่างฝีมือ' : 'ระดับค่าแรงปกติ'}
+                        {scanForm.rate_tier === 'skilled' ? 'ระดับค่าแรงฝีมือ' : 'ระดับค่าแรงปกติ'}
                       </span>
                     </div>
 
@@ -1877,7 +1877,7 @@ export default function Advances() {
                                   borderRadius: 4,
                                 }}
                               >
-                                ช่างฝีมือ
+                                ค่าแรงฝีมือ
                               </span>
                             )}
                             {selected && <span style={{ fontSize: 12, color: '#c2410c', fontWeight: 700 }}>✓</span>}
@@ -2017,7 +2017,7 @@ export default function Advances() {
                         </span>
                       </div>
                       <span style={{ fontSize: 11, color: 'var(--vk-ink-3)' }}>
-                        {discForm.rate_tier === 'skilled' ? 'ระดับช่างฝีมือ' : 'ระดับค่าแรงปกติ'}
+                        {discForm.rate_tier === 'skilled' ? 'ระดับค่าแรงฝีมือ' : 'ระดับค่าแรงปกติ'}
                       </span>
                     </div>
 

@@ -882,7 +882,7 @@ export default function EmployeeSummary() {
         </div>
 
         {/* ── Right Panel (Ledger) ── */}
-        <div style={{ overflowY: 'auto', background: 'var(--vk-bone)', padding: '20px 24px 48px' }}>
+        <div style={{ overflowY: 'auto', overflowX: 'hidden', background: 'var(--vk-bone)', padding: '20px 24px 48px', minWidth: 0, boxSizing: 'border-box' }}>
           {selectedEmp && (
             <button className="vk-btn md:hidden" style={{ marginBottom: 20, fontSize: 12, padding: '5px 12px' }}
               onClick={() => setSelectedEmpId(null)}>← กลับ</button>
@@ -897,10 +897,19 @@ export default function EmployeeSummary() {
               </div>
             </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              border: '1px solid var(--vk-ink)',
+              background: 'var(--vk-paper)',
+              width: '100%',
+              maxWidth: '100%',
+              boxSizing: 'border-box',
+              overflow: 'hidden'
+            }}>
 
               {/* ── A. Header strip ── */}
-              <div style={{ padding: '16px 32px 12px', background: 'var(--vk-paper)', border: '1px solid var(--vk-ink)', borderBottom: '2px solid var(--vk-ink)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
+              <div style={{ padding: '16px 24px 12px', background: 'var(--vk-paper)', borderBottom: '2px solid var(--vk-ink)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12, boxSizing: 'border-box', width: '100%' }}>
                 <div>
                   <div className="vk-eyebrow" style={{ marginBottom: 3 }}>EMPLOYEE LEDGER · บัญชีรายการพนักงาน</div>
                   <div style={{ fontFamily: 'var(--vk-sans)', fontWeight: 800, fontSize: 20, letterSpacing: '-0.02em', color: 'var(--vk-ink)', lineHeight: 1.2 }}>

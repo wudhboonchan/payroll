@@ -20,7 +20,7 @@ import ShareLinks from './pages/ShareLinks'
 import EmployeeSlipPage from './pages/EmployeeSlip'
 import LiffUnavailable from './pages/LiffUnavailable'
 import UserManagement from './pages/UserManagement'
-import EmployeeSummary from './pages/EmployeeSummary'
+import CompanyEmployeeSummary from './pages/CompanyEmployeeSummary'
 import { AppLayout, RequireAuth } from './components/layout/AppLayout'
 import { ErrorBoundary } from './components/ErrorBoundary'
 
@@ -77,7 +77,7 @@ function App() {
                   </Route>
                   <Route element={<RequireAuth allowedRoles={['superUser', 'admin', 'normalUser']} />}>
                     <Route path="/payslip"    element={<PaySlip />} />
-                    <Route path="/employee-summary" element={<EmployeeSummary />} />
+                    <Route path="/employee-summary" element={<CompanyEmployeeSummary />} />
                     <Route path="/share-links" element={<ShareLinks />} />
                     <Route path="/export"     element={<Export />} />
                   </Route>

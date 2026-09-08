@@ -464,11 +464,17 @@ export default function LiffSlip() {
 
     const specialSubs = (entry.special_note as string || '').split(',').map((s: string) => s.trim()).filter(Boolean)
 
-    const amtNormal  = Number(entry.amount_normal     || 0)
-    const amtShift   = isClerk ? 0 : Number(entry.amount_shift || 0)
+    const amtNormal  = Number(entry.override_normal != null ? entry.override_normal : (entry.amount_normal || 0))
+    const amtShift   = isClerk ? 0 : Number(entry.override_shift != null ? entry.override_shift : (entry.amount_shift || 0))
     const amtWood    = Number(entry.amount_wood_excess || 0)
     const amtFilm    = Number(entry.amount_film        || 0)
-    const amtSpecial = Number(entry.amount_special     || 0)
+    const amtSpecial = (() => {
+      const a = Number(entry.amount_special || 0)
+      const o = entry.override_special != null ? Number(entry.override_special) : null
+      if (o != null && a > 0 && o === a) return a
+      if (o != null && a > 0) return a >= o ? a : (a + o)
+      return o != null ? o : a
+    })()
     const amtDilig   = Number(entry.amount_diligence   || 0)
     const amtPos     = Number(entry.amount_position    || 0)
     const dSS        = Number(entry.deduct_social_security    || 0)

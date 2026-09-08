@@ -1,7 +1,9 @@
 export type RateTier = 'normal' | 'skilled'
+export type JobGroup = 'clerk' | 'general'
 export type Job = {
   id: string; factory_id: string; code: string; department: string; description: string
   job_type: 'regular' | 'temporary'; valid_from: string | null; expires_on: string | null
+  job_group?: JobGroup
   quota: number; planned_morning: number | null; planned_afternoon: number | null; planned_night: number | null
   normal_rate: number; skilled_rate: number | null; active: boolean; notes: string; updated_at: string
 }
@@ -85,18 +87,29 @@ export function entryRate(entry: Entry, jobs: Job[], profiles: WageProfile[], da
   const emp = employees?.find(e => e.id === entry.employee_id)
   const isSkilledTier = wageTier(profile, date) === 'skilled'
 
-  // Skilled rate applies ONLY if this is the employee's regular assigned job
-  const isRegularJob = isSkilledTier && (
-    (profile?.job_id && profile.job_id === entry.job_id) ||
-    (profile?.job_code && job.code.trim().toLowerCase() === profile.job_code.trim().toLowerCase()) ||
-    (emp?.job_title && (
-      job.code.trim().toLowerCase() === emp.job_title.trim().toLowerCase() ||
-      emp.job_title === entry.job_id
-    ))
-  )
+  // Clerk group jobs (692021, 692032, 692041, 692050):
+  // Skilled clerk employees receive skilled_rate (377) on any clerk job without single-job lock.
+  // Regular clerk employees receive normal_rate (357).
+  const isClerkJob = job.job_group === 'clerk' || ['692021', '692032', '692041', '692050'].includes(job.code.trim())
 
-  const baseRate = isRegularJob ? (job.skilled_rate ?? job.normal_rate) : job.normal_rate
-  if (baseRate === null) return null
+  let isSkilledApplicable = false
+  if (isClerkJob) {
+    isSkilledApplicable = isSkilledTier
+  } else {
+    // General jobs: skilled rate applies if this is the employee's regular assigned job
+    isSkilledApplicable = isSkilledTier && (
+      (!profile?.job_id && !profile?.job_code && !emp?.job_title) ||
+      (profile?.job_id && profile.job_id === entry.job_id) ||
+      (profile?.job_code && job.code.trim().toLowerCase() === profile.job_code.trim().toLowerCase()) ||
+      (emp?.job_title && (
+        job.code.trim().toLowerCase() === emp.job_title.trim().toLowerCase() ||
+        emp.job_title === entry.job_id
+      ))
+    )
+  }
+
+  const baseRate = isSkilledApplicable ? job.skilled_rate : job.normal_rate
+  if (baseRate === null || baseRate === undefined) return null
   return entry.is_half_shift ? baseRate / 2 : baseRate
 }
 export function validateEntries(entries: Entry[]) {

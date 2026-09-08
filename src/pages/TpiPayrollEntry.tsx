@@ -9,12 +9,14 @@ import { toast } from 'sonner'
 import {
   Save, CheckCircle2, AlertCircle, Search, X,
   Clock, ChevronDown, ChevronUp,
-  Sparkles, RefreshCw, AlertTriangle, Pencil, RotateCcw
+  AlertTriangle, Pencil, RotateCcw
 } from 'lucide-react'
 import { calculateTpiPayroll, isEndOfMonthPeriod } from '../features/tpi/payrollCalc'
 import type { AttendanceLog } from '../features/tpi/attendanceApi'
 import { loadMonthlyAttendanceLogs, getAttendanceTypeLabel, formatAttendanceSummary } from '../features/tpi/attendanceApi'
 import { formatEmployeeFullName, formatThaiDateDDMMYYYY } from '../lib/formatters'
+import { employeeWageForm } from '../features/tpi/employeeWageForm'
+import { referenceJobs } from '../features/tpi/referenceJobs'
 import '../styles/tokens.css'
 
 interface Employee {
@@ -86,79 +88,6 @@ export const getStoredHolidaysForFactory = (factoryId?: string): Set<string> => 
   return set
 }
 
-// ── Generator for Simulated Sample Shifts for Logic Inspection ──
-function generateSimulatedShifts(emp: Employee, periodStart: string, periodEnd: string): TpiShiftRow[] {
-  const isClerk = emp.position === 'clerk'
-  const shifts: TpiShiftRow[] = []
-  const start = new Date(periodStart + 'T00:00:00')
-  const end = new Date(periodEnd + 'T00:00:00')
-  const current = new Date(start)
-  let dayCount = 0
-
-  while (current <= end && dayCount < 11) {
-    const dateStr = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}-${String(current.getDate()).padStart(2, '0')}`
-    const dayOfWeek = current.getDay()
-
-    // Skip Sundays
-    if (dayOfWeek !== 0) {
-      dayCount++
-      if (isClerk) {
-        // Clerk: 8h shift, overtime is full 8h shift at 2x, dayCount 3 is public holiday (2x)
-        const isHoliday = dayCount === 3
-        const hasOt = dayCount === 5 || dayCount === 8
-        shifts.push({
-          id: `sim-${emp.id}-${dateStr}-0`,
-          work_date: dateStr,
-          employee_id: emp.id,
-          shift_index: 0,
-          job_id: 'job-clerk',
-          job_code_snapshot: isHoliday ? 'C101 (เสมียน - วันหยุดนักขัตฤกษ์)' : 'C101 (เสมียน)',
-          rate_tier: 'normal',
-          rate_snapshot: 357,
-          is_half_shift: false,
-          actual_hours: 8,
-          ot_hours: hasOt ? 8 : 0,
-          ot_pay: hasOt ? 714 : 0,
-          is_holiday_ot: isHoliday,
-        })
-      } else {
-        // Regular worker:
-        // Day 3: วันหยุดนักขัตฤกษ์ (ได้ 2 เท่า = 714 บ.)
-        // Day 5: ครึ่งกะ (4 ชม. = 178.50 บ.)
-        // Day 7 & 9: ช่างฝีมือ (400 บ.)
-        // Day 2: OT 2 ชม.
-        // Day 6: OT 3 ชม.
-        const isHoliday = dayCount === 3
-        const isHalf = dayCount === 5
-        const isSkilled = dayCount === 7 || dayCount === 9
-        const otHrs = dayCount === 2 ? 2 : dayCount === 6 ? 3 : 0
-        const base = isSkilled ? 400 : 357
-        const wage = isHalf ? base / 2 : base
-        const hourlyRate = (base / 8) * 1.5
-        const otMoney = otHrs > 0 ? Math.ceil(hourlyRate * otHrs) : 0
-
-        shifts.push({
-          id: `sim-${emp.id}-${dateStr}-0`,
-          work_date: dateStr,
-          employee_id: emp.id,
-          shift_index: 0,
-          job_id: isSkilled ? 'job-skilled' : 'job-normal',
-          job_code_snapshot: isHoliday ? '694014 (วันหยุดนักขัตฤกษ์)' : (isSkilled ? 'P134 (ช่างฝีมือ)' : '694014 (ผลิตครอบ)'),
-          rate_tier: isSkilled ? 'skilled' : 'normal',
-          rate_snapshot: wage,
-          is_half_shift: isHalf,
-          actual_hours: isHalf ? 4 : 8,
-          ot_hours: otHrs,
-          ot_pay: otMoney,
-          is_holiday_ot: isHoliday,
-        })
-      }
-    }
-    current.setDate(current.getDate() + 1)
-  }
-  return shifts
-}
-
 export default function TpiPayrollEntry() {
   const { onMenuClick } = useOutletContext<{ onMenuClick: () => void }>()
   const { user } = useAppStore()
@@ -169,7 +98,6 @@ export default function TpiPayrollEntry() {
   const [statusFilter, setStatusFilter] = useState<'saved' | 'outdated' | 'unsaved' | null>(null)
   const [showDailyBreakdown, setShowDailyBreakdown] = useState<boolean>(true)
   const [selectedPeriodId, setSelectedPeriodId] = useState<string>('')
-  const [isSimulated, setIsSimulated] = useState<boolean>(false)
   // Inactive/expired job warning modal state
   const [inactiveJobWarning, setInactiveJobWarning] = useState<{
     empName: string
@@ -249,18 +177,35 @@ export default function TpiPayrollEntry() {
 
   // ── 2c. TPI Employee Wage Profiles (for checking skilled tier + bound job) ──
   const { data: dbWageProfiles = [] } = useQuery<any[]>({
-    queryKey: ['tpi-wage-profiles-payroll', user?.factory_id],
+    queryKey: ['tpi-profiles', user?.factory_id],
     queryFn: async () => {
+      if (!user?.factory_id) return []
       const { data, error } = await supabase
         .from('tpi_employee_wage_profiles')
         .select('employee_id,rate_tier,job_id,job_code,skilled_from')
-        .eq('factory_id', user!.factory_id)
+        .eq('factory_id', user.factory_id)
       if (error) return []
       return data || []
     },
     enabled: !!user?.factory_id,
     staleTime: 60_000,
   })
+
+  // Helper to determine if an employee receives skilled wage rate (profile or recognized skilled job code)
+  const isSkilledEmp = useMemo(() => {
+    const profileMap = new Map<string, any>()
+    for (const p of dbWageProfiles) {
+      profileMap.set(p.employee_id, p)
+    }
+    return (emp?: Employee | null) => {
+      if (!emp) return false
+      const profile = profileMap.get(emp.id)
+      if (profile?.rate_tier === 'skilled') return true
+      const jobsList = dbTpiJobCodes.length > 0 ? dbTpiJobCodes : referenceJobs
+      const form = employeeWageForm(emp.job_title, profile, jobsList)
+      return form.rateTier === 'skilled'
+    }
+  }, [dbWageProfiles, dbTpiJobCodes])
 
 
   const { data: dbShifts = [], isLoading: shiftsLoading } = useQuery<TpiShiftRow[]>({
@@ -308,33 +253,17 @@ export default function TpiPayrollEntry() {
     staleTime: 0,
   })
 
-  // Auto-enable simulation if database has 0 shifts for this period so the user can inspect logic immediately
-  useEffect(() => {
-    if (!shiftsLoading && dbShifts.length === 0) {
-      setIsSimulated(true)
-    }
-  }, [dbShifts.length, shiftsLoading])
-
-  // Active shifts: either database shifts or simulated shifts
+  // Active shifts: database shifts with factory holiday detection
   const allTpiShifts = useMemo(() => {
-    if (!isSimulated) {
-      const storedHolidays = getStoredHolidaysForFactory(user?.factory_id)
-      if (storedHolidays.size === 0) return dbShifts
-      return dbShifts.map((s) => {
-        if (storedHolidays.has(s.work_date)) {
-          return { ...s, is_holiday_ot: true }
-        }
-        return s
-      })
-    }
-    // Generate simulated shifts for all employees
-    if (!currentPeriod) return []
-    let sim: TpiShiftRow[] = []
-    for (const emp of employees) {
-      sim = sim.concat(generateSimulatedShifts(emp, currentPeriod.period_start, currentPeriod.period_end))
-    }
-    return sim
-  }, [isSimulated, dbShifts, employees, currentPeriod, user?.factory_id])
+    const storedHolidays = getStoredHolidaysForFactory(user?.factory_id)
+    if (storedHolidays.size === 0) return dbShifts
+    return dbShifts.map((s) => {
+      if (storedHolidays.has(s.work_date)) {
+        return { ...s, is_holiday_ot: true }
+      }
+      return s
+    })
+  }, [dbShifts, user?.factory_id])
 
   // ── 4. Existing Payroll Entries in Current Period ──
   const { data: allEntries = [] } = useQuery<PayrollRow[]>({
@@ -411,19 +340,9 @@ export default function TpiPayrollEntry() {
   const existingEntry = allEntries.find(e => e.employee_id === selectedEmpId) ?? null
   const empShifts = allTpiShifts.filter(s => s.employee_id === selectedEmpId)
 
-  // In simulation mode, add sample advance & face scan deduction if empty
   const empAdvances = useMemo(() => {
-    const real = allAdvances.filter(a => a.employee_id === selectedEmpId)
-    if (real.length > 0) return real
-    if (isSimulated && selectedEmp) {
-      return [
-        { employee_id: selectedEmp.id, amount: 500, note: 'เบิกเงินสดฉุกเฉิน' },
-        { employee_id: selectedEmp.id, amount: 178.50, note: '[สแกนหน้าไม่สำเร็จ] 04 ก.ย. 2569 รหัสงาน B1' },
-        { employee_id: selectedEmp.id, amount: 714, note: '[ลงโทษ ขาดงานไม่มีคนแทน] วันที่: 03 ก.ย. 2569 | กะแรก: B1 (หัก 2 เท่า)' }
-      ]
-    }
-    return []
-  }, [allAdvances, selectedEmpId, isSimulated, selectedEmp])
+    return allAdvances.filter(a => a.employee_id === selectedEmpId)
+  }, [allAdvances, selectedEmpId])
 
   // Categorize advances for clear reporting: เบิกล่วงหน้า, หักสแกนหน้าไม่ผ่าน, หักลงโทษขาดงานไม่มีคนแทน
   const {
@@ -651,7 +570,7 @@ export default function TpiPayrollEntry() {
         deduct_uniform: 0,
       })
     }
-  }, [existingEntry, selectedEmpId, isSimulated, selectedEmp?.position, selectedEmp?.has_position_allowance, selectedEmp?.is_safety_officer, currentPeriod?.period_end, attendanceByEmp])
+  }, [existingEntry, selectedEmpId, selectedEmp?.position, selectedEmp?.has_position_allowance, selectedEmp?.is_safety_officer, currentPeriod?.period_end, attendanceByEmp])
 
   // ── Main Calculation for Selected Employee ──
   const calc = useMemo(() => {
@@ -679,7 +598,7 @@ export default function TpiPayrollEntry() {
   // ── Outdated Detection across all employees ──
   const outdatedSet = useMemo(() => {
     const set = new Set<string>()
-    if (!currentPeriod || isSimulated) return set
+    if (!currentPeriod) return set
     const eps = 0.5
 
     for (const entry of allEntries) {
@@ -722,12 +641,11 @@ export default function TpiPayrollEntry() {
       }
     }
     return set
-  }, [allEntries, allTpiShifts, allAdvances, employees, currentPeriod, isSimulated])
+  }, [allEntries, allTpiShifts, allAdvances, employees, currentPeriod])
 
   const isOutdated = outdatedSet.has(selectedEmpId ?? '')
 
   function empStatus(empId: string): 'saved' | 'unsaved' | 'outdated' | 'none' {
-    if (isSimulated) return 'saved'
     const hasShifts = allTpiShifts.some(s => s.employee_id === empId)
     if (!hasShifts) return 'none'
     const hasEntry = allEntries.some(e => e.employee_id === empId)
@@ -739,10 +657,6 @@ export default function TpiPayrollEntry() {
   const saveMutation = useMutation({
     mutationFn: async () => {
       if (!selectedEmpId || !currentPeriod?.id || !calc) return
-      if (isSimulated) {
-        toast.info('อยู่ในโหมดจำลองข้อมูล: ทดลองบันทึกสำเร็จ (ไม่ทับฐานข้อมูลจริง)')
-        return
-      }
 
       const specAmt = (extraEntries.amount_safety || 0) + (extraEntries.amount_other_special || 0)
       let note = (specialNote || '').trim()
@@ -889,35 +803,6 @@ export default function TpiPayrollEntry() {
             </select>
           </div>
 
-          {isSimulated && (
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: '#ea580c', color: '#ffffff', padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 700 }}>
-              <Sparkles style={{ width: 12, height: 12 }} />
-              โหมดจำลองข้อมูลกะ (Simulation Mode)
-            </span>
-          )}
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <button
-            type="button"
-            onClick={() => setIsSimulated(prev => !prev)}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              fontSize: 11,
-              fontWeight: 700,
-              padding: '4px 10px',
-              borderRadius: 6,
-              cursor: 'pointer',
-              border: `1px solid ${isSimulated ? '#ea580c' : 'var(--vk-rule-soft)'}`,
-              background: isSimulated ? '#fff' : 'rgba(0,0,0,0.04)',
-              color: isSimulated ? '#c2410c' : 'var(--vk-ink-2)',
-            }}
-          >
-            <RefreshCw style={{ width: 12, height: 12 }} />
-            {isSimulated ? 'สลับกลับใช้ข้อมูลกะจริงในฐานข้อมูล' : '⚡ เปิดโหมดจำลองกะเพื่อดูตรรกะ'}
-          </button>
         </div>
       </div>
 
@@ -1042,9 +927,16 @@ export default function TpiPayrollEntry() {
                     <div style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 3 }}>
                       {/* Line 1: Employee Name + Position Badge */}
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, width: '100%' }}>
-                        <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--vk-ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {formatEmployeeFullName(emp, true)}
-                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', minWidth: 0, gap: 4 }}>
+                          <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--vk-ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {formatEmployeeFullName(emp, true)}
+                          </span>
+                          {isSkilledEmp(emp) && (
+                            <span title="พนักงานค่าแรงฝีมือ" style={{ flexShrink: 0, fontSize: 13 }}>
+                              ⭐
+                            </span>
+                          )}
+                        </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
                           {empHasOvr && (
                             <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 4, background: '#fffbeb', color: '#b45309', border: '1px solid #fcd34d', flexShrink: 0 }}>
@@ -1171,12 +1063,17 @@ export default function TpiPayrollEntry() {
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
                       <div style={{ minWidth: 0 }}>
                         <div className="vk-eyebrow" style={{ marginBottom: 2 }}>
-                          PAYROLL ENTRY · {currentPeriod?.label} {isSimulated ? '(จำลองเพื่อตรวจสอบตรรกะ)' : ''}
+                          PAYROLL ENTRY · {currentPeriod?.label}
                         </div>
-                        <div style={{ fontFamily: 'var(--vk-sans)', fontWeight: 700, fontSize: 18, letterSpacing: '-0.02em', wordBreak: 'break-word' }}>
-                          {formatEmployeeFullName(selectedEmp, true)}
+                        <div style={{ fontFamily: 'var(--vk-sans)', fontWeight: 700, fontSize: 18, letterSpacing: '-0.02em', wordBreak: 'break-word', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          <span>{formatEmployeeFullName(selectedEmp, true)}</span>
+                          {isSkilledEmp(selectedEmp) && (
+                            <span title="พนักงานค่าแรงฝีมือ" style={{ fontSize: 16 }}>
+                              ⭐
+                            </span>
+                          )}
                           {selectedEmp.nationality && (
-                            <span style={{ fontWeight: 400, fontSize: 13, color: 'var(--vk-ink-3)', marginLeft: 6 }}>
+                            <span style={{ fontWeight: 400, fontSize: 13, color: 'var(--vk-ink-3)' }}>
                               ({selectedEmp.nationality})
                             </span>
                           )}
@@ -1226,13 +1123,13 @@ export default function TpiPayrollEntry() {
                 })()}
 
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 14, alignItems: 'center' }}>
-                  {existingEntry && !isOutdated && !isSimulated && (
+                  {existingEntry && !isOutdated && (
                     <span className="vk-pill" data-tone="approved">
                       <CheckCircle2 style={{ width: 11, height: 11, display: 'inline', marginRight: 4 }} />
                       บันทึกแล้ว
                     </span>
                   )}
-                  {existingEntry && isOutdated && !isSimulated && (
+                  {existingEntry && isOutdated && (
                     <span className="vk-pill" style={{ background: 'rgba(177,71,41,0.10)', color: 'var(--vk-persimmon)', border: '1px solid var(--vk-persimmon)', display: 'inline-flex', alignItems: 'center', gap: 4, fontWeight: 700, letterSpacing: '0.04em' }}>
                       <AlertCircle style={{ width: 11, height: 11, flexShrink: 0 }} />
                       OUTDATED · มีการแก้ไขกะหรือยอดเบิก กรุณาบันทึกใหม่
@@ -1249,16 +1146,6 @@ export default function TpiPayrollEntry() {
                   </button>
                 </div>
               </div>
-
-              {/* Simulation Notice Banner */}
-              {isSimulated && (
-                <div style={{ background: '#ffedd5', border: '1px solid #fdba74', borderRadius: 8, padding: '10px 14px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <Sparkles style={{ width: 18, height: 18, color: '#ea580c', flexShrink: 0 }} />
-                  <div style={{ fontSize: 12, color: '#9a3412', lineHeight: 1.4 }}>
-                    <strong>กำลังแสดงผลด้วยโหมดจำลองข้อมูลกะ (Simulation):</strong> เนื่องจากในฐานข้อมูลของงวดนี้ยังไม่มีการกดบันทึกกะจริง ระบบจึงจำลองกะงาน (กะปกติ, กะฝีมือ, ครึ่งกะ, OT, และยอดเบิก) ให้พนักงานคนนี้โดยอัตโนมัติ เพื่อให้ท่านตรวจสอบตรรกะและสูตรการคำนวณเงินค่าแรงได้ทันที
-                  </div>
-                </div>
-              )}
 
               {/* ── Sticky Warning Banner: Inactive/Expired Skilled Job ── */}
               {(() => {
@@ -1332,7 +1219,7 @@ export default function TpiPayrollEntry() {
                           ฿{monoNum(calc.baseShiftWage)}
                         </div>
                         <div style={{ fontSize: 10, color: '#9a3412', marginTop: 1 }}>
-                          ช่างทั่วไป {calc.normalTierCount} / ช่างฝีมือ {calc.skilledTierCount}
+                          ค่าแรงปกติ {calc.normalTierCount} / ค่าแรงฝีมือ {calc.skilledTierCount}
                         </div>
                       </div>
 
@@ -1431,7 +1318,7 @@ export default function TpiPayrollEntry() {
                                         </span>
                                       ) : s.tier === 'skilled' ? (
                                         <span style={{ color: '#0369a1', background: '#e0f2fe', padding: '1px 5px', borderRadius: 4, fontSize: 10, fontWeight: 700 }}>
-                                          ช่างฝีมือ
+                                          ค่าแรงฝีมือ
                                         </span>
                                       ) : (
                                         <span style={{ color: 'var(--vk-ink-3)', fontSize: 10 }}>ปกติ</span>

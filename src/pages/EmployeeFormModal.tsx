@@ -359,7 +359,7 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
         factory_id: user.factory_id,
         bank_name: values.payment_method === 'cash' ? null : values.bank_name,
         bank_account: values.payment_method === 'cash' ? null : values.bank_account,
-        job_title: isTpi ? (tpiRateTier === 'skilled' ? tpiJobCode : null) : values.job_title,
+        job_title: isTpi ? (tpiRateTier === 'skilled' ? (tpiJobCode || null) : null) : values.job_title,
         wage_type: isTpi ? 'daily' : values.wage_type,
         rate_per_12h: isTpi ? 0 : values.rate_per_12h,
       }
@@ -446,7 +446,7 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
       toast.error('ยังโหลดประเภทค่าแรงไม่สำเร็จ กรุณาปิดแล้วเปิดใหม่อีกครั้ง')
       return
     }
-    if (isTpi && tpiRateTier === 'skilled' && !tpiJobCode) {
+    if (isTpi && tpiRateTier === 'skilled' && position !== 'clerk' && !tpiJobCode) {
       toast.error('กรุณาเลือกรหัสงานที่ Active อยู่สำหรับพนักงานค่าแรงฝีมือ')
       return
     }
@@ -671,46 +671,55 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
 
                 {tpiRateTier === 'skilled' && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 4, padding: '14px 16px', background: '#f0fdf4', borderRadius: 8, border: '1px solid #bbf7d0' }}>
-                    {/* Job Code selector */}
-                    <div>
-                      <label style={{ fontSize: 12, fontWeight: 700, color: '#166534', display: 'block', marginBottom: 6 }}>
-                        รหัสงานประจำ (สำหรับค่าแรงฝีมือ) <span style={{ color: 'var(--vk-crimson)' }}>*</span>
-                      </label>
-                      {activeTpiJobs.length === 0 ? (
-                        <div style={{ fontSize: 12, color: '#b45309', background: '#fef9c3', padding: '8px 12px', borderRadius: 6, border: '1px solid #fde047' }}>
-                          ไม่พบรหัสงานที่ Active — กรุณาเพิ่มรหัสงานในหน้าจัดการรหัสงาน (TPI) ก่อน
+                    {position === 'clerk' ? (
+                      <div style={{ fontSize: 12, color: '#166534', background: 'rgba(22,163,74,0.08)', padding: '10px 14px', borderRadius: 8, borderLeft: '3px solid #16a34a', lineHeight: 1.6 }}>
+                        <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6, color: '#15803d' }}>
+                          <span>🏢</span> กลุ่มงานเสมียน — ได้รับเรทฝีมือ ฿377 อัตโนมัติ
                         </div>
-                      ) : (
-                        <select
-                          className="vk-input"
-                          value={tpiJobCode}
-                          onChange={(e) => {
-                            const code = e.target.value
-                            setTpiJobCode(code)
-                            const matched = activeTpiJobs.find(j => j.code === code)
-                            setTpiJobId(matched?.id || '')
-                          }}
-                          style={{ borderColor: !tpiJobCode ? 'var(--vk-crimson)' : '#86efac', background: '#fff' }}
-                        >
-                          <option value="">— เลือกรหัสงานประจำ —</option>
-                          {activeTpiJobs.map(j => (
-                            <option key={j.id} value={j.code}>
-                              {j.code}{j.description ? ` – ${j.description}` : ''}{j.skilled_rate ? ` (ฝีมือ ฿${j.skilled_rate.toLocaleString()})` : ''}
-                            </option>
-                          ))}
-                        </select>
-                      )}
-                      {!tpiJobCode && (
-                        <span style={{ fontSize: 11, color: 'var(--vk-crimson)', marginTop: 4, display: 'block' }}>
-                          ⚠ กรุณาเลือกรหัสงานประจำก่อนบันทึก
-                        </span>
-                      )}
-                      {tpiJobCode && selectedActiveJob && (
-                        <span style={{ fontSize: 11, color: '#166534', marginTop: 4, display: 'block' }}>
-                          ✓ รหัสงาน <strong>{selectedActiveJob.code}</strong> — เรทฝีมือ ฿{(selectedActiveJob.skilled_rate || 0).toLocaleString()} / เรทปกติ ฿{(selectedActiveJob.normal_rate || 0).toLocaleString()}
-                        </span>
-                      )}
-                    </div>
+                        พนักงานตำแหน่งเสมียนจะได้รับอัตราค่าแรงฝีมือ <strong>฿377</strong> ต่อกะ (ดึงจากฐานข้อมูล) ในทุกรหัสงานกลุ่มเสมียน (692021, 692032, 692041, 692050) แม้จะมีการสลับหมุนเวียนตำแหน่ง (Rotation) เป็นประจำ โดยไม่ต้องผูกติดกับรหัสงานเดี่ยว
+                      </div>
+                    ) : (
+                      /* Job Code selector for general workers */
+                      <div>
+                        <label style={{ fontSize: 12, fontWeight: 700, color: '#166534', display: 'block', marginBottom: 6 }}>
+                          รหัสงานประจำ (สำหรับค่าแรงฝีมือ) <span style={{ color: 'var(--vk-crimson)' }}>*</span>
+                        </label>
+                        {activeTpiJobs.length === 0 ? (
+                          <div style={{ fontSize: 12, color: '#b45309', background: '#fef9c3', padding: '8px 12px', borderRadius: 6, border: '1px solid #fde047' }}>
+                            ไม่พบรหัสงานที่ Active — กรุณาเพิ่มรหัสงานในหน้าจัดการรหัสงาน (TPI) ก่อน
+                          </div>
+                        ) : (
+                          <select
+                            className="vk-input"
+                            value={tpiJobCode}
+                            onChange={(e) => {
+                              const code = e.target.value
+                              setTpiJobCode(code)
+                              const matched = activeTpiJobs.find(j => j.code === code)
+                              setTpiJobId(matched?.id || '')
+                            }}
+                            style={{ borderColor: !tpiJobCode ? 'var(--vk-crimson)' : '#86efac', background: '#fff' }}
+                          >
+                            <option value="">— เลือกรหัสงานประจำ —</option>
+                            {activeTpiJobs.map(j => (
+                              <option key={j.id} value={j.code}>
+                                {j.code}{j.description ? ` – ${j.description}` : ''}{j.skilled_rate ? ` (ฝีมือ ฿${j.skilled_rate.toLocaleString()})` : ''}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                        {!tpiJobCode && (
+                          <span style={{ fontSize: 11, color: 'var(--vk-crimson)', marginTop: 4, display: 'block' }}>
+                            ⚠ กรุณาเลือกรหัสงานประจำก่อนบันทึก
+                          </span>
+                        )}
+                        {tpiJobCode && selectedActiveJob && (
+                          <span style={{ fontSize: 11, color: '#166534', marginTop: 4, display: 'block' }}>
+                            ✓ รหัสงาน <strong>{selectedActiveJob.code}</strong> — เรทฝีมือ ฿{(selectedActiveJob.skilled_rate || 0).toLocaleString()} / เรทปกติ ฿{(selectedActiveJob.normal_rate || 0).toLocaleString()}
+                          </span>
+                        )}
+                      </div>
+                    )}
 
                     {/* Skilled from date */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -728,10 +737,12 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
                     </div>
 
                     {/* Use-case explanation */}
-                    <div style={{ fontSize: 11, color: '#166534', background: 'rgba(22,163,74,0.07)', padding: '8px 12px', borderRadius: 6, borderLeft: '3px solid #86efac', lineHeight: 1.6 }}>
-                      <strong>หลักการค่าแรงฝีมือ:</strong> พนักงานจะได้รับ<strong>เรทฝีมือ</strong>เฉพาะวันที่ปฏิบัติงานในรหัสงานประจำที่เลือกไว้เท่านั้น
-                      หากมีการโยกย้ายไปทำงานรหัสอื่นชั่วคราว จะคิดเป็น<strong>เรทปกติ</strong>แทน
-                    </div>
+                    {position !== 'clerk' && (
+                      <div style={{ fontSize: 11, color: '#166534', background: 'rgba(22,163,74,0.07)', padding: '8px 12px', borderRadius: 6, borderLeft: '3px solid #86efac', lineHeight: 1.6 }}>
+                        <strong>หลักการค่าแรงฝีมือ:</strong> พนักงานจะได้รับ<strong>เรทฝีมือ</strong>เฉพาะวันที่ปฏิบัติงานในรหัสงานประจำที่เลือกไว้เท่านั้น
+                        หากมีการโยกย้ายไปทำงานรหัสอื่นชั่วคราว จะคิดเป็น<strong>เรทปกติ</strong>แทน
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

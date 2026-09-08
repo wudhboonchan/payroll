@@ -1,0 +1,167 @@
+-- Migration Phase 9: Add job_group ('clerk' vs 'general') to tpi_job_codes
+-- Supports job rotation within clerk positions (692021, 692032, 692041, 692050)
+-- Skilled clerk workers receive skilled_rate (377) on any clerk job without single-job locking.
+-- Normal clerk workers receive normal_rate (357).
+
+BEGIN;
+
+-- 1. Add job_group column to tpi_job_codes
+ALTER TABLE public.tpi_job_codes
+  ADD COLUMN IF NOT EXISTS job_group text NOT NULL DEFAULT 'general'
+  CHECK (job_group IN ('clerk', 'general'));
+
+CREATE INDEX IF NOT EXISTS idx_tpi_job_codes_group 
+  ON public.tpi_job_codes (factory_id, job_group);
+
+-- 2. Update the 4 clerk jobs with job_group='clerk', normal_rate=357, skilled_rate=377
+UPDATE public.tpi_job_codes
+SET job_group = 'clerk',
+    normal_rate = 357,
+    skilled_rate = 377
+WHERE code IN ('692021', '692032', '692041', '692050');
+
+-- 3. Ensure all other jobs default to general group
+UPDATE public.tpi_job_codes
+SET job_group = 'general'
+WHERE code NOT IN ('692021', '692032', '692041', '692050');
+
+-- 4. Update tpi_save_shift_day RPC function with clerk group rotation support
+CREATE OR REPLACE FUNCTION public.tpi_save_shift_day(
+  p_factory uuid,
+  p_date date,
+  p_revision integer,
+  p_entries jsonb,
+  p_is_holiday boolean DEFAULT false
+) RETURNS integer
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  current_revision integer;
+  item record;
+  job record;
+  tier text;
+  amount numeric;
+  v_is_half boolean;
+  v_hours numeric;
+  v_ot_hours numeric;
+  v_ot_pay numeric;
+  v_is_holiday boolean;
+  v_day_has_holiday boolean := coalesce(p_is_holiday, false);
+BEGIN
+  IF NOT public.can_manage_factory(p_factory) THEN
+    RAISE EXCEPTION 'Access denied';
+  END IF;
+
+  INSERT INTO tpi_shift_days(factory_id, work_date, revision, is_holiday)
+  VALUES(p_factory, p_date, 0, v_day_has_holiday)
+  ON CONFLICT(factory_id, work_date) DO NOTHING;
+
+  SELECT revision INTO current_revision 
+  FROM tpi_shift_days 
+  WHERE factory_id=p_factory AND work_date=p_date FOR UPDATE;
+
+  IF current_revision <> p_revision THEN
+    RAISE EXCEPTION 'Stale write rejected (expected revision %, found %)', p_revision, current_revision;
+  END IF;
+
+  FOR item IN SELECT * FROM jsonb_to_recordset(p_entries) AS x(
+    employee_id uuid,
+    shift_index integer,
+    job_id uuid,
+    is_half_shift boolean,
+    actual_hours numeric,
+    ot_hours numeric,
+    ot_pay numeric,
+    is_holiday_ot boolean
+  ) LOOP
+    IF NOT EXISTS(SELECT 1 FROM employees WHERE id=item.employee_id AND factory_id=p_factory AND status='active') THEN 
+      RAISE EXCEPTION 'Employee inactive or belongs to another factory'; 
+    END IF;
+    
+    SELECT * INTO job FROM tpi_job_codes WHERE id=item.job_id AND factory_id=p_factory FOR SHARE;
+    IF NOT FOUND THEN 
+      RAISE EXCEPTION 'Invalid job'; 
+    END IF;
+    
+    v_is_half := coalesce(item.is_half_shift, false);
+    v_hours := coalesce(item.actual_hours, CASE WHEN v_is_half THEN 4 ELSE 8 END);
+    v_ot_hours := coalesce(item.ot_hours, 0);
+    v_ot_pay := coalesce(item.ot_pay, 0);
+    v_is_holiday := coalesce(item.is_holiday_ot, false) OR v_day_has_holiday;
+    
+    IF v_is_holiday THEN
+      v_day_has_holiday := true;
+    END IF;
+    
+    IF NOT job.active OR (job.valid_from IS NOT NULL AND p_date<job.valid_from) OR (job.expires_on IS NOT NULL AND p_date>job.expires_on) THEN 
+      RAISE EXCEPTION 'รหัสงานหมดอายุ หรือยังไม่เริ่มใช้งาน'; 
+    END IF;
+    
+    -- Check if employee has skilled wage tier
+    -- 1) Clerk group: any skilled clerk receives skilled_rate on any clerk job without single-job lock
+    -- 2) General group: skilled rate applies when matching regular assigned job or bound job
+    SELECT 
+      CASE 
+        WHEN wp.rate_tier = 'skilled' AND (wp.skilled_from IS NULL OR wp.skilled_from <= p_date) AND (
+          job.job_group = 'clerk'
+          OR (
+            wp.job_id = item.job_id 
+            OR lower(coalesce(wp.job_code, '')) = lower(job.code)
+            OR lower(coalesce(emp.job_title, '')) = lower(job.code)
+            OR (wp.job_id IS NULL AND (wp.job_code IS NULL OR wp.job_code = '') AND (emp.job_title IS NULL OR emp.job_title = ''))
+          )
+        )
+        THEN 'skilled' 
+        ELSE 'normal' 
+      END INTO tier
+    FROM tpi_employee_wage_profiles wp
+    LEFT JOIN employees emp ON emp.id = wp.employee_id
+    WHERE wp.employee_id=item.employee_id AND wp.factory_id=p_factory FOR SHARE;
+    
+    tier := coalesce(tier, 'normal');
+    amount := CASE 
+      WHEN tier = 'skilled' THEN coalesce(job.skilled_rate, job.normal_rate) 
+      ELSE job.normal_rate 
+    END;
+    
+    IF amount IS NULL THEN 
+      RAISE EXCEPTION 'กรุณากำหนดอัตราค่าจ้างของรหัสงานก่อนบันทึก'; 
+    END IF;
+    
+    IF v_is_half THEN
+      amount := amount / 2.0;
+    END IF;
+    
+    INSERT INTO tpi_shift_entries(factory_id, work_date, employee_id, shift_index, job_id, rate_tier, rate_snapshot, job_code_snapshot, is_half_shift, actual_hours, ot_hours, ot_pay, is_holiday_ot)
+    VALUES(p_factory, p_date, item.employee_id, item.shift_index, item.job_id, tier, amount, job.code, v_is_half, v_hours, v_ot_hours, v_ot_pay, v_is_holiday)
+    ON CONFLICT(factory_id, work_date, employee_id, shift_index) 
+    DO UPDATE SET 
+      job_id = excluded.job_id,
+      rate_tier = excluded.rate_tier,
+      rate_snapshot = excluded.rate_snapshot,
+      job_code_snapshot = excluded.job_code_snapshot,
+      is_half_shift = excluded.is_half_shift,
+      actual_hours = excluded.actual_hours,
+      ot_hours = excluded.ot_hours,
+      ot_pay = excluded.ot_pay,
+      is_holiday_ot = excluded.is_holiday_ot;
+  END LOOP;
+  
+  DELETE FROM tpi_shift_entries e 
+  WHERE factory_id=p_factory AND work_date=p_date 
+    AND NOT EXISTS(
+      SELECT 1 FROM jsonb_to_recordset(p_entries) AS r(employee_id uuid, shift_index integer, job_id uuid) 
+      WHERE r.employee_id=e.employee_id AND r.shift_index=e.shift_index
+    );
+    
+  UPDATE tpi_shift_days 
+  SET revision=revision+1, is_holiday=v_day_has_holiday, updated_at=clock_timestamp(), updated_by=auth.uid() 
+  WHERE factory_id=p_factory AND work_date=p_date;
+  
+  RETURN current_revision+1;
+END; 
+$$;
+
+COMMIT;

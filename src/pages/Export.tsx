@@ -10,6 +10,7 @@ import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
 import { formatPeriodLabel, compareEmployeeCode, formatEmployeeFullName } from '../lib/formatters'
 import { isTpiCompany } from '../features/tpi/model'
+import { calculatePayroll } from '../lib/payrollCalc'
 import '../styles/tokens.css'
 
 interface PayrollPeriod { id: string; period_start: string; period_end: string; status: string | null }
@@ -86,13 +87,19 @@ function buildSlipHtml(entry: any, period: any, shifts: any[], branchName: strin
   const clerkHourly = clerkDaily / 8
 
   // ── amounts ──
-  const amtNormal  = Number(entry.amount_normal  || 0)
-  const amtShift   = Number(entry.amount_shift   || 0)
-  const amtOtRaw   = Number(entry.amount_ot      || 0)
+  const amtNormal  = Number(entry.override_normal != null ? entry.override_normal : (entry.amount_normal || 0))
+  const amtShift   = Number(entry.override_shift != null ? entry.override_shift : (entry.amount_shift || 0))
+  const amtOtRaw   = Number(entry.override_ot != null ? entry.override_ot : (entry.amount_ot || 0))
   const amtOt1xRaw = Number(entry.amount_ot_1x   || 0)
   const amtWood    = Number(entry.amount_wood_excess || 0)
   const amtFilm    = Number(entry.amount_film    || 0)
-  const amtSpecial = Number(entry.amount_special || 0) + Number(entry.override_special || 0)
+  const amtSpecial = (() => {
+    const a = Number(entry.amount_special || 0)
+    const o = entry.override_special != null ? Number(entry.override_special) : null
+    if (o != null && a > 0 && o === a) return a
+    if (o != null && a > 0) return a >= o ? a : (a + o)
+    return o != null ? o : a
+  })()
   const amtDilig   = Number(entry.amount_diligence || 0)
   const amtPos     = Number(entry.amount_position || 0)
   const deductSS   = Number(entry.deduct_social_security || 0)
@@ -559,7 +566,7 @@ export default function Export() {
 
   const isTpi = isTpiCompany(currentFactoryName)
 
-  const [exportType,       setExportType]       = useState<'month' | 'period'>('month')
+  const [exportType,       setExportType]       = useState<'month' | 'period'>('period')
   const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(null)
   const [selectedMonth,    setSelectedMonth]    = useState<string>('')
   const [isExportingXlsx,  setIsExportingXlsx]  = useState(false)
@@ -568,7 +575,7 @@ export default function Export() {
 
   // PDF modal state
   const [pdfTarget,        setPdfTarget]        = useState<'all' | 'individual'>('individual')
-  const [pdfMode,          setPdfMode]          = useState<'month' | 'period'>('month')
+  const [pdfMode,          setPdfMode]          = useState<'month' | 'period'>('period')
   const [pdfMonth,         setPdfMonth]         = useState('')
   const [pdfPeriodId,      setPdfPeriodId]      = useState('')
   const [pdfEmpId,         setPdfEmpId]         = useState<string | null>(null)
@@ -579,7 +586,7 @@ export default function Export() {
   // Summary modal state
   const [showSummaryModal,    setShowSummaryModal]    = useState(false)
   const [summaryTarget,       setSummaryTarget]       = useState<'all' | 'individual'>('individual')
-  const [summaryMode,         setSummaryMode]         = useState<'month' | 'period'>('month')
+  const [summaryMode,         setSummaryMode]         = useState<'month' | 'period'>('period')
   const [summaryMonth,        setSummaryMonth]        = useState('')
   const [summaryPeriodId,     setSummaryPeriodId]     = useState('')
   const [summaryEmpId,        setSummaryEmpId]        = useState<string | null>(null)
@@ -669,11 +676,11 @@ export default function Export() {
   useEffect(() => {
     if (!hasInit.current && periods.length > 0) {
       hasInit.current = true
-      const approved = periods.find(p => p.status === 'approved')
+      const defaultPeriod = periods.find(p => p.status === 'draft') || periods[0]
       requestAnimationFrame(() => {
-        setSelectedPeriodId(approved?.id ?? periods[0].id)
-        setPdfPeriodId(approved?.id ?? periods[0].id)
-        setSummaryPeriodId(approved?.id ?? periods[0].id)
+        setSelectedPeriodId(defaultPeriod?.id ?? periods[0].id)
+        setPdfPeriodId(defaultPeriod?.id ?? periods[0].id)
+        setSummaryPeriodId(defaultPeriod?.id ?? periods[0].id)
       })
     }
   }, [periods])
@@ -703,36 +710,173 @@ export default function Export() {
     setIsExportingXlsx(true)
     try {
       const XLSX = await import('xlsx')
-      const { data, error } = await supabase.from('payroll_entries').select(`
-        amount_normal,override_normal,amount_shift,amount_ot,amount_wood_excess,amount_film,
-        amount_special,override_special,amount_diligence,amount_position,
-        deduct_social_security,deduct_advance,deduct_safety_equipment,deduct_uniform,
-        employee:employees(employee_code,first_name,last_name,payment_method,bank_name,bank_account,status)
+
+      // 1. Fetch payroll entries for target periods with full fields and overrides
+      const { data: entriesData, error } = await supabase.from('payroll_entries').select(`
+        id, employee_id, period_id,
+        amount_normal, override_normal,
+        amount_shift, override_shift,
+        amount_ot, override_ot,
+        amount_wood_excess, amount_film,
+        amount_special, override_special, special_note, override_reason,
+        amount_diligence, amount_position,
+        deduct_social_security, deduct_advance, deduct_safety_equipment, deduct_uniform,
+        employee:employees(id, employee_code, first_name, last_name, position, payment_method, bank_name, bank_account, status, rate_per_12h, wage_type, nationality, exempt_social_security)
       `).in('period_id', ids).limit(10000)
       if (error) throw error
-      if (!data?.length) { toast.error('ไม่พบข้อมูลในช่วงเวลานี้'); return }
+
+      // 2. Fetch shift_assignments for target periods to catch any employees with shifts whose payroll hasn't been saved yet
+      let allShifts: any[] = []
+      let fromShift = 0
+      const PAGE_SHIFT = 1000
+      while (true) {
+        const { data: sData, error: sErr } = await supabase.from('shift_assignments' as any)
+          .select('employee_id,period_id,work_date,shift_type,is_holiday_ot,is_holiday_ot_exempt,is_half_shift,actual_hours,ot_hours,wood_excess,film_amount,is_cross_position,cross_position_title,cross_position_extra_pay')
+          .in('period_id', ids)
+          .range(fromShift, fromShift + PAGE_SHIFT - 1)
+        if (sErr) break
+        allShifts = allShifts.concat(sData ?? [])
+        if (!sData || sData.length < PAGE_SHIFT) break
+        fromShift += PAGE_SHIFT
+      }
+
+      // 3. Fetch advance_payments for target periods
+      const { data: allAdvances = [] } = await supabase.from('advance_payments')
+        .select('employee_id,period_id,amount')
+        .in('period_id', ids)
+
+      // 4. Fetch all active employees for this factory
+      const { data: allEmps = [] } = await supabase.from('employees')
+        .select('id, employee_code, first_name, last_name, position, payment_method, bank_name, bank_account, status, rate_per_12h, wage_type, nationality, exempt_social_security')
+        .eq('factory_id', user?.factory_id ?? '')
+      const empMap = new Map<string, any>(allEmps.map((e: any) => [e.id, e]))
 
       const map: Record<string, any> = {}
-      ;(data as any[]).filter(r => !!r.employee).forEach(r => {
-        const k = r.employee.employee_code
-        if (!map[k]) map[k] = { emp: r.employee, n:0,s:0,ot:0,w:0,f:0,sp:0,d:0,p:0,ss:0,adv:0,safe:0,uni:0 }
-        const normalVal = r.override_normal != null ? Number(r.override_normal) : (r.amount_normal || 0)
-        const specialVal = Number(r.amount_special || 0) + Number(r.override_special || 0)
+      const processedEmpIdsByPeriod = new Set<string>()
+
+      ;(entriesData as any[] || []).filter(r => !!r.employee).forEach(r => {
+        const emp = r.employee
+        const k = emp.employee_code
+        processedEmpIdsByPeriod.add(`${r.period_id}_${r.employee_id}`)
+
+        if (!map[k]) map[k] = { emp, n: 0, s: 0, ot: 0, w: 0, f: 0, sp: 0, d: 0, p: 0, ss: 0, adv: 0, safe: 0, uni: 0 }
+
+        const normalVal = r.override_normal != null ? Number(r.override_normal) : Number(r.amount_normal || 0)
+        const shiftVal = r.override_shift != null ? Number(r.override_shift) : Number(r.amount_shift || 0)
+        const otVal = r.override_ot != null ? Number(r.override_ot) : Number(r.amount_ot || 0)
+
+        // Special allowance calculation matching the slip exactly
+        let specialVal = 0
+        const amtSpec = Number(r.amount_special || 0)
+        const ovrSpec = r.override_special != null ? Number(r.override_special) : null
+        if (ovrSpec != null && amtSpec > 0 && ovrSpec === amtSpec) {
+          specialVal = amtSpec
+        } else if (isTpi) {
+          specialVal = amtSpec || (ovrSpec ?? 0)
+        } else if (ovrSpec != null && amtSpec > 0) {
+          specialVal = amtSpec >= ovrSpec ? amtSpec : (amtSpec + ovrSpec)
+        } else {
+          specialVal = ovrSpec != null ? ovrSpec : amtSpec
+        }
+
         map[k].n += normalVal
-        map[k].s += r.amount_shift || 0
-        map[k].ot += r.amount_ot || 0
-        map[k].w += r.amount_wood_excess || 0
-        map[k].f += r.amount_film || 0
+        map[k].s += shiftVal
+        map[k].ot += otVal
+        map[k].w += Number(r.amount_wood_excess || 0)
+        map[k].f += Number(r.amount_film || 0)
         map[k].sp += specialVal
-        map[k].d += r.amount_diligence || 0
-        map[k].p += r.amount_position || 0
-        map[k].ss += Math.abs(r.deduct_social_security || 0)
-        map[k].adv += Math.abs(r.deduct_advance || 0)
-        map[k].safe += Math.abs(r.deduct_safety_equipment || 0)
-        map[k].uni += Math.abs(r.deduct_uniform || 0)
+        map[k].d += Number(r.amount_diligence || 0)
+        map[k].p += Number(r.amount_position || 0)
+        map[k].ss += Math.abs(Number(r.deduct_social_security || 0))
+        map[k].adv += Math.abs(Number(r.deduct_advance || 0))
+        map[k].safe += Math.abs(Number(r.deduct_safety_equipment || 0))
+        map[k].uni += Math.abs(Number(r.deduct_uniform || 0))
       })
+
+      // Include any employee who worked shifts in the period but has not been saved to payroll_entries yet
+      ids.forEach(periodId => {
+        const periodObj = periods.find(p => p.id === periodId)
+        const shiftsForPeriod = allShifts.filter(s => s.period_id === periodId)
+        const empIdsWithShifts = [...new Set(shiftsForPeriod.map(s => s.employee_id))]
+
+        empIdsWithShifts.forEach(empId => {
+          if (processedEmpIdsByPeriod.has(`${periodId}_${empId}`)) return
+          const emp = empMap.get(empId)
+          if (!emp) return
+
+          const k = emp.employee_code
+          if (!map[k]) map[k] = { emp, n: 0, s: 0, ot: 0, w: 0, f: 0, sp: 0, d: 0, p: 0, ss: 0, adv: 0, safe: 0, uni: 0 }
+
+          const empShifts = shiftsForPeriod.filter(s => s.employee_id === empId)
+          const empAdvances = allAdvances.filter(a => a.period_id === periodId && a.employee_id === empId)
+          const advTotal = empAdvances.reduce((s, a) => s + Number(a.amount || 0), 0)
+
+          const isEmpClerk = emp.position === 'clerk'
+          const empIsThai = !emp.nationality || emp.nationality === 'ไทย'
+          const empSsRate = empIsThai && !emp.exempt_social_security ? (Number((periodObj as any)?.social_security_rate ?? 0.05)) : 0
+
+          const normShifts = empShifts.filter((s: any) => !s.is_holiday_ot || s.is_holiday_ot_exempt)
+          const holShifts = empShifts.filter((s: any) => s.is_holiday_ot && !s.is_holiday_ot_exempt)
+          const normDays = normShifts.filter((s: any) => !s.is_half_shift && !s.actual_hours).length
+          const halfDays = normShifts.filter((s: any) => s.is_half_shift && !s.actual_hours).length
+          const partialHrs = normShifts.reduce((s: number, sh: any) => s + Number(sh.actual_hours || 0), 0)
+          const holFull = holShifts.filter((s: any) => !s.is_half_shift).length
+          const holHalf = holShifts.filter((s: any) => s.is_half_shift).length
+          const clerkNorm = normShifts.filter((s: any) => !isWeekend(s.work_date)).length
+          const clerkOt = empShifts.filter((s: any) => !isWeekend(s.work_date)).reduce((s: number, sh: any) => s + Number(sh.ot_hours || 0), 0)
+          const clerkOt1x = empShifts.filter((s: any) => isWeekend(s.work_date)).reduce((s: number, sh: any) => s + Number(sh.ot_hours || 0), 0)
+          const autoW = empShifts.reduce((s: number, sh: any) => s + Number(sh.wood_excess || 0), 0)
+          const autoF = empShifts.reduce((s: number, sh: any) => s + Number(sh.film_amount || 0), 0)
+          const autoSp = empShifts.filter((s: any) => s.is_cross_position).reduce((s: number, sh: any) => s + Number(sh.cross_position_extra_pay || 0), 0)
+
+          const periodDays = periodObj ? (() => {
+            const s = new Date(periodObj.period_start + 'T00:00:00')
+            const e = new Date(periodObj.period_end + 'T00:00:00')
+            return Math.round((e.getTime() - s.getTime()) / 86400000) + 1
+          })() : undefined
+
+          const c = calculatePayroll({
+            position: emp.position as 'worker' | 'clerk',
+            wage_type: emp.wage_type as 'daily' | 'monthly',
+            rate_per_12h: Number(emp.rate_per_12h) || 0,
+            normal_days: isEmpClerk ? clerkNorm : normDays,
+            period_days: isEmpClerk ? periodDays : undefined,
+            half_shift_days: isEmpClerk ? 0 : halfDays,
+            holiday_ot_full_days: holFull,
+            holiday_ot_half_days: holHalf,
+            partial_hours_total: isEmpClerk ? 0 : partialHrs,
+            clerk_ot_hours: clerkOt,
+            clerk_ot_1x_hours: clerkOt1x,
+            amount_wood_excess: isEmpClerk ? 0 : autoW,
+            amount_film: isEmpClerk ? 0 : autoF,
+            amount_special: autoSp,
+            amount_diligence: 0,
+            amount_position: 0,
+            social_security_rate: empSsRate,
+            deduct_advance: advTotal,
+            deduct_safety_equipment: 0,
+            deduct_uniform: 0,
+          })
+
+          map[k].n += c.amount_normal
+          map[k].s += c.amount_shift
+          map[k].ot += c.amount_ot + c.amount_ot_1x
+          map[k].w += isEmpClerk ? 0 : autoW
+          map[k].f += isEmpClerk ? 0 : autoF
+          map[k].sp += autoSp
+          map[k].ss += c.deduct_social_security
+          map[k].adv += advTotal
+        })
+      })
+
+      if (!Object.keys(map).length) {
+        toast.error('ไม่พบข้อมูลในช่วงเวลานี้')
+        return
+      }
+
       const rows = Object.values(map).map((x: any) => {
-        const income = x.n+x.s+x.ot+x.w+x.f+x.sp+x.d+x.p; const deduct = x.ss+x.adv+x.safe+x.uni
+        const income = x.n + x.s + x.ot + x.w + x.f + x.sp + x.d + x.p
+        const deduct = x.ss + x.adv + x.safe + x.uni
         const payMethod = x.emp.payment_method === 'bank_transfer' ? 'โอนธนาคาร' : (x.emp.payment_method === 'cash' ? 'เงินสด' : (x.emp.payment_method || '-'))
         const bankName = x.emp.payment_method === 'bank_transfer' ? (x.emp.bank_name || '-') : '-'
         const bankAccount = x.emp.payment_method === 'bank_transfer' ? (x.emp.bank_account || '-') : '-'
@@ -742,29 +886,41 @@ export default function Export() {
           'วิธีการรับเงิน': payMethod,
           'ธนาคาร': bankName,
           'เลขที่บัญชี': bankAccount,
-          'ค่าจ้างรวม': x.n+x.s,
+          'ค่าจ้างรวม': x.n + x.s,
           'ค่าจ้างปกติ': x.n,
           'ค่ากะ': x.s,
           'OT': x.ot,
           'ค่าไม้เกิน': x.w,
           'ค่าฟิล์ม': x.f,
-          'ค่าพิเศษ': x.sp,
+          'เงินพิเศษ': x.sp,
           'เบี้ยขยัน': x.d,
           'ค่าตำแหน่ง': x.p,
           'ประกันสังคม': x.ss,
           'เบิกล่วงหน้า': x.adv,
           'ค่าอุปกรณ์ความปลอดภัย': x.safe,
           'ค่าเสื้อพนักงาน': x.uni,
-          'รวม': income-deduct
+          'รวม': income - deduct
         }
       }).sort((a, b) => compareEmployeeCode(a['รหัสพนักงาน'], b['รหัสพนักงาน']))
+
       const label = getExportLabel()
-      const wb = XLSX.utils.book_new(); const ws = XLSX.utils.aoa_to_sheet([[`ค่าแรง ${label}`]])
-      XLSX.utils.sheet_add_json(ws, rows, { origin:'A2' }); XLSX.utils.book_append_sheet(wb, ws, 'Payroll Summary')
-      XLSX.writeFile(wb, `Payroll_Summary_${label.replace(/[\s/*?:[\]]/g,'_')}.xlsx`)
+      const wb = XLSX.utils.book_new()
+      const ws = XLSX.utils.aoa_to_sheet([[`ค่าแรง ${label}`]])
+      XLSX.utils.sheet_add_json(ws, rows, { origin: 'A2' })
+      ws['!cols'] = [
+        { wch: 14 }, { wch: 24 }, { wch: 14 }, { wch: 16 }, { wch: 18 },
+        { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 12 },
+        { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 14 },
+        { wch: 14 }, { wch: 20 }, { wch: 16 }, { wch: 16 }
+      ]
+      XLSX.utils.book_append_sheet(wb, ws, 'Payroll Summary')
+      XLSX.writeFile(wb, `Payroll_Summary_${label.replace(/[\s/*?:[\]]/g, '_')}.xlsx`)
       toast.success('ดาวน์โหลด Payroll Excel สำเร็จ')
-    } catch(e:any) { toast.error('เกิดข้อผิดพลาด', { description: e.message }) }
-    finally { setIsExportingXlsx(false) }
+    } catch(e: any) {
+      toast.error('เกิดข้อผิดพลาด', { description: e.message })
+    } finally {
+      setIsExportingXlsx(false)
+    }
   }
 
   // ── SSO Excel ───────────────────────────────────────────────────────────────
@@ -839,8 +995,8 @@ export default function Export() {
         }
 
         if (isTpi) {
-          row['ระดับค่าแรง TPI'] = profile?.rate_tier === 'skilled' ? 'ช่างฝีมือ (Skilled)' : 'ทั่วไป (Normal)'
-          row['วันที่เริ่มเป็นช่างฝีมือ'] = (profile?.rate_tier === 'skilled' && profile?.skilled_from) ? profile.skilled_from : '-'
+          row['ระดับค่าแรง TPI'] = profile?.rate_tier === 'skilled' ? 'ค่าแรงฝีมือ (Skilled)' : 'ทั่วไป (Normal)'
+          row['วันที่เริ่มเป็นค่าแรงฝีมือ'] = (profile?.rate_tier === 'skilled' && profile?.skilled_from) ? profile.skilled_from : '-'
         }
 
         row['วิธีรับเงิน'] = payMethod
@@ -1886,7 +2042,7 @@ body{margin:0;padding:0;background:#fff;font-family:'Sarabun',sans-serif}
                 </div>
                 {isTpi && (
                   <div style={{ fontSize: 11, color: '#16a34a', borderTop: '1px dashed var(--vk-rule-soft)', paddingTop: 6, marginTop: 2 }}>
-                    ✓ รวมข้อมูลระดับค่าแรง TPI และวันที่เริ่มเป็นช่างฝีมือ
+                    ✓ รวมข้อมูลระดับค่าแรง TPI และวันที่เริ่มเป็นค่าแรงฝีมือ
                   </div>
                 )}
               </div>

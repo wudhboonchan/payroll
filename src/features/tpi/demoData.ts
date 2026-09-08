@@ -2,11 +2,14 @@ import type { Employee, Entry, ShiftDay, WageProfile } from './model'
 import { referenceJobs } from './referenceJobs'
 
 export const demoJobs = referenceJobs.map((job) => {
+  if (job.job_group === 'clerk') {
+    return { ...job, normal_rate: 357, skilled_rate: 377 }
+  }
   // Add realistic skilled rates for jobs where skilled labor applies
   if (job.code.includes('694014') || job.code.includes('P139') || job.code.includes('693051') || job.code.includes('695010')) {
     return { ...job, skilled_rate: 450 }
   }
-  if (job.code.includes('692041') || job.code.includes('P134') || job.code.includes('P301')) {
+  if (job.code.includes('P134') || job.code.includes('P301')) {
     return { ...job, skilled_rate: 400 }
   }
   return { ...job, skilled_rate: job.skilled_rate ?? 380 }

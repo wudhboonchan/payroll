@@ -30,6 +30,7 @@ export interface VKSlipDocumentProps {
   // Employee band
   employeeName: string
   employeeCode: string
+  isSkilled?: boolean
   positionLabel?: string
   jobTitle?: string
   branchName?: string
@@ -70,6 +71,7 @@ export function VKSlipDocument({
   generatedAt,
   employeeName,
   employeeCode,
+  isSkilled = false,
   positionLabel,
   jobTitle,
   branchName,
@@ -123,7 +125,14 @@ export function VKSlipDocument({
       <div style={{ background: '#f7f7f7', borderBottom: '1px solid #e8e8e8', display: 'grid', gridTemplateColumns: '1fr 380px', gap: 0 }}>
         <div style={{ padding: '14px 28px' }}>
           <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#aaa', marginBottom: 5 }}>พนักงาน</div>
-          <div style={{ fontWeight: 700, fontSize: 17, color: '#1a1a1a', letterSpacing: '-0.01em' }}>{employeeName}</div>
+          <div style={{ fontWeight: 700, fontSize: 17, color: '#1a1a1a', letterSpacing: '-0.01em', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <span>{employeeName}</span>
+            {isSkilled && (
+              <span title="พนักงานค่าแรงฝีมือ" style={{ fontSize: 15, flexShrink: 0 }}>
+                ⭐
+              </span>
+            )}
+          </div>
           <div style={{ fontSize: 11, color: '#777', marginTop: 3 }}>
             <span style={{ fontFamily: 'monospace' }}>{employeeCode}</span>
             {positionLabel ? ` · ${positionLabel}` : ''}

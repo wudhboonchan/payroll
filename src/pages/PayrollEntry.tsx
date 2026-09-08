@@ -138,10 +138,13 @@ export default function PayrollEntry() {
       setOverrideNormal(existingEntry.override_normal != null ? Number(existingEntry.override_normal) : null)
       setOverrideSpecial(existingEntry.override_special != null ? Number(existingEntry.override_special) : null)
       setSpecialNote(existingEntry.special_note || '')
+      const savedSpecial = existingEntry.override_special != null
+        ? Number(existingEntry.override_special)
+        : Number(existingEntry.amount_special || 0)
       setExtraEntries({
         amount_diligence: Number(existingEntry.amount_diligence || 0),
         amount_position: Number(existingEntry.amount_position || 0),
-        amount_special: Number(existingEntry.override_special || 0),
+        amount_special: savedSpecial,
         deduct_safety_equipment: Number(existingEntry.deduct_safety_equipment || 0),
         deduct_uniform: Number(existingEntry.deduct_uniform || 0),
       })
@@ -292,11 +295,14 @@ export default function PayrollEntry() {
         [c.amount_ot + c.amount_ot_1x, Number(entry.amount_ot)],
         [autoW,                        Number(entry.amount_wood_excess)],
         [autoF,                        Number(entry.amount_film)],
-        [autoSp,                       Number(entry.amount_special)],
         [advTotal,                     Number(entry.deduct_advance)],
         [c.deduct_social_security,     Number(entry.deduct_social_security)],
       ]
-      if (checks.some(([a, b]) => Math.abs(a - b) > eps)) set.add(emp.id)
+      const specDiff = Math.min(
+        Math.abs((autoSp + Number(entry.override_special || 0)) - Number(entry.amount_special)),
+        Math.abs(autoSp - Number(entry.amount_special))
+      )
+      if (checks.some(([a, b]) => Math.abs(a - b) > eps) || specDiff > eps) set.add(emp.id)
     }
     return set
   }, [allEntries, allShifts, allAdvances, employees, currentPeriod])
@@ -323,7 +329,7 @@ export default function PayrollEntry() {
         amount_ot: Math.round((calc.amount_ot + calc.amount_ot_1x) * 100) / 100,
         amount_wood_excess: Math.round(autoWood * 100) / 100,
         amount_film: Math.round(autoFilm * 100) / 100,
-        amount_special: Math.round(autoSpecial * 100) / 100,
+        amount_special: Math.round((autoSpecial + (extraEntries.amount_special || 0)) * 100) / 100,
         override_special: extraEntries.amount_special || null,
         special_note: (specialNote || autoSpecialNote || '').trim(),
         amount_diligence: extraEntries.amount_diligence,

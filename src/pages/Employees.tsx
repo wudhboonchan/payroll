@@ -30,7 +30,15 @@ interface Employee {
   exempt_social_security?: boolean | null
 }
 
-type SortCol = 'employee_code' | 'name' | 'nationality' | 'rate' | 'position'
+type SortCol =
+  | 'employee_code'
+  | 'name'
+  | 'position'
+  | 'job_title'
+  | 'nationality'
+  | 'payment_method'
+  | 'rate'
+  | 'status'
 
 const POSITIONS: Record<string, string> = {
   worker: 'พนักงานทั่วไป', clerk: 'เสมียน', foreman: 'หัวหน้างาน',
@@ -120,18 +128,46 @@ export default function Employees() {
   })
 
   const sorted = [...filtered].sort((a, b) => {
+    let cmp = 0
     if (sortCol === 'employee_code') {
-      const cmp = compareEmployeeCode(a.employee_code, b.employee_code)
-      return sortAsc ? cmp : -cmp
+      cmp = compareEmployeeCode(a.employee_code, b.employee_code)
+    } else if (sortCol === 'name') {
+      const nameA = formatEmployeeFullName(a, isTpi)
+      const nameB = formatEmployeeFullName(b, isTpi)
+      cmp = nameA.localeCompare(nameB, 'th')
+    } else if (sortCol === 'position') {
+      const posA = POSITIONS[a.position ?? ''] || a.position || ''
+      const posB = POSITIONS[b.position ?? ''] || b.position || ''
+      cmp = posA.localeCompare(posB, 'th')
+    } else if (sortCol === 'job_title') {
+      const titleA = a.job_title || ''
+      const titleB = b.job_title || ''
+      cmp = titleA.localeCompare(titleB, 'th')
+    } else if (sortCol === 'nationality') {
+      const natA = fmtNationality(a.nationality)
+      const natB = fmtNationality(b.nationality)
+      cmp = natA.localeCompare(natB, 'th')
+    } else if (sortCol === 'payment_method') {
+      const payA = a.payment_method === 'bank_transfer' ? `โอน ${a.bank_name || ''} ${a.bank_account || ''}` : 'เงินสด'
+      const payB = b.payment_method === 'bank_transfer' ? `โอน ${b.bank_name || ''} ${b.bank_account || ''}` : 'เงินสด'
+      cmp = payA.localeCompare(payB, 'th')
+    } else if (sortCol === 'rate') {
+      if (isTpi) {
+        const tierA = tpiProfileMap.get(a.id)?.rate_tier === 'skilled' ? 1 : 0
+        const tierB = tpiProfileMap.get(b.id)?.rate_tier === 'skilled' ? 1 : 0
+        cmp = tierA - tierB
+      } else {
+        cmp = (Number(a.rate_per_12h) || 0) - (Number(b.rate_per_12h) || 0)
+      }
+    } else if (sortCol === 'status') {
+      cmp = (a.status || '').localeCompare(b.status || '', 'th')
     }
-    let vA: string | number = '', vB: string | number = ''
-    if (sortCol === 'name')     { vA = `${a.first_name} ${a.last_name}`; vB = `${b.first_name} ${b.last_name}` }
-    else if (sortCol === 'nationality') { vA = a.nationality||''; vB = b.nationality||'' }
-    else if (sortCol === 'rate')     { vA = Number(a.rate_per_12h); vB = Number(b.rate_per_12h) }
-    else if (sortCol === 'position') { vA = a.position||''; vB = b.position||'' }
-    if (vA < vB) return sortAsc ? -1 : 1
-    if (vA > vB) return sortAsc ? 1 : -1
-    return 0
+
+    if (cmp === 0) {
+      cmp = compareEmployeeCode(a.employee_code, b.employee_code)
+    }
+
+    return sortAsc ? cmp : -cmp
   })
 
   const toggleSort = (col: SortCol) => {
@@ -244,27 +280,32 @@ export default function Employees() {
             <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
               <tr>
                 {[
-                  { label: 'รหัส',           col: 'employee_code' as SortCol, align: 'left'  },
-                  { label: 'ชื่อ–นามสกุล',   col: 'name'          as SortCol, align: 'left'  },
-                  { label: 'กลุ่มงาน',        col: 'position'      as SortCol, align: 'left'  },
-                  { label: 'ตำแหน่ง',         col: null,                        align: 'left'  },
-                  { label: 'สัญชาติ',         col: 'nationality'   as SortCol, align: 'left'  },
-                  { label: 'วิธีรับเงิน',     col: null,                        align: 'left'  },
-                  { label: isTpi ? 'ประเภทค่าแรง' : 'ค่าจ้าง/เงินเดือน', col: isTpi ? null : ('rate' as SortCol), align: isTpi ? 'center' : 'right' },
-                  { label: 'สถานะ',           col: null,                        align: 'right' },
+                  { label: 'รหัส',           col: 'employee_code' as SortCol, align: 'left'   },
+                  { label: 'ชื่อ–นามสกุล',   col: 'name'          as SortCol, align: 'left'   },
+                  { label: 'กลุ่มงาน',        col: 'position'      as SortCol, align: 'left'   },
+                  { label: 'ตำแหน่ง',         col: 'job_title'     as SortCol, align: 'left'   },
+                  { label: 'สัญชาติ',         col: 'nationality'   as SortCol, align: 'left'   },
+                  { label: 'วิธีรับเงิน',     col: 'payment_method' as SortCol, align: 'left'  },
+                  { label: isTpi ? 'ประเภทค่าแรง' : 'ค่าจ้าง/เงินเดือน', col: 'rate' as SortCol, align: isTpi ? 'center' : 'right' },
+                  { label: 'สถานะ',           col: 'status'        as SortCol, align: 'right'  },
                 ].map((h, i) => (
                   <th key={i}
-                    onClick={() => h.col && toggleSort(h.col)}
+                    onClick={() => toggleSort(h.col)}
                     style={{
                       textAlign: h.align as any,
                       fontFamily: 'var(--vk-sans)', fontWeight: 600, fontSize: 11,
                       textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--vk-ink-3)',
                       padding: '12px 14px', borderBottom: '1px solid var(--vk-rule)',
-                      background: 'var(--vk-paper)', cursor: h.col ? 'pointer' : 'default',
+                      background: 'var(--vk-paper)', cursor: 'pointer',
                       whiteSpace: 'nowrap', userSelect: 'none',
                     }}>
-                    <span style={{ display: 'inline-flex', alignItems: 'center' }}>
-                      {h.label}{h.col && <SortIcon col={h.col} />}
+                    <span style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: h.align === 'right' ? 'flex-end' : h.align === 'center' ? 'center' : 'flex-start',
+                      width: '100%',
+                    }}>
+                      {h.label}<SortIcon col={h.col} />
                     </span>
                   </th>
                 ))}

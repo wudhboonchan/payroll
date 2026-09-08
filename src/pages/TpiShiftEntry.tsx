@@ -33,6 +33,7 @@ import {
   calculateEntryOt,
 } from '../features/tpi/model'
 import { getMainDepartment, cleanJobNotes } from '../features/tpi/referenceJobs'
+import { employeeWageForm } from '../features/tpi/employeeWageForm'
 import { demoJobs, demoEmployees, demoWageProfiles, demoInitialEntries } from '../features/tpi/demoData'
 import { loadDay, saveDay, errorMessage } from '../features/tpi/api'
 import { formatThaiBuddhistDate, compareEmployeeCode } from '../lib/formatters'
@@ -112,12 +113,13 @@ const formatJobForDb = (ref: Job, factoryId: string) => {
     department: ref.department ? ref.department.trim() : '',
     description: ref.description ? ref.description.trim() : '',
     job_type: (isTemp ? 'temporary' : 'regular') as 'temporary' | 'regular',
+    job_group: ref.job_group || (['692021', '692032', '692041', '692050'].includes(ref.code.trim()) ? 'clerk' : 'general'),
     quota,
     planned_morning: isPlanValid ? pm : null,
     planned_afternoon: isPlanValid ? pa : null,
     planned_night: isPlanValid ? pn : null,
     normal_rate: ref.normal_rate || 357,
-    skilled_rate: ref.skilled_rate ?? null,
+    skilled_rate: (ref.job_group === 'clerk' || ['692021', '692032', '692041', '692050'].includes(ref.code.trim())) ? 377 : (ref.skilled_rate ?? null),
     valid_from: ref.valid_from || null,
     expires_on: expiresOn,
     active: ref.active ?? true,
@@ -308,6 +310,30 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
     return list.sort((a, b) => compareEmployeeCode(a.employee_code, b.employee_code))
   }, [preview, dbEmployees])
   const wageProfiles = useMemo(() => (preview ? demoWageProfiles : dbWageProfiles), [preview, dbWageProfiles])
+  const isSkilledWorker = useMemo(() => {
+    const profileMap = new Map<string, WageProfile>()
+    for (const p of wageProfiles) {
+      profileMap.set(p.employee_id, p)
+    }
+    const empMap = new Map(employees.map((e) => [e.id, e]))
+    const jobsList = jobs.length > 0 ? jobs : referenceJobs
+    return (empId: string) => {
+      const p = profileMap.get(empId)
+      if (p?.rate_tier === 'skilled') {
+        if (p.skilled_from && p.skilled_from > activeDateStr) return false
+        return true
+      }
+      const emp = empMap.get(empId)
+      if (emp) {
+        const form = employeeWageForm(emp.job_title, p, jobsList)
+        if (form.rateTier === 'skilled') {
+          if (p?.skilled_from && p.skilled_from > activeDateStr) return false
+          return true
+        }
+      }
+      return false
+    }
+  }, [wageProfiles, activeDateStr, employees, jobs])
 
   // Track daily revision for optimistic concurrency control
   const [dayRevision, setDayRevision] = useState(0)
@@ -938,7 +964,10 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
 
     const isClerk = modalEmp.position === 'clerk'
     const tier1 = wageTier(wageProfiles.find((p) => p.employee_id === modalEmp.id), activeDateStr)
-    const baseRate1 = (tier1 === 'skilled' && job1?.skilled_rate) ? job1.skilled_rate : (job1?.normal_rate || 357)
+    const isClerkJob1 = job1?.job_group === 'clerk' || (job1?.code && ['692021', '692032', '692041', '692050'].includes(job1.code.trim()))
+    const baseRate1 = isClerkJob1
+      ? (tier1 === 'skilled' ? (job1?.skilled_rate ?? 377) : (job1?.normal_rate ?? 357))
+      : ((tier1 === 'skilled' && job1?.skilled_rate) ? job1.skilled_rate : (job1?.normal_rate || 357))
     const ot1 = (!isClerk && modalShift1HasOt) ? calculateEntryOt(modalShift1OtHours, baseRate1, isClerk) : { ot_hours: 0, ot_pay: 0 }
 
     const updatedEntries = entries.filter((e) => e.employee_id !== modalEmp.id)
@@ -974,7 +1003,10 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
       }
 
       const tier2 = wageTier(wageProfiles.find((p) => p.employee_id === modalEmp.id), activeDateStr)
-      const baseRate2 = (tier2 === 'skilled' && job2?.skilled_rate) ? job2.skilled_rate : (job2?.normal_rate || 357)
+      const isClerkJob2 = job2?.job_group === 'clerk' || (job2?.code && ['692021', '692032', '692041', '692050'].includes(job2.code.trim()))
+      const baseRate2 = isClerkJob2
+        ? (tier2 === 'skilled' ? (job2?.skilled_rate ?? 377) : (job2?.normal_rate ?? 357))
+        : ((tier2 === 'skilled' && job2?.skilled_rate) ? job2.skilled_rate : (job2?.normal_rate || 357))
       const ot2 = modalShift2HasOt ? calculateEntryOt(modalShift2OtHours, baseRate2, isClerk) : { ot_hours: 0, ot_pay: 0 }
 
       newEmpEntries.push({
@@ -1739,15 +1771,22 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                     <div className="vk-pool-card-content">
                       {/* Line 1: Name + Badges */}
                       <div className="vk-pool-card-line1">
-                        <span className="vk-pool-emp-name">
-                          {emp.first_name} {emp.last_name}
-                          {emp.nationality ? <span className="vk-pool-nat-txt"> ({emp.nationality})</span> : null}
+                        <div style={{ display: 'flex', alignItems: 'center', minWidth: 0, gap: 4, flex: 1 }}>
+                          <span className="vk-pool-emp-name" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {emp.first_name} {emp.last_name}
+                            {emp.nationality ? <span className="vk-pool-nat-txt"> ({emp.nationality})</span> : null}
+                          </span>
+                          {isSkilledWorker(emp.id) && (
+                            <span title="พนักงานค่าแรงฝีมือ" style={{ flexShrink: 0, fontSize: 12 }}>
+                              ⭐
+                            </span>
+                          )}
                           {(emp.position === 'clerk' || (emp.position && String(emp.position).toLowerCase() === 'clerk')) && (
-                            <span className="vk-pool-clerk-badge">
+                            <span className="vk-pool-clerk-badge" style={{ flexShrink: 0 }}>
                               เสมียน
                             </span>
                           )}
-                        </span>
+                        </div>
                         <div className="vk-pool-badges-group">
                           {count === 1 && (
                             <span className="vk-badge-shift-1">
@@ -1978,7 +2017,12 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                                         >
                                           <div className="vk-tpi-worker-pill-main">
                                             <div className="vk-tpi-worker-pill-line1">
-                                              <span className="vk-tpi-wp-name">{emp.first_name} {emp.last_name}</span>
+                                              <div style={{ display: 'flex', alignItems: 'center', minWidth: 0, gap: 3 }}>
+                                                <span className="vk-tpi-wp-name">
+                                                  {emp.first_name} {emp.last_name}
+                                                </span>
+                                                {isSkilledWorker(emp.id) && <span title="พนักงานค่าแรงฝีมือ" style={{ flexShrink: 0, fontSize: 11 }}>⭐</span>}
+                                              </div>
                                               {totalWorkerShifts > 1 && (
                                                 <span className="vk-tpi-wp-2shift" title="มีอีก 1 กะในรหัสงานอื่น">
                                                   2 กะ
@@ -2191,7 +2235,12 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                                         >
                                           <div className="vk-tpi-worker-pill-main">
                                             <div className="vk-tpi-worker-pill-line1">
-                                              <span className="vk-tpi-wp-name">{emp.first_name} {emp.last_name}</span>
+                                              <div style={{ display: 'flex', alignItems: 'center', minWidth: 0, gap: 3 }}>
+                                                <span className="vk-tpi-wp-name">
+                                                  {emp.first_name} {emp.last_name}
+                                                </span>
+                                                {isSkilledWorker(emp.id) && <span title="พนักงานค่าแรงฝีมือ" style={{ flexShrink: 0, fontSize: 11 }}>⭐</span>}
+                                              </div>
                                               {totalWorkerShifts > 1 && (
                                                 <span className="vk-tpi-wp-2shift" title="มีอีก 1 กะในรหัสงานอื่น">
                                                   2 กะ
@@ -2268,14 +2317,15 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
           wageProfiles.find((p) => p.employee_id === modalEmp.id),
           activeDateStr
         )
-        const modalBaseRate1 =
-          modalTier === 'skilled' && modalJob1?.skilled_rate
-            ? modalJob1.skilled_rate
-            : modalJob1?.normal_rate || 357
-        const modalBaseRate2 =
-          modalTier === 'skilled' && modalJob2?.skilled_rate
-            ? modalJob2.skilled_rate
-            : modalJob2?.normal_rate || 357
+        const isClerkJob1 = modalJob1?.job_group === 'clerk' || (modalJob1?.code && ['692021', '692032', '692041', '692050'].includes(modalJob1.code.trim()))
+        const modalBaseRate1 = isClerkJob1
+          ? (modalTier === 'skilled' ? (modalJob1?.skilled_rate ?? 377) : (modalJob1?.normal_rate ?? 357))
+          : (modalTier === 'skilled' && modalJob1?.skilled_rate ? modalJob1.skilled_rate : (modalJob1?.normal_rate || 357))
+
+        const isClerkJob2 = modalJob2?.job_group === 'clerk' || (modalJob2?.code && ['692021', '692032', '692041', '692050'].includes(modalJob2.code.trim()))
+        const modalBaseRate2 = isClerkJob2
+          ? (modalTier === 'skilled' ? (modalJob2?.skilled_rate ?? 377) : (modalJob2?.normal_rate ?? 357))
+          : (modalTier === 'skilled' && modalJob2?.skilled_rate ? modalJob2.skilled_rate : (modalJob2?.normal_rate || 357))
 
         const modalShift1Wage = modalShift1IsHalf ? modalBaseRate1 / 2 : modalBaseRate1
         const modalShift1OtCalc = (!modalIsClerk && modalShift1HasOt)
@@ -2294,6 +2344,9 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                 <div className="vk-modal-header-info">
                   <h3 className="vk-modal-emp-title">
                     {modalEmp.first_name} {modalEmp.last_name}
+                    {isSkilledWorker(modalEmp.id) && (
+                      <span title="พนักงานค่าแรงฝีมือ" style={{ marginLeft: 6, fontSize: 16 }}>⭐</span>
+                    )}
                   </h3>
                   <div className="vk-modal-emp-meta">
                     <span className="vk-meta-code">{modalEmp.employee_code}</span>
