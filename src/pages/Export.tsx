@@ -11,6 +11,7 @@ import { th } from 'date-fns/locale'
 import { formatPeriodLabel, compareEmployeeCode, formatEmployeeFullName } from '../lib/formatters'
 import { isTpiCompany } from '../features/tpi/model'
 import { calculatePayroll } from '../lib/payrollCalc'
+import { calculateTpiPayroll } from '../features/tpi/payrollCalc'
 import '../styles/tokens.css'
 
 interface PayrollPeriod { id: string; period_start: string; period_end: string; status: string | null }
@@ -725,19 +726,41 @@ export default function Export() {
       `).in('period_id', ids).limit(10000)
       if (error) throw error
 
-      // 2. Fetch shift_assignments for target periods to catch any employees with shifts whose payroll hasn't been saved yet
+      // 2. Fetch shifts for target periods to catch any employees with shifts whose payroll hasn't been saved yet
       let allShifts: any[] = []
-      let fromShift = 0
-      const PAGE_SHIFT = 1000
-      while (true) {
-        const { data: sData, error: sErr } = await supabase.from('shift_assignments' as any)
-          .select('employee_id,period_id,work_date,shift_type,is_holiday_ot,is_holiday_ot_exempt,is_half_shift,actual_hours,ot_hours,wood_excess,film_amount,is_cross_position,cross_position_title,cross_position_extra_pay')
-          .in('period_id', ids)
-          .range(fromShift, fromShift + PAGE_SHIFT - 1)
-        if (sErr) break
-        allShifts = allShifts.concat(sData ?? [])
-        if (!sData || sData.length < PAGE_SHIFT) break
-        fromShift += PAGE_SHIFT
+      if (isTpi) {
+        const selectedPeriods = periods.filter(p => ids.includes(p.id))
+        const minStart = selectedPeriods.map(p => p.period_start).sort()[0]
+        const maxEnd = selectedPeriods.map(p => p.period_end).sort().reverse()[0]
+        if (minStart && maxEnd) {
+          let fromShift = 0
+          const PAGE_SHIFT = 1000
+          while (true) {
+            const { data: sData, error: sErr } = await supabase.from('tpi_shift_entries' as any)
+              .select('id,work_date,employee_id,shift_index,job_id,job_code_snapshot,rate_tier,rate_snapshot,is_half_shift,actual_hours,ot_hours,ot_pay,is_holiday_ot')
+              .eq('factory_id', user?.factory_id ?? '')
+              .gte('work_date', minStart)
+              .lte('work_date', maxEnd)
+              .range(fromShift, fromShift + PAGE_SHIFT - 1)
+            if (sErr) break
+            allShifts = allShifts.concat(sData ?? [])
+            if (!sData || sData.length < PAGE_SHIFT) break
+            fromShift += PAGE_SHIFT
+          }
+        }
+      } else {
+        let fromShift = 0
+        const PAGE_SHIFT = 1000
+        while (true) {
+          const { data: sData, error: sErr } = await supabase.from('shift_assignments' as any)
+            .select('employee_id,period_id,work_date,shift_type,is_holiday_ot,is_holiday_ot_exempt,is_half_shift,actual_hours,ot_hours,wood_excess,film_amount,is_cross_position,cross_position_title,cross_position_extra_pay')
+            .in('period_id', ids)
+            .range(fromShift, fromShift + PAGE_SHIFT - 1)
+          if (sErr) break
+          allShifts = allShifts.concat(sData ?? [])
+          if (!sData || sData.length < PAGE_SHIFT) break
+          fromShift += PAGE_SHIFT
+        }
       }
 
       // 3. Fetch advance_payments for target periods
@@ -747,7 +770,7 @@ export default function Export() {
 
       // 4. Fetch all active employees for this factory
       const { data: allEmps = [] } = await supabase.from('employees')
-        .select('id, employee_code, first_name, last_name, position, payment_method, bank_name, bank_account, status, rate_per_12h, wage_type, nationality, exempt_social_security')
+        .select('id, employee_code, first_name, last_name, position, payment_method, bank_name, bank_account, status, rate_per_12h, wage_type, nationality, exempt_social_security, is_safety_officer, has_position_allowance')
         .eq('factory_id', user?.factory_id ?? '')
       const empMap = new Map<string, any>(allEmps.map((e: any) => [e.id, e]))
 
@@ -796,7 +819,9 @@ export default function Export() {
       // Include any employee who worked shifts in the period but has not been saved to payroll_entries yet
       ids.forEach(periodId => {
         const periodObj = periods.find(p => p.id === periodId)
-        const shiftsForPeriod = allShifts.filter(s => s.period_id === periodId)
+        const shiftsForPeriod = isTpi
+          ? allShifts.filter(s => periodObj && s.work_date >= periodObj.period_start && s.work_date <= periodObj.period_end)
+          : allShifts.filter(s => s.period_id === periodId)
         const empIdsWithShifts = [...new Set(shiftsForPeriod.map(s => s.employee_id))]
 
         empIdsWithShifts.forEach(empId => {
@@ -811,61 +836,78 @@ export default function Export() {
           const empAdvances = allAdvances.filter(a => a.period_id === periodId && a.employee_id === empId)
           const advTotal = empAdvances.reduce((s, a) => s + Number(a.amount || 0), 0)
 
-          const isEmpClerk = emp.position === 'clerk'
-          const empIsThai = !emp.nationality || emp.nationality === 'ไทย'
-          const empSsRate = empIsThai && !emp.exempt_social_security ? (Number((periodObj as any)?.social_security_rate ?? 0.05)) : 0
+          if (isTpi && periodObj) {
+            const c = calculateTpiPayroll({
+              employee: emp,
+              shifts: empShifts,
+              advances: empAdvances,
+              period: periodObj,
+            })
+            map[k].n += c.effectiveNormal
+            map[k].s += c.effectiveShift
+            map[k].ot += c.totalOtPay
+            map[k].sp += c.amountSpecial
+            map[k].d += c.amountDiligence
+            map[k].p += c.amountPosition
+            map[k].ss += c.deductSocialSecurity
+            map[k].adv += advTotal
+          } else {
+            const isEmpClerk = emp.position === 'clerk'
+            const empIsThai = !emp.nationality || emp.nationality === 'ไทย'
+            const empSsRate = empIsThai && !emp.exempt_social_security ? (Number((periodObj as any)?.social_security_rate ?? 0.05)) : 0
 
-          const normShifts = empShifts.filter((s: any) => !s.is_holiday_ot || s.is_holiday_ot_exempt)
-          const holShifts = empShifts.filter((s: any) => s.is_holiday_ot && !s.is_holiday_ot_exempt)
-          const normDays = normShifts.filter((s: any) => !s.is_half_shift && !s.actual_hours).length
-          const halfDays = normShifts.filter((s: any) => s.is_half_shift && !s.actual_hours).length
-          const partialHrs = normShifts.reduce((s: number, sh: any) => s + Number(sh.actual_hours || 0), 0)
-          const holFull = holShifts.filter((s: any) => !s.is_half_shift).length
-          const holHalf = holShifts.filter((s: any) => s.is_half_shift).length
-          const clerkNorm = normShifts.filter((s: any) => !isWeekend(s.work_date)).length
-          const clerkOt = empShifts.filter((s: any) => !isWeekend(s.work_date)).reduce((s: number, sh: any) => s + Number(sh.ot_hours || 0), 0)
-          const clerkOt1x = empShifts.filter((s: any) => isWeekend(s.work_date)).reduce((s: number, sh: any) => s + Number(sh.ot_hours || 0), 0)
-          const autoW = empShifts.reduce((s: number, sh: any) => s + Number(sh.wood_excess || 0), 0)
-          const autoF = empShifts.reduce((s: number, sh: any) => s + Number(sh.film_amount || 0), 0)
-          const autoSp = empShifts.filter((s: any) => s.is_cross_position).reduce((s: number, sh: any) => s + Number(sh.cross_position_extra_pay || 0), 0)
+            const normShifts = empShifts.filter((s: any) => !s.is_holiday_ot || s.is_holiday_ot_exempt)
+            const holShifts = empShifts.filter((s: any) => s.is_holiday_ot && !s.is_holiday_ot_exempt)
+            const normDays = normShifts.filter((s: any) => !s.is_half_shift && !s.actual_hours).length
+            const halfDays = normShifts.filter((s: any) => s.is_half_shift && !s.actual_hours).length
+            const partialHrs = normShifts.reduce((s: number, sh: any) => s + Number(sh.actual_hours || 0), 0)
+            const holFull = holShifts.filter((s: any) => !s.is_half_shift).length
+            const holHalf = holShifts.filter((s: any) => s.is_half_shift).length
+            const clerkNorm = normShifts.filter((s: any) => !isWeekend(s.work_date)).length
+            const clerkOt = empShifts.filter((s: any) => !isWeekend(s.work_date)).reduce((s: number, sh: any) => s + Number(sh.ot_hours || 0), 0)
+            const clerkOt1x = empShifts.filter((s: any) => isWeekend(s.work_date)).reduce((s: number, sh: any) => s + Number(sh.ot_hours || 0), 0)
+            const autoW = empShifts.reduce((s: number, sh: any) => s + Number(sh.wood_excess || 0), 0)
+            const autoF = empShifts.reduce((s: number, sh: any) => s + Number(sh.film_amount || 0), 0)
+            const autoSp = empShifts.filter((s: any) => s.is_cross_position).reduce((s: number, sh: any) => s + Number(sh.cross_position_extra_pay || 0), 0)
 
-          const periodDays = periodObj ? (() => {
-            const s = new Date(periodObj.period_start + 'T00:00:00')
-            const e = new Date(periodObj.period_end + 'T00:00:00')
-            return Math.round((e.getTime() - s.getTime()) / 86400000) + 1
-          })() : undefined
+            const periodDays = periodObj ? (() => {
+              const s = new Date(periodObj.period_start + 'T00:00:00')
+              const e = new Date(periodObj.period_end + 'T00:00:00')
+              return Math.round((e.getTime() - s.getTime()) / 86400000) + 1
+            })() : undefined
 
-          const c = calculatePayroll({
-            position: emp.position as 'worker' | 'clerk',
-            wage_type: emp.wage_type as 'daily' | 'monthly',
-            rate_per_12h: Number(emp.rate_per_12h) || 0,
-            normal_days: isEmpClerk ? clerkNorm : normDays,
-            period_days: isEmpClerk ? periodDays : undefined,
-            half_shift_days: isEmpClerk ? 0 : halfDays,
-            holiday_ot_full_days: holFull,
-            holiday_ot_half_days: holHalf,
-            partial_hours_total: isEmpClerk ? 0 : partialHrs,
-            clerk_ot_hours: clerkOt,
-            clerk_ot_1x_hours: clerkOt1x,
-            amount_wood_excess: isEmpClerk ? 0 : autoW,
-            amount_film: isEmpClerk ? 0 : autoF,
-            amount_special: autoSp,
-            amount_diligence: 0,
-            amount_position: 0,
-            social_security_rate: empSsRate,
-            deduct_advance: advTotal,
-            deduct_safety_equipment: 0,
-            deduct_uniform: 0,
-          })
+            const c = calculatePayroll({
+              position: emp.position as 'worker' | 'clerk',
+              wage_type: emp.wage_type as 'daily' | 'monthly',
+              rate_per_12h: Number(emp.rate_per_12h) || 0,
+              normal_days: isEmpClerk ? clerkNorm : normDays,
+              period_days: isEmpClerk ? periodDays : undefined,
+              half_shift_days: isEmpClerk ? 0 : halfDays,
+              holiday_ot_full_days: holFull,
+              holiday_ot_half_days: holHalf,
+              partial_hours_total: isEmpClerk ? 0 : partialHrs,
+              clerk_ot_hours: clerkOt,
+              clerk_ot_1x_hours: clerkOt1x,
+              amount_wood_excess: isEmpClerk ? 0 : autoW,
+              amount_film: isEmpClerk ? 0 : autoF,
+              amount_special: autoSp,
+              amount_diligence: 0,
+              amount_position: 0,
+              social_security_rate: empSsRate,
+              deduct_advance: advTotal,
+              deduct_safety_equipment: 0,
+              deduct_uniform: 0,
+            })
 
-          map[k].n += c.amount_normal
-          map[k].s += c.amount_shift
-          map[k].ot += c.amount_ot + c.amount_ot_1x
-          map[k].w += isEmpClerk ? 0 : autoW
-          map[k].f += isEmpClerk ? 0 : autoF
-          map[k].sp += autoSp
-          map[k].ss += c.deduct_social_security
-          map[k].adv += advTotal
+            map[k].n += c.amount_normal
+            map[k].s += c.amount_shift
+            map[k].ot += c.amount_ot + c.amount_ot_1x
+            map[k].w += isEmpClerk ? 0 : autoW
+            map[k].f += isEmpClerk ? 0 : autoF
+            map[k].sp += autoSp
+            map[k].ss += c.deduct_social_security
+            map[k].adv += advTotal
+          }
         })
       })
 
@@ -880,6 +922,29 @@ export default function Export() {
         const payMethod = x.emp.payment_method === 'bank_transfer' ? 'โอนธนาคาร' : (x.emp.payment_method === 'cash' ? 'เงินสด' : (x.emp.payment_method || '-'))
         const bankName = x.emp.payment_method === 'bank_transfer' ? (x.emp.bank_name || '-') : '-'
         const bankAccount = x.emp.payment_method === 'bank_transfer' ? (x.emp.bank_account || '-') : '-'
+
+        if (isTpi) {
+          return {
+            'รหัสพนักงาน': x.emp.employee_code,
+            'ชื่อ-นามสกุล': `${x.emp.first_name} ${x.emp.last_name}`.trim(),
+            'วิธีการรับเงิน': payMethod,
+            'ธนาคาร': bankName,
+            'เลขที่บัญชี': bankAccount,
+            'ค่าจ้างรวม': x.n + x.s,
+            'ค่าจ้างปกติ': x.n,
+            'ค่ากะ': x.s,
+            'OT': x.ot,
+            'เงินพิเศษ': x.sp,
+            'เบี้ยขยัน': x.d,
+            'ค่าตำแหน่ง': x.p,
+            'ประกันสังคม': x.ss,
+            'เบิกล่วงหน้า': x.adv,
+            'ค่าอุปกรณ์ความปลอดภัย': x.safe,
+            'ค่าเสื้อพนักงาน': x.uni,
+            'รวม': income - deduct
+          }
+        }
+
         return {
           'รหัสพนักงาน': x.emp.employee_code,
           'ชื่อ-นามสกุล': `${x.emp.first_name} ${x.emp.last_name}`.trim(),
@@ -907,12 +972,21 @@ export default function Export() {
       const wb = XLSX.utils.book_new()
       const ws = XLSX.utils.aoa_to_sheet([[`ค่าแรง ${label}`]])
       XLSX.utils.sheet_add_json(ws, rows, { origin: 'A2' })
-      ws['!cols'] = [
-        { wch: 14 }, { wch: 24 }, { wch: 14 }, { wch: 16 }, { wch: 18 },
-        { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 12 },
-        { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 14 },
-        { wch: 14 }, { wch: 20 }, { wch: 16 }, { wch: 16 }
-      ]
+      if (isTpi) {
+        ws['!cols'] = [
+          { wch: 14 }, { wch: 24 }, { wch: 14 }, { wch: 16 }, { wch: 18 },
+          { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 12 },
+          { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 14 },
+          { wch: 14 }, { wch: 20 }, { wch: 16 }, { wch: 16 }
+        ]
+      } else {
+        ws['!cols'] = [
+          { wch: 14 }, { wch: 24 }, { wch: 14 }, { wch: 16 }, { wch: 18 },
+          { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 12 },
+          { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 14 },
+          { wch: 14 }, { wch: 20 }, { wch: 16 }, { wch: 16 }
+        ]
+      }
       XLSX.utils.book_append_sheet(wb, ws, 'Payroll Summary')
       XLSX.writeFile(wb, `Payroll_Summary_${label.replace(/[\s/*?:[\]]/g, '_')}.xlsx`)
       toast.success('ดาวน์โหลด Payroll Excel สำเร็จ')
@@ -1143,21 +1217,44 @@ export default function Export() {
         .select('id,name').eq('id', user?.factory_id ?? '').single()
       const branchName = fullFactoryName(factoryData?.name || '')
 
-      // Fetch shift_assignments for all entries in bulk with pagination
+      // Fetch shifts for all entries in bulk with pagination
       const empIds    = [...new Set((entries as any[]).map(e => e.employee_id))]
       let allShifts: any[] = []
-      let fromShift = 0
-      const PAGE_SHIFT = 1000
-      while (true) {
-        const { data, error } = await supabase.from('shift_assignments' as any)
-          .select('employee_id,period_id,work_date,is_holiday_ot,is_holiday_ot_exempt,is_half_shift,actual_hours,ot_hours')
-          .in('period_id', targetPeriodIds)
-          .in('employee_id', empIds)
-          .range(fromShift, fromShift + PAGE_SHIFT - 1)
-        if (error) break
-        allShifts = allShifts.concat(data ?? [])
-        if (!data || data.length < PAGE_SHIFT) break
-        fromShift += PAGE_SHIFT
+      if (isTpi) {
+        const selectedPeriods = periods.filter(p => targetPeriodIds.includes(p.id))
+        const minStart = selectedPeriods.map(p => p.period_start).sort()[0]
+        const maxEnd = selectedPeriods.map(p => p.period_end).sort().reverse()[0]
+        if (minStart && maxEnd) {
+          let fromShift = 0
+          const PAGE_SHIFT = 1000
+          while (true) {
+            const { data, error } = await supabase.from('tpi_shift_entries' as any)
+              .select('id,work_date,employee_id,shift_index,job_id,job_code_snapshot,rate_tier,rate_snapshot,is_half_shift,actual_hours,ot_hours,ot_pay,is_holiday_ot')
+              .eq('factory_id', user?.factory_id ?? '')
+              .in('employee_id', empIds)
+              .gte('work_date', minStart)
+              .lte('work_date', maxEnd)
+              .range(fromShift, fromShift + PAGE_SHIFT - 1)
+            if (error) break
+            allShifts = allShifts.concat(data ?? [])
+            if (!data || data.length < PAGE_SHIFT) break
+            fromShift += PAGE_SHIFT
+          }
+        }
+      } else {
+        let fromShift = 0
+        const PAGE_SHIFT = 1000
+        while (true) {
+          const { data, error } = await supabase.from('shift_assignments' as any)
+            .select('employee_id,period_id,work_date,is_holiday_ot,is_holiday_ot_exempt,is_half_shift,actual_hours,ot_hours')
+            .in('period_id', targetPeriodIds)
+            .in('employee_id', empIds)
+            .range(fromShift, fromShift + PAGE_SHIFT - 1)
+          if (error) break
+          allShifts = allShifts.concat(data ?? [])
+          if (!data || data.length < PAGE_SHIFT) break
+          fromShift += PAGE_SHIFT
+        }
       }
 
       const sorted = [...(entries as any[])].sort((a, b) => {
@@ -1167,7 +1264,9 @@ export default function Export() {
 
       const generatedAt = thaiDateTimeNow()
       const slipsHtml = sorted.map((e,i) => {
-        const empShifts = (allShifts as any[]).filter(s => s.employee_id === e.employee_id && s.period_id === e.period_id)
+        const empShifts = isTpi
+          ? (allShifts as any[]).filter(s => s.employee_id === e.employee_id && s.work_date >= e.period.period_start && s.work_date <= e.period.period_end)
+          : (allShifts as any[]).filter(s => s.employee_id === e.employee_id && s.period_id === e.period_id)
         return `<div style="page-break-after:${i<sorted.length-1?'always':'auto'};padding:0;margin:0">${buildSlipHtml(e, e.period, empShifts, branchName, generatedAt)}</div>`
       }).join('')
 
