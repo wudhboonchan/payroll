@@ -258,6 +258,7 @@ export default function EmployeeSummary() {
   const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(null)
   const [empSearch, setEmpSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'worked' | 'not_worked' | null>(null)
+  const [onlyWorkedFilter, setOnlyWorkedFilter] = useState(false)
 
   const { data: factoryData } = useQuery<any>({
     queryKey: ['factory-info', user?.factory_id],
