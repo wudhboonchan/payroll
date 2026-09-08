@@ -15,6 +15,8 @@ export interface SlipIncomeRow {
 export interface SlipDeductRow {
   label: string
   value: number
+  detail?: string | null
+  subs?: string[]
 }
 
 export interface VKSlipDocumentProps {
@@ -159,8 +161,8 @@ export function VKSlipDocument({
           <div style={{ flex: 1, padding: '0 24px' }}>
             {income.map((r, i) => (
               <div key={i} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, padding: '9px 0 2px' }}>
-                  <span style={{ fontSize: 13, color: '#1a1a1a', fontWeight: 500 }}>{r.label}</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, padding: '9px 0 2px' }}>
+                  <span style={{ fontSize: 13, color: '#1a1a1a', fontWeight: 500, whiteSpace: 'pre-line' }}>{r.label}</span>
                   <span style={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 600, color: '#1a1a1a', whiteSpace: 'nowrap' }}>{mono(r.value)}</span>
                 </div>
                 {r.detail && (
@@ -191,9 +193,21 @@ export function VKSlipDocument({
             {deductions.length === 0
               ? <div style={{ padding: '9px 0', fontSize: 12, color: '#bbb' }}>ไม่มีรายการหัก</div>
               : deductions.map((r, i) => (
-                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, padding: '9px 0', borderBottom: '1px solid #f0f0f0' }}>
-                  <span style={{ fontSize: 13, color: '#1a1a1a', fontWeight: 500 }}>{r.label}</span>
-                  <span style={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 600, color: '#c0392b', whiteSpace: 'nowrap' }}>{mono(r.value)}</span>
+                <div key={i} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, padding: '9px 0 2px' }}>
+                    <span style={{ fontSize: 13, color: '#1a1a1a', fontWeight: 500, whiteSpace: 'pre-line' }}>{r.label}</span>
+                    <span style={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 600, color: '#c0392b', whiteSpace: 'nowrap' }}>{mono(r.value)}</span>
+                  </div>
+                  {r.detail && (
+                    <div style={{ fontFamily: 'monospace', fontSize: 10, color: '#b44a2a', paddingBottom: 5, wordBreak: 'break-word', whiteSpace: 'normal' }}>{r.detail}</div>
+                  )}
+                  {r.subs?.map((sub, si) => (
+                    <div key={si} style={{ display: 'flex', gap: 6, padding: '3px 0 3px 8px', alignItems: 'center' }}>
+                      <span style={{ fontSize: 10, color: '#bbb', flexShrink: 0 }}>·</span>
+                      <span style={{ fontSize: 11, color: '#999', flex: 1, wordBreak: 'break-word', whiteSpace: 'normal' }}>{sub}</span>
+                    </div>
+                  ))}
+                  {(r.subs?.length ?? 0) > 0 && <div style={{ paddingBottom: 6 }} />}
                 </div>
               ))
             }

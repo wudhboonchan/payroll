@@ -36,6 +36,7 @@ export interface PaySlipData {
   deduct_advance: number
   deduct_safety_equipment: number
   deduct_uniform: number
+  deduction_items?: Array<{ label: string; value: number; detail?: string | null }>
 
   // Totals
   total_income: number
@@ -85,12 +86,14 @@ export const PaySlipPreview = forwardRef<HTMLDivElement, PaySlipPreviewProps>(({
     { label: 'ค่าตำแหน่ง',      value: data.amount_position },
   ].filter(r => r.value > 0)
 
-  const deductRows = [
-    { label: 'ประกันสังคม',            value: data.deduct_social_security },
-    { label: 'เบิกล่วงหน้า',           value: data.deduct_advance },
-    { label: 'ค่าอุปกรณ์ความปลอดภัย', value: data.deduct_safety_equipment },
-    { label: 'ค่าเสื้อพนักงาน',        value: data.deduct_uniform },
-  ].filter(r => r.value > 0)
+  const deductRows = data.deduction_items && data.deduction_items.length > 0
+    ? data.deduction_items.filter(r => r.value > 0)
+    : [
+        { label: 'ประกันสังคม',            value: data.deduct_social_security },
+        { label: 'เบิกล่วงหน้า',           value: data.deduct_advance },
+        { label: 'ค่าอุปกรณ์ความปลอดภัย', value: data.deduct_safety_equipment },
+        { label: 'ค่าเสื้อพนักงาน',        value: data.deduct_uniform },
+      ].filter(r => r.value > 0)
 
   const S = {
     wrap: {
@@ -115,8 +118,8 @@ export const PaySlipPreview = forwardRef<HTMLDivElement, PaySlipPreviewProps>(({
     tHeaderCell: { padding: '9px 14px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase' as const, textAlign: 'center' as const, background: '#e2e8f0', color: '#0f172a' },
     tBodyRow: { display: 'grid', gridTemplateColumns: '1fr 1fr', borderBottom: '1px solid #94a3b8' },
     tCell: { padding: '12px 14px' },
-    itemRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '7px', gap: '8px' },
-    itemLabel: { fontSize: '12px', color: '#1e293b', flex: 1 },
+    itemRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' as const, marginBottom: '7px', gap: '8px' },
+    itemLabel: { fontSize: '12px', color: '#1e293b', flex: 1, whiteSpace: 'pre-line' as const },
     itemValue: { fontSize: '12px', fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' as const },
     subtotalRow: { display: 'grid', gridTemplateColumns: '1fr 1fr' },
     subtotalCell: { padding: '9px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f1f5f9' },
@@ -193,9 +196,16 @@ export const PaySlipPreview = forwardRef<HTMLDivElement, PaySlipPreviewProps>(({
           <div style={S.tCell}>
             {deductRows.length === 0
               ? <p style={{ textAlign: 'center', color: '#94a3b8', fontSize: '12px' }}>—</p>
-              : deductRows.map(r => (
-                <div key={r.label} style={S.itemRow}>
-                  <span style={S.itemLabel}>{r.label}</span>
+              : deductRows.map((r, idx) => (
+                <div key={idx} style={S.itemRow}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <span style={S.itemLabel}>{r.label}</span>
+                    {r.detail && (
+                      <div style={{ fontSize: '10px', color: '#b91c1c', marginTop: '1px', lineHeight: 1.3, wordBreak: 'break-word', whiteSpace: 'normal' }}>
+                        {r.detail}
+                      </div>
+                    )}
+                  </div>
                   <span style={S.itemValue}>{formatThaiCurrency(r.value)}</span>
                 </div>
               ))

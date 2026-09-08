@@ -24,3 +24,9 @@ dist-ssr
 *.sw?
 .claude/worktrees/
 scratch/
+
+# Local data & reference files
+*.xlsx
+*.xls
+/*.jpg
+/*.png

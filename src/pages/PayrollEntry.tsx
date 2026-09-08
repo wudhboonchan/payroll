@@ -1,3 +1,4 @@
+import { DeductionProductPicker } from '../components/payroll/DeductionProductPicker'
 import React from 'react'
 import { useOutletContext } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -9,7 +10,7 @@ import { toast } from 'sonner'
 import { Save, CheckCircle2, AlertCircle, Search, X, AlertTriangle } from 'lucide-react'
 import { calculatePayroll } from '../lib/payrollCalc'
 import type { PayrollCalculationInput } from '../lib/payrollCalc'
-import { compareEmployeeCode } from '../lib/formatters'
+import { compareEmployeeCode, formatThaiDateDDMMYYYY } from '../lib/formatters'
 import '../styles/tokens.css'
 
 interface Employee {
@@ -151,11 +152,36 @@ export default function PayrollEntry() {
   }, [existingEntry, selectedEmpId])
 
   // ── calculation ──
-  const { calc, totalAdvance, autoWood, autoFilm, autoSpecial, autoSpecialNote, crossPositions, isClerk, clerkOtHours, clerkOt1xHours, clerkOtDays, clerkWeekdayDays, clerkWeekendDays, shiftPayDays, holidayOtFullDays, holidayOtHalfDays, baseNormal, baseShift, clerkDaily, clerkHourly } = useMemo(() => {
-    const empty = { calc: null, totalAdvance: 0, autoWood: 0, autoFilm: 0, autoSpecial: 0, autoSpecialNote: '', crossPositions: [] as { title: string; amount: number }[], isClerk: false, clerkOtHours: 0, clerkOt1xHours: 0, clerkOtDays: 0, clerkWeekdayDays: 0, clerkWeekendDays: 0, shiftPayDays: 0, holidayOtFullDays: 0, holidayOtHalfDays: 0, baseNormal: 357, baseShift: 0, clerkDaily: 0, clerkHourly: 0 }
+  const { calc, totalAdvance, regAdv, scanAdv, discAdv, safetyAdv, regAdvTotal, scanAdvTotal, discAdvTotal, safetyAdvTotal, autoWood, autoFilm, autoSpecial, autoSpecialNote, crossPositions, isClerk, clerkOtHours, clerkOt1xHours, clerkOtDays, clerkWeekdayDays, clerkWeekendDays, shiftPayDays, holidayOtFullDays, holidayOtHalfDays, baseNormal, baseShift, clerkDaily, clerkHourly } = useMemo(() => {
+    const empty = { calc: null, totalAdvance: 0, regAdv: [] as typeof empAdvances, scanAdv: [] as typeof empAdvances, discAdv: [] as typeof empAdvances, safetyAdv: [] as typeof empAdvances, regAdvTotal: 0, scanAdvTotal: 0, discAdvTotal: 0, safetyAdvTotal: 0, autoWood: 0, autoFilm: 0, autoSpecial: 0, autoSpecialNote: '', crossPositions: [] as { title: string; amount: number }[], isClerk: false, clerkOtHours: 0, clerkOt1xHours: 0, clerkOtDays: 0, clerkWeekdayDays: 0, clerkWeekendDays: 0, shiftPayDays: 0, holidayOtFullDays: 0, holidayOtHalfDays: 0, baseNormal: 357, baseShift: 0, clerkDaily: 0, clerkHourly: 0 }
     if (!selectedEmp) return empty
     const isClerk = selectedEmp.position === 'clerk'
     const advTotal = empAdvances.reduce((s, a) => s + Number(a.amount), 0)
+
+    const regAdv = empAdvances.filter(a => {
+      const note = a.note || ''
+      const isScan = note.includes('[สแกนหน้าไม่สำเร็จ]') || note.includes('สแกนหน้าไม่สำเร็จ')
+      const isDisc = note.includes('[ลงโทษ ขาดงานไม่มีคนแทน]') || note.includes('ลงโทษ ขาดงาน') || note.includes('[ลงโทษ ขาด/ลา/มาสาย]') || note.includes('ลงโทษ ขาด/ลา/มาสาย')
+      const isSafety = note.includes('[หักค่าปรับ จป.]') || note.includes('หักค่าปรับผิดระเบียบ') || note.includes('ค่าปรับผิดระเบียบ')
+      return !isScan && !isDisc && !isSafety
+    })
+    const scanAdv = empAdvances.filter(a => {
+      const note = a.note || ''
+      return note.includes('[สแกนหน้าไม่สำเร็จ]') || note.includes('สแกนหน้าไม่สำเร็จ')
+    })
+    const discAdv = empAdvances.filter(a => {
+      const note = a.note || ''
+      return note.includes('[ลงโทษ ขาดงานไม่มีคนแทน]') || note.includes('ลงโทษ ขาดงาน') || note.includes('[ลงโทษ ขาด/ลา/มาสาย]') || note.includes('ลงโทษ ขาด/ลา/มาสาย')
+    })
+    const safetyAdv = empAdvances.filter(a => {
+      const note = a.note || ''
+      return note.includes('[หักค่าปรับ จป.]') || note.includes('หักค่าปรับผิดระเบียบ') || note.includes('ค่าปรับผิดระเบียบ')
+    })
+    const regAdvTotal = regAdv.reduce((s, a) => s + Number(a.amount || 0), 0)
+    const scanAdvTotal = scanAdv.reduce((s, a) => s + Number(a.amount || 0), 0)
+    const discAdvTotal = discAdv.reduce((s, a) => s + Number(a.amount || 0), 0)
+    const safetyAdvTotal = safetyAdv.reduce((s, a) => s + Number(a.amount || 0), 0)
+
     const normShifts = empShifts.filter(s => !s.is_holiday_ot || s.is_holiday_ot_exempt)
     const holShifts  = empShifts.filter(s => s.is_holiday_ot && !s.is_holiday_ot_exempt)
     const normDays = normShifts.filter(s => !s.is_half_shift && !s.actual_hours).length
@@ -212,7 +238,7 @@ export default function PayrollEntry() {
     const baseShift  = Math.max(0, rate - baseNormal)
     const clerkDaily = rate / 30
     const clerkHourly = clerkDaily / 8
-    return { calc: calculatePayroll(input), totalAdvance: advTotal, autoWood: autoW, autoFilm: autoF, autoSpecial: autoSp, autoSpecialNote: autoSpNote, crossPositions, isClerk, clerkOtHours: clerkOt, clerkOt1xHours: clerkOt1x, clerkOtDays, clerkWeekdayDays: clerkNormDays, clerkWeekendDays: clerkWeekendShifts.length, shiftPayDays: normDays, holidayOtFullDays: holFull, holidayOtHalfDays: holHalf, baseNormal, baseShift, clerkDaily, clerkHourly, holFull, holHalf }
+    return { calc: calculatePayroll(input), totalAdvance: advTotal, regAdv, scanAdv, discAdv, safetyAdv, regAdvTotal, scanAdvTotal, discAdvTotal, safetyAdvTotal, autoWood: autoW, autoFilm: autoF, autoSpecial: autoSp, autoSpecialNote: autoSpNote, crossPositions, isClerk, clerkOtHours: clerkOt, clerkOt1xHours: clerkOt1x, clerkOtDays, clerkWeekdayDays: clerkNormDays, clerkWeekendDays: clerkWeekendShifts.length, shiftPayDays: normDays, holidayOtFullDays: holFull, holidayOtHalfDays: holHalf, baseNormal, baseShift, clerkDaily, clerkHourly, holFull, holHalf }
   }, [selectedEmp, empShifts, empAdvances, overrideNormal, overrideSpecial, extraEntries, ssRate, isThai])
 
   // ── outdated detection — computed for ALL employees upfront ──
@@ -526,9 +552,9 @@ export default function PayrollEntry() {
               ) : calc ? (
                 <>
                   {/* Income + Deduct */}
-                  <div className="vk-income-grid" style={{ border: '1px solid var(--vk-rule)', marginBottom: 0 }}>
+                  <div className="vk-income-grid" style={{ border: '1px solid var(--vk-rule)', marginBottom: 0, width: '100%' }}>
                     {/* ── Income column ── */}
-                    <div className="vk-income-col" style={{ padding: '20px 24px', background: 'var(--vk-bone)', display: 'flex', flexDirection: 'column' }}>
+                    <div className="vk-income-col" style={{ padding: '20px 24px', background: 'var(--vk-bone)', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
                       <div className="vk-eyebrow" style={{ color: 'var(--vk-jade)', marginBottom: 14 }}>INCOME · รายได้</div>
 
                       {/* Calculated rows */}
@@ -632,38 +658,202 @@ export default function PayrollEntry() {
                     </div>
 
                     {/* ── Deduct column ── */}
-                    <div className="vk-deduct-col" style={{ padding: '20px 24px', background: 'var(--vk-bone)', display: 'flex', flexDirection: 'column' }}>
+                    <div className="vk-deduct-col" style={{ padding: '20px 24px', background: 'var(--vk-bone)', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
                       <div className="vk-eyebrow" style={{ color: 'var(--vk-crimson)', marginBottom: 14 }}>DEDUCT · รายการหัก</div>
                       {[
-                        { label: selectedEmp?.exempt_social_security ? 'ประกันสังคม (ยกเว้น)' : `ประกันสังคม ${(ssRate*100).toFixed(0)}%`, value: calc.deduct_social_security },
-                        { label: 'เบิกล่วงหน้า', value: totalAdvance },
-                        { label: 'หักอุปกรณ์ความปลอดภัย', value: extraEntries.deduct_safety_equipment },
-                        { label: 'หักเครื่องแบบ', value: extraEntries.deduct_uniform },
-                      ].filter(r => r.value !== 0 || r.label.includes('ประกัน') || r.label.includes('เบิก')).map((r, i) => (
-                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: '1px dashed var(--vk-rule-soft)' }}>
-                          <div style={{ flex: 1, fontSize: 13 }}>{r.label}</div>
-                          <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 13, fontVariantNumeric: 'tabular-nums', color: 'var(--vk-crimson)' }}>
+                        { label: selectedEmp?.exempt_social_security ? 'ประกันสังคม (ยกเว้น)' : `ประกันสังคม ${(ssRate*100).toFixed(0)}%`, value: calc.deduct_social_security, showAlways: true },
+                        { label: 'เบิกล่วงหน้า', value: regAdvTotal, sub: regAdv.length > 0 ? `${regAdv.length} รายการเบิกเงินล่วงหน้า` : null, showAlways: true },
+                        { label: 'หักสแกนหน้าไม่ผ่าน', value: scanAdvTotal, sub: scanAdv.length > 0 ? `${scanAdv.length} รายการสแกนหน้าไม่สำเร็จ` : null, showAlways: false },
+                        { label: 'หักลงโทษขาดงานไม่มีคนแทน', value: discAdvTotal, sub: discAdv.length > 0 ? `${discAdv.length} รายการลงโทษขาดงาน (2 เท่า)` : null, showAlways: false },
+                        ...(safetyAdv.length > 0 ? safetyAdv.map((adv) => {
+                          const infoMatch = (adv.note || '').match(/หักค่าปรับผิดระเบียบ\s*(\([^\)]+\))/)
+                          let infoStr = infoMatch ? infoMatch[1] : ''
+                          if (infoStr && /วันที่\s*\d{4}[-\/]/.test(infoStr)) {
+                            infoStr = infoStr.replace(/วันที่\s*([\d\/\-]+)/, (_, d) => `วันที่ ${formatThaiDateDDMMYYYY(d)}`)
+                          }
+                          const label = infoStr
+                            ? `หักค่าปรับผิดระเบียบ\n${infoStr}`
+                            : ((adv.note || '').match(/(หักค่าปรับผิดระเบียบ\s*\([^\)]+\))/)?.[1] || 'หักค่าปรับผิดระเบียบ')
+                          const reasonMatch = (adv.note || '').match(/สาเหตุ:\s*([^\|]+)/)
+                          const sub = reasonMatch ? `สาเหตุ: ${reasonMatch[1].trim()} (ยอดหักงวดละ ฿${monoNum(Number(adv.amount))})` : `ยอดหัก ฿${monoNum(Number(adv.amount))}`
+                          return {
+                            label,
+                            value: Number(adv.amount),
+                            sub,
+                            showAlways: false,
+                          }
+                        }) : []),
+                        { label: 'หักอุปกรณ์ความปลอดภัย', value: extraEntries.deduct_safety_equipment, sub: null, showAlways: false },
+                        { label: 'หักเครื่องแบบ', value: extraEntries.deduct_uniform, sub: null, showAlways: false },
+                      ].filter(r => r.value !== 0 || r.showAlways).map((r, i) => (
+                        <div key={i} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, padding: '7px 0', borderBottom: '1px dashed var(--vk-rule-soft)' }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'pre-line' }}>{r.label}</div>
+                            {r.sub && <div style={{ fontSize: 11, color: 'var(--vk-ink-3)', marginTop: 1, wordBreak: 'break-word', whiteSpace: 'normal' }}>{r.sub}</div>}
+                          </div>
+                          <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 13, fontVariantNumeric: 'tabular-nums', color: 'var(--vk-crimson)', fontWeight: 700, flexShrink: 0 }}>
                             {monoNum(r.value)}
                           </div>
                         </div>
                       ))}
 
+                      {/* Advance Breakdown Sub-items */}
+                      {regAdv.length > 0 && (
+                        <div style={{ padding: '8px 10px', background: 'rgba(162, 35, 27, 0.04)', borderRadius: 6, marginTop: 8, border: '1px dashed rgba(162, 35, 27, 0.25)' }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--vk-crimson)', marginBottom: 6 }}>
+                            รายละเอียดเบิกล่วงหน้า ({regAdv.length} รายการ):
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            {regAdv.map((adv, idx) => (
+                              <div key={idx} style={{ padding: '7px 10px', background: '#ffffff', borderRadius: 4, border: '1px solid #fee2e2' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+                                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--vk-crimson)' }}>
+                                    รายการที่ {idx + 1}
+                                  </span>
+                                  <span style={{ fontFamily: 'var(--vk-mono)', fontWeight: 700, fontSize: 12, color: 'var(--vk-crimson)' }}>
+                                    –฿{monoNum(Number(adv.amount))}
+                                  </span>
+                                </div>
+                                <div style={{ fontSize: 11, color: 'var(--vk-ink-2)', lineHeight: 1.45, wordBreak: 'break-word', whiteSpace: 'normal' }}>
+                                  {adv.note || 'เบิกเงินสดทั่วไป'}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {scanAdv.length > 0 && (
+                        <div style={{ padding: '8px 10px', background: 'rgba(234, 88, 12, 0.05)', borderRadius: 6, marginTop: 8, border: '1px dashed #fed7aa' }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: '#c2410c', marginBottom: 6 }}>
+                            รายละเอียดหักสแกนหน้าไม่ผ่าน ({scanAdv.length} รายการ):
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            {scanAdv.map((adv, idx) => {
+                              const cleanNote = (adv.note || '').replace(/\[สแกนหน้าไม่สำเร็จ\]/g, '').trim()
+                              const parts = cleanNote.split('|').map(p => p.trim()).filter(Boolean)
+                              return (
+                                <div key={idx} style={{ padding: '7px 10px', background: '#ffffff', borderRadius: 4, border: '1px solid #ffedd5' }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                                    <span style={{ fontSize: 11, fontWeight: 700, color: '#c2410c' }}>
+                                      รายการที่ {idx + 1}
+                                    </span>
+                                    <span style={{ fontFamily: 'var(--vk-mono)', fontWeight: 700, fontSize: 12, color: '#ea580c' }}>
+                                      –฿{monoNum(Number(adv.amount))}
+                                    </span>
+                                  </div>
+                                  {parts.length > 1 ? (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 11, color: 'var(--vk-ink-2)', lineHeight: 1.45 }}>
+                                      {parts.map((p, pIdx) => (
+                                        <div key={pIdx} style={{ wordBreak: 'break-word', whiteSpace: 'normal', display: 'flex', alignItems: 'flex-start', gap: 4 }}>
+                                          <span style={{ color: '#ea580c', flexShrink: 0 }}>•</span>
+                                          <span style={{ flex: 1 }}>{p}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <div style={{ fontSize: 11, color: 'var(--vk-ink-2)', lineHeight: 1.45, wordBreak: 'break-word', whiteSpace: 'normal' }}>
+                                      {cleanNote || 'สแกนหน้าไม่สำเร็จ'}
+                                    </div>
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {discAdv.length > 0 && (
+                        <div style={{ padding: '8px 10px', background: 'rgba(153, 27, 27, 0.05)', borderRadius: 6, marginTop: 8, border: '1px dashed #fca5a5' }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: '#991b1b', marginBottom: 6 }}>
+                            รายละเอียดหักลงโทษขาดงานไม่มีคนแทน ({discAdv.length} รายการ):
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            {discAdv.map((adv, idx) => {
+                              const cleanNote = (adv.note || '')
+                                .replace(/\[ลงโทษ\s*(ขาดงานไม่มีคนแทน|ขาด\/ลา\/มาสาย|ขาดงาน)\]/g, '')
+                                .replace(/วันที่:\s*([\d\/\-]+)/, (_, d) => `วันที่: ${formatThaiDateDDMMYYYY(d)}`)
+                                .trim()
+                              const parts = cleanNote.split('|').map(p => p.trim()).filter(Boolean)
+                              return (
+                                <div key={idx} style={{ padding: '7px 10px', background: '#ffffff', borderRadius: 4, border: '1px solid #fee2e2' }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                                    <span style={{ fontSize: 11, fontWeight: 700, color: '#991b1b' }}>
+                                      รายการที่ {idx + 1}
+                                    </span>
+                                    <span style={{ fontFamily: 'var(--vk-mono)', fontWeight: 700, fontSize: 12, color: 'var(--vk-crimson)' }}>
+                                      –฿{monoNum(Number(adv.amount))}
+                                    </span>
+                                  </div>
+                                  {parts.length > 1 ? (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 11, color: 'var(--vk-ink-2)', lineHeight: 1.45 }}>
+                                      {parts.map((p, pIdx) => (
+                                        <div key={pIdx} style={{ wordBreak: 'break-word', whiteSpace: 'normal', display: 'flex', alignItems: 'flex-start', gap: 4 }}>
+                                          <span style={{ color: '#991b1b', flexShrink: 0 }}>•</span>
+                                          <span style={{ flex: 1 }}>{p}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <div style={{ fontSize: 11, color: 'var(--vk-ink-2)', lineHeight: 1.45, wordBreak: 'break-word', whiteSpace: 'normal' }}>
+                                      {cleanNote || 'หักลงโทษ 2 เท่า'}
+                                    </div>
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {safetyAdv.length > 0 && (
+                        <div style={{ padding: '8px 10px', background: 'rgba(124, 58, 237, 0.05)', borderRadius: 6, marginTop: 8, border: '1px dashed #c4b5fd' }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: '#6d28d9', marginBottom: 6 }}>
+                            รายละเอียดหักค่าปรับผิดระเบียบวินัย จป. ({safetyAdv.length} รายการ):
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            {safetyAdv.map((adv, idx) => {
+                              const cleanNote = (adv.note || '').replace(/\[หักค่าปรับ จป\.\]/g, '').trim()
+                              const parts = cleanNote.split('|').map(p => p.trim()).filter(Boolean)
+                              return (
+                                <div key={idx} style={{ padding: '7px 10px', background: '#ffffff', borderRadius: 4, border: '1px solid #ede9fe' }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                                    <span style={{ fontSize: 11, fontWeight: 700, color: '#6d28d9' }}>
+                                      รายการที่ {idx + 1}
+                                    </span>
+                                    <span style={{ fontFamily: 'var(--vk-mono)', fontWeight: 700, fontSize: 12, color: '#7c3aed' }}>
+                                      –฿{monoNum(Number(adv.amount))}
+                                    </span>
+                                  </div>
+                                  {parts.length > 1 ? (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 11, color: 'var(--vk-ink-2)', lineHeight: 1.45 }}>
+                                      {parts.map((p, pIdx) => (
+                                        <div key={pIdx} style={{ wordBreak: 'break-word', whiteSpace: 'normal', display: 'flex', alignItems: 'flex-start', gap: 4 }}>
+                                          <span style={{ color: '#7c3aed', flexShrink: 0 }}>•</span>
+                                          <span style={{ flex: 1 }}>{p}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <div style={{ fontSize: 11, color: 'var(--vk-ink-2)', lineHeight: 1.45, wordBreak: 'break-word', whiteSpace: 'normal' }}>
+                                      {cleanNote || 'หักค่าปรับผิดระเบียบวินัย จป.'}
+                                    </div>
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )}
+
                       {/* Deduct input fields */}
                       <div style={{ marginTop: 14, borderTop: '1px solid var(--vk-rule-soft)', paddingTop: 14, paddingBottom: 20, display: 'flex', flexDirection: 'column', gap: 8 }}>
                         <div className="vk-eyebrow" style={{ marginBottom: 2 }}>รายการหักเพิ่มเติม</div>
-                        {[
-                          { key: 'deduct_safety_equipment', label: 'ค่าอุปกรณ์ความปลอดภัย (฿)' },
-                          { key: 'deduct_uniform',          label: 'ค่าเสื้อพนักงาน (฿)' },
-                        ].map(f => (
-                          <div key={f.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                            <label style={{ fontSize: 12, color: 'var(--vk-ink-2)' }}>{f.label}</label>
-                            <input type="number" min="0"
-                              value={extraEntries[f.key as keyof typeof extraEntries] || ''}
-                              onChange={e => setExtraEntries(prev => ({ ...prev, [f.key]: Number(e.target.value) || 0 }))}
-                              style={{ width: 90, fontFamily: 'var(--vk-mono)', fontSize: 13, textAlign: 'right', border: '1px solid var(--vk-rule)', background: 'var(--vk-paper)', padding: '4px 8px' }}
-                              placeholder="0" />
-                          </div>
-                        ))}
+                        <DeductionProductPicker
+                          key={`${selectedEmpId}:${currentPeriod?.id}`}
+                          onAdd={(field, amount) => setExtraEntries(prev => ({ ...prev, [field]: Math.max(0, prev[field] + amount) }))}
+                        />
+
                       </div>
 
                       <div style={{ display: 'flex', justifyContent: 'space-between', padding: '14px 0 0', marginTop: 'auto', borderTop: '2px solid var(--vk-rule)' }}>

@@ -12,6 +12,7 @@ import { normalizePrefix } from '@/lib/formatters'
 import '../styles/tokens.css'
 import { isTpiCompany, type Job } from '../features/tpi/model'
 import { demoJobs } from '../features/tpi/demoData'
+import { employeeWageForm } from '../features/tpi/employeeWageForm'
 import './TpiShiftEntry.css'
 
 const employeeSchema = z
@@ -118,7 +119,7 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
     () => (cachedWageProfile?.rate_tier as 'normal' | 'skilled') || 'normal'
   )
   const [tpiSkilledFrom, setTpiSkilledFrom] = useState<string>(
-    () => cachedWageProfile?.skilled_from || ''
+    () => cachedWageProfile?.skilled_from === '0001-01-01' ? '' : cachedWageProfile?.skilled_from || ''
   )
   const [tpiJobCode, setTpiJobCode] = useState<string>(
     () => (cachedWageProfile as any)?.job_code || ''
@@ -208,9 +209,11 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
   })
 
   // Query TPI Wage Profile for existing employee
-  const { data: tpiWageProfile, isLoading: isLoadingWageProfile } = useQuery({
+  // NOTE: do NOT include isTpi in enabled — factories query may still be loading when this
+  // component mounts, causing isTpi=false momentarily and missing the cache key on getQueryData.
+  const { data: tpiWageProfile, isLoading: isLoadingWageProfile, error: wageProfileError } = useQuery({
     queryKey: ['tpi-employee-wage', user?.factory_id, employeeId],
-    enabled: !!user?.factory_id && !!employeeId && isOpen && isTpi,
+    enabled: !!user?.factory_id && !!employeeId && isOpen,
     queryFn: async () => {
       const { data, error } = await supabase
         .from('tpi_employee_wage_profiles')
@@ -218,7 +221,7 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
         .eq('employee_id', employeeId!)
         .eq('factory_id', user!.factory_id)
         .maybeSingle()
-      if (error) return null
+      if (error) throw error
       return data
     },
     staleTime: 0,
@@ -248,41 +251,39 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
     }
   }, [position, setValue, isTpi])
 
+  const wageInitialized = useRef<string | null>(null)
   useEffect(() => {
-    if (!isTpi) return
-    // If editing an existing employee, wait until the wage profile query has returned
-    // something (either data or null). While tpiWageProfile is `undefined`, the query
-    // hasn't resolved yet — don't reset state prematurely.
-    if (employeeId && tpiWageProfile === undefined) return
-
-    if (tpiWageProfile) {
-      // Existing profile found → restore all TPI settings
-      setTpiRateTier((tpiWageProfile.rate_tier as any) || 'normal')
-      setTpiSkilledFrom(tpiWageProfile.skilled_from || '')
-      const foundCode = (tpiWageProfile as any).job_code || employeeData?.job_title || ''
-      setTpiJobCode(foundCode)
-      const matched = activeTpiJobs.find((j) => j.code.trim().toLowerCase() === foundCode.trim().toLowerCase() || j.id === (tpiWageProfile as any).job_id)
-      setTpiJobId(matched?.id || (tpiWageProfile as any).job_id || '')
-    } else if (!employeeId) {
-      // New employee (no existing profile) — initialize to defaults
-      setTpiRateTier('normal')
-      setTpiSkilledFrom('')
-      const foundCode = employeeData?.job_title || ''
-      setTpiJobCode(foundCode)
-      const matched = activeTpiJobs.find((j) => j.code.trim().toLowerCase() === foundCode.trim().toLowerCase())
-      setTpiJobId(matched?.id || '')
-    } else {
-      // Existing employee but no wage profile in DB yet — default to normal
-      setTpiRateTier('normal')
-      setTpiSkilledFrom('')
-      const foundCode = employeeData?.job_title || ''
-      setTpiJobCode(foundCode)
-      const matched = activeTpiJobs.find((j) => j.code.trim().toLowerCase() === foundCode.trim().toLowerCase())
-      setTpiJobId(matched?.id || '')
+    if (!isOpen) {
+      wageInitialized.current = null
+      return
     }
-  }, [tpiWageProfile, employeeData, employeeId, isOpen, isTpi, activeTpiJobs])
+    if (!isTpi) return
+    const sessionKey = employeeId || 'new'
+    if (wageInitialized.current === sessionKey) return
+    if (employeeId && (!employeeData || tpiWageProfile === undefined)) return
+    wageInitialized.current = sessionKey
 
+    const settings = employeeWageForm(
+      employeeId ? employeeData?.job_title : '',
+      employeeId ? tpiWageProfile : null,
+      dbTpiJobs.length > 0 ? dbTpiJobs : demoJobs,
+    )
+    setTpiRateTier(settings.rateTier)
+    setTpiSkilledFrom(settings.skilledFrom)
+    setTpiJobCode(settings.jobCode)
+    setTpiJobId(settings.jobId)
+  }, [tpiWageProfile, employeeData, employeeId, isOpen, isTpi, dbTpiJobs])
+
+  const employeeInitialized = useRef<string | null>(null)
   useEffect(() => {
+    if (!isOpen) {
+      employeeInitialized.current = null
+      return
+    }
+    const sessionKey = `${employeeId || 'new'}:${isTpi}`
+    if (employeeInitialized.current === sessionKey) return
+    if (employeeId && !employeeData) return
+    employeeInitialized.current = sessionKey
     if (employeeData && isOpen) {
       const empNat = employeeData.nationality || 'ไทย'
       const normPref = normalizePrefix(employeeData.prefix, empNat, employeeData.first_name, isTpi)
@@ -358,7 +359,7 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
         factory_id: user.factory_id,
         bank_name: values.payment_method === 'cash' ? null : values.bank_name,
         bank_account: values.payment_method === 'cash' ? null : values.bank_account,
-        job_title: isTpi && tpiRateTier === 'skilled' ? tpiJobCode : values.job_title,
+        job_title: isTpi ? (tpiRateTier === 'skilled' ? tpiJobCode : null) : values.job_title,
         wage_type: isTpi ? 'daily' : values.wage_type,
         rate_per_12h: isTpi ? 0 : values.rate_per_12h,
       }
@@ -378,28 +379,39 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
           employee_id: savedEmpId,
           factory_id: user.factory_id,
           rate_tier: tpiRateTier,
-          skilled_from: tpiRateTier === 'skilled' ? (tpiSkilledFrom || null) : null,
+          // Legacy DB requires a date: earliest date represents no start restriction.
+          skilled_from: tpiRateTier === 'skilled' ? (tpiSkilledFrom || '0001-01-01') : null,
           job_id: tpiRateTier === 'skilled' ? (tpiJobId || null) : null,
           job_code: tpiRateTier === 'skilled' ? (tpiJobCode || null) : null,
           updated_at: new Date().toISOString(),
         }
 
-        let { error: profileErr } = await supabase
+        const saveProfile = () => supabase
           .from('tpi_employee_wage_profiles')
-          .upsert(profilePayload, { onConflict: 'factory_id,employee_id' })
+          .upsert(profilePayload, { onConflict: 'employee_id' })
+          .select('*')
+          .single()
+        let { data: savedProfile, error: profileErr } = await saveProfile()
 
-        // Graceful fallback if migration phase 8 columns not in db yet
-        if (profileErr && profileErr.message && (profileErr.message.includes('job_id') || profileErr.message.includes('job_code') || profileErr.message.includes('column'))) {
-          const { job_id, job_code, ...cleanPayload } = profilePayload
-          const { error: fallbackErr } = await supabase
-            .from('tpi_employee_wage_profiles')
-            .upsert(cleanPayload, { onConflict: 'factory_id,employee_id' })
-          profileErr = fallbackErr
+        // Older databases store the assigned job in employees.job_title.
+        // Retry only an explicitly missing optional column, preserving any supported column.
+        for (let attempt = 0; profileErr && attempt < 2; attempt++) {
+          if (!['PGRST204', '42703'].includes(profileErr.code)) break
+          const missingColumn = ['job_code', 'job_id'].find((column) =>
+            Object.hasOwn(profilePayload, column) &&
+            (profileErr!.message.includes(`'${column}'`) || profileErr!.message.includes(`"${column}"`))
+          )
+          if (!missingColumn) break
+          delete profilePayload[missingColumn]
+          const result = await saveProfile()
+          savedProfile = result.data
+          profileErr = result.error
         }
 
-        if (profileErr) {
-          console.error('Error saving tpi wage profile:', profileErr)
-        }
+        if (profileErr) throw profileErr
+        queryClient.setQueryData(
+          ['tpi-employee-wage', user.factory_id, savedEmpId], savedProfile
+        )
       }
     },
     onSuccess: (_, { deleteShifts }) => {
@@ -430,6 +442,10 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
 
   // Called by form submit — intercepts inactive + existing shifts case (synchronous, uses pre-fetched count)
   const handleSave = (values: EmployeeFormValues) => {
+    if (isTpi && employeeId && (isLoadingWageProfile || wageProfileError)) {
+      toast.error('ยังโหลดประเภทค่าแรงไม่สำเร็จ กรุณาปิดแล้วเปิดใหม่อีกครั้ง')
+      return
+    }
     if (isTpi && tpiRateTier === 'skilled' && !tpiJobCode) {
       toast.error('กรุณาเลือกรหัสงานที่ Active อยู่สำหรับพนักงานค่าแรงฝีมือ')
       return
@@ -576,7 +592,9 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
                   </span>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                {isLoadingWageProfile && employeeId && <p role="status">กำลังโหลดประเภทค่าแรง...</p>}
+                {wageProfileError && <p role="alert">โหลดประเภทค่าแรงไม่สำเร็จ กรุณาปิดแล้วเปิดใหม่อีกครั้ง</p>}
+                <fieldset disabled={mutation.isPending || (!!employeeId && (isLoadingWageProfile || !!wageProfileError))} style={{ border: 0, padding: 0, margin: 0, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                   {/* Option 1: ค่าแรงปกติ */}
                   <label
                     style={{
@@ -601,6 +619,7 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
                         setTpiRateTier('normal')
                         setTpiJobCode('')
                         setTpiJobId('')
+                        setTpiSkilledFrom('')
                         // Clear the job_title form field so it doesn't carry over
                         setValue('job_title', '')
                       }}
@@ -648,7 +667,7 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
                       </div>
                     </div>
                   </label>
-                </div>
+                </fieldset>
 
                 {tpiRateTier === 'skilled' && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 4, padding: '14px 16px', background: '#f0fdf4', borderRadius: 8, border: '1px solid #bbf7d0' }}>
@@ -700,9 +719,10 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
                       </label>
                       <input
                         type="date"
+                        aria-label="วันที่เริ่มใช้เรทฝีมือ (ถ้ามี)"
                         value={tpiSkilledFrom}
                         onChange={(e) => setTpiSkilledFrom(e.target.value)}
-                        className="vk-input"
+                        className="vk-input tpi-skilled-date"
                         style={{ height: 34, background: '#ffffff', borderColor: '#86efac', maxWidth: 200, fontSize: 12 }}
                       />
                     </div>
@@ -926,7 +946,7 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
             background: 'var(--vk-bone)', flexShrink: 0, position: 'sticky', bottom: 0,
           }}>
             <button type="button" className="vk-btn" onClick={onClose}>ยกเลิก</button>
-            <button type="submit" className="vk-btn vk-btn--primary" disabled={mutation.isPending}>
+            <button type="submit" className="vk-btn vk-btn--primary" disabled={mutation.isPending || (isTpi && !!employeeId && (isLoadingWageProfile || !!wageProfileError))}>
               {mutation.isPending ? 'กำลังบันทึก...' : 'บันทึกข้อมูล'}
             </button>
           </div>
@@ -953,7 +973,7 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
             </div>
             <div style={{ display: 'flex', gap: 8, padding: '0 20px 20px', justifyContent: 'flex-end' }}>
               <button className="vk-btn" onClick={() => setInactiveConfirm(null)}>ยกเลิก</button>
-              <button className="vk-btn vk-btn--primary" disabled={mutation.isPending}
+              <button className="vk-btn vk-btn--primary" disabled={mutation.isPending || (isTpi && !!employeeId && (isLoadingWageProfile || !!wageProfileError))}
                 onClick={() => { mutation.mutate({ values: inactiveConfirm.pendingValues, deleteShifts: true }); setInactiveConfirm(null) }}>
                 {mutation.isPending ? 'กำลังดำเนินการ...' : 'ยืนยัน — ลบกะและพ้นสภาพ'}
               </button>

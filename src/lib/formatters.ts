@@ -113,6 +113,34 @@ export const formatThaiBuddhistDate = (dateStr: string | null | undefined, fallb
   return dateStr
 }
 
+/**
+ * Formats a date string into Thai Buddhist format วว-ดด-ปปปป (DD-MM-YYYY)
+ * Example: '2026-09-07' -> '07-09-2569'
+ */
+export const formatThaiDateDDMMYYYY = (rawDate: string | null | undefined): string => {
+  if (!rawDate) return ''
+  const trimmed = rawDate.trim()
+  // Match YYYY-MM-DD or YYYY/MM/DD
+  const ymdMatch = trimmed.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/)
+  if (ymdMatch) {
+    const y = Number(ymdMatch[1])
+    const m = ymdMatch[2].padStart(2, '0')
+    const d = ymdMatch[3].padStart(2, '0')
+    const thaiYear = y < 2400 ? y + 543 : y
+    return `${d}-${m}-${thaiYear}`
+  }
+  // Match DD-MM-YYYY or DD/MM/YYYY
+  const dmyMatch = trimmed.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/)
+  if (dmyMatch) {
+    const d = dmyMatch[1].padStart(2, '0')
+    const m = dmyMatch[2].padStart(2, '0')
+    const y = Number(dmyMatch[3])
+    const thaiYear = y < 2400 ? y + 543 : y
+    return `${d}-${m}-${thaiYear}`
+  }
+  return trimmed
+}
+
 export const formatPeriodLabel = (start: string, end: string): string => {
   const startDate = parseISO(start)
   const endDate = parseISO(end)

@@ -1,3 +1,4 @@
+import { DeductionProductPicker } from '../components/payroll/DeductionProductPicker'
 import React, { useState, useMemo, useEffect } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -13,7 +14,7 @@ import {
 import { calculateTpiPayroll, isEndOfMonthPeriod } from '../features/tpi/payrollCalc'
 import type { AttendanceLog } from '../features/tpi/attendanceApi'
 import { loadMonthlyAttendanceLogs, getAttendanceTypeLabel, formatAttendanceSummary } from '../features/tpi/attendanceApi'
-import { formatEmployeeFullName } from '../lib/formatters'
+import { formatEmployeeFullName, formatThaiDateDDMMYYYY } from '../lib/formatters'
 import '../styles/tokens.css'
 
 interface Employee {
@@ -357,11 +358,14 @@ export default function TpiPayrollEntry() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('advance_payments')
-        .select('employee_id,amount,note,created_at')
+        .select('employee_id,amount,notes,created_at')
         .eq('period_id', currentPeriod.id)
         .limit(10000)
       if (error) throw error
-      return (data || []) as AdvanceRow[]
+      return (data || []).map((r: any) => ({
+        ...r,
+        note: r.notes || r.note || null,
+      })) as AdvanceRow[]
     },
     enabled: !!currentPeriod?.id,
     staleTime: 30_000,
@@ -414,11 +418,60 @@ export default function TpiPayrollEntry() {
     if (isSimulated && selectedEmp) {
       return [
         { employee_id: selectedEmp.id, amount: 500, note: 'เบิกเงินสดฉุกเฉิน' },
-        { employee_id: selectedEmp.id, amount: 178.50, note: '[สแกนหน้าไม่สำเร็จ] 04 ก.ย. 2569 รหัสงาน B1' }
+        { employee_id: selectedEmp.id, amount: 178.50, note: '[สแกนหน้าไม่สำเร็จ] 04 ก.ย. 2569 รหัสงาน B1' },
+        { employee_id: selectedEmp.id, amount: 714, note: '[ลงโทษ ขาดงานไม่มีคนแทน] วันที่: 03 ก.ย. 2569 | กะแรก: B1 (หัก 2 เท่า)' }
       ]
     }
     return []
   }, [allAdvances, selectedEmpId, isSimulated, selectedEmp])
+
+  // Categorize advances for clear reporting: เบิกล่วงหน้า, หักสแกนหน้าไม่ผ่าน, หักลงโทษขาดงานไม่มีคนแทน
+  const {
+    advRegular,
+    advScan,
+    advDisc,
+    advSafetyFine,
+    advRegularTotal,
+    advScanTotal,
+    advDiscTotal,
+    advSafetyFineTotal,
+  } = useMemo(() => {
+    const reg: typeof empAdvances = []
+    const scan: typeof empAdvances = []
+    const disc: typeof empAdvances = []
+    const safety: typeof empAdvances = []
+
+    for (const adv of empAdvances) {
+      const note = adv.note || ''
+      if (note.includes('[หักค่าปรับ จป.]') || note.includes('หักค่าปรับผิดระเบียบ') || note.includes('ค่าปรับผิดระเบียบ')) {
+        safety.push(adv)
+      } else if (note.includes('[สแกนหน้าไม่สำเร็จ]') || note.includes('สแกนหน้าไม่สำเร็จ')) {
+        scan.push(adv)
+      } else if (
+        note.includes('[ลงโทษ ขาดงานไม่มีคนแทน]') ||
+        note.includes('ลงโทษ ขาดงาน') ||
+        note.includes('[ลงโทษ ขาด/ลา/มาสาย]') ||
+        note.includes('ลงโทษ ขาด/ลา/มาสาย')
+      ) {
+        disc.push(adv)
+      } else {
+        reg.push(adv)
+      }
+    }
+
+    const sum = (list: typeof empAdvances) => list.reduce((s, a) => s + Number(a.amount || 0), 0)
+
+    return {
+      advRegular: reg,
+      advScan: scan,
+      advDisc: disc,
+      advSafetyFine: safety,
+      advRegularTotal: sum(reg),
+      advScanTotal: sum(scan),
+      advDiscTotal: sum(disc),
+      advSafetyFineTotal: sum(safety),
+    }
+  }, [empAdvances])
 
   // ── Detect inactive/expired bound job on employee selection ──
   useEffect(() => {
@@ -1306,12 +1359,19 @@ export default function TpiPayrollEntry() {
                       </div>
 
                       <div style={{ background: '#ffffff', padding: '8px 12px', borderRadius: 6, border: '1px solid #fed7aa' }}>
-                        <div style={{ fontSize: 11, color: '#7c2d12', fontWeight: 600 }}>เบิกล่วงหน้า/หักสแกน</div>
+                        <div style={{ fontSize: 11, color: '#7c2d12', fontWeight: 600 }}>เบิกล่วงหน้า/หักพิเศษ</div>
                         <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--vk-crimson)', marginTop: 2 }}>
                           –฿{monoNum(calc.deductAdvance)}
                         </div>
-                        <div style={{ fontSize: 10, color: 'var(--vk-crimson)', marginTop: 1 }}>
-                          {empAdvances.length} รายการ
+                        <div style={{ fontSize: 10, color: 'var(--vk-crimson)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {empAdvances.length === 0 ? '0 รายการ' : (
+                            <span>
+                              {advRegularTotal > 0 && `เบิก ฿${monoNum(advRegularTotal)}`}
+                              {advScanTotal > 0 && `${advRegularTotal > 0 ? ' • ' : ''}สแกน ฿${monoNum(advScanTotal)}`}
+                              {advDiscTotal > 0 && `${(advRegularTotal > 0 || advScanTotal > 0) ? ' • ' : ''}ลงโทษ ฿${monoNum(advDiscTotal)}`}
+                              {advSafetyFineTotal > 0 && `${(advRegularTotal > 0 || advScanTotal > 0 || advDiscTotal > 0) ? ' • ' : ''}ปรับ จป. ฿${monoNum(advSafetyFineTotal)}`}
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1410,9 +1470,9 @@ export default function TpiPayrollEntry() {
                   </div>
 
                   {/* ── Income & Deduct Column (Diamond Style) ── */}
-                  <div className="vk-income-grid" style={{ border: '1px solid var(--vk-rule)', marginBottom: 0 }}>
+                  <div className="vk-income-grid" style={{ border: '1px solid var(--vk-rule)', marginBottom: 0, width: '100%' }}>
                     {/* Income Column */}
-                    <div className="vk-income-col" style={{ padding: '20px 24px', background: 'var(--vk-bone)', display: 'flex', flexDirection: 'column' }}>
+                    <div className="vk-income-col" style={{ padding: '20px 24px', background: 'var(--vk-bone)', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
                       <div className="vk-eyebrow" style={{ color: 'var(--vk-jade)', marginBottom: 14 }}>INCOME · รายได้</div>
 
                       {/* Calculated rows */}
@@ -1448,13 +1508,13 @@ export default function TpiPayrollEntry() {
                           isOverridden: false,
                         },
                       ].map((r, i) => (
-                        <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '7px 0', borderBottom: '1px dashed var(--vk-rule-soft)' }}>
-                          <div style={{ flex: 1 }}>
+                        <div key={i} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, padding: '7px 0', borderBottom: '1px dashed var(--vk-rule-soft)' }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ fontSize: 13, fontWeight: 600 }}>{r.label}</div>
-                            {r.sub && <div style={{ fontSize: 11, color: 'var(--vk-ink-3)', marginTop: 1 }}>{r.sub}</div>}
-                            {r.detail && <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 10, color: 'var(--vk-persimmon)', marginTop: 1 }}>{r.detail}</div>}
+                            {r.sub && <div style={{ fontSize: 11, color: 'var(--vk-ink-3)', marginTop: 1, wordBreak: 'break-word', whiteSpace: 'normal' }}>{r.sub}</div>}
+                            {r.detail && <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 10, color: 'var(--vk-persimmon)', marginTop: 1, wordBreak: 'break-word', whiteSpace: 'normal' }}>{r.detail}</div>}
                           </div>
-                          <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 13, fontVariantNumeric: 'tabular-nums', textAlign: 'right', color: r.isOverridden ? 'var(--vk-marigold)' : 'var(--vk-ink)', fontWeight: 700 }}>
+                          <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 13, fontVariantNumeric: 'tabular-nums', textAlign: 'right', color: r.isOverridden ? 'var(--vk-marigold)' : 'var(--vk-ink)', fontWeight: 700, flexShrink: 0 }}>
                             {monoNum(r.value)}
                           </div>
                         </div>
@@ -1719,10 +1779,10 @@ export default function TpiPayrollEntry() {
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, borderBottom: '1px solid #ffedd5', paddingBottom: 6 }}>
                             <div>
                               <div style={{ fontSize: 12, fontWeight: 700, color: '#9a3412', display: 'flex', alignItems: 'center', gap: 5 }}>
-                                <span>หมวดเงินพิเศษ (Category)</span>
+                                <span>หมวดเงินพิเศษ</span>
                               </div>
                               <div style={{ fontSize: 10, color: 'var(--vk-ink-3)' }}>
-                                รวมรายการย่อย (Sub-categories): ค่าตำแหน่ง, ค่า จป., เงินพิเศษอื่นๆ
+                                รวมรายการ: ค่าตำแหน่ง, ค่า จป., เงินพิเศษอื่นๆ
                               </div>
                             </div>
                             <div style={{ textAlign: 'right' }}>
@@ -2055,66 +2115,225 @@ export default function TpiPayrollEntry() {
                             ? 'รอ Admin กรอกเลข ปกส และยืนยันข้อมูลสมบูรณ์'
                             : 'ได้รับการยกเว้นตามเงื่อนไขพิเศษ',
                           value: calc.deductSocialSecurity,
+                          showAlways: true,
                         },
                         {
-                          label: 'เบิกล่วงหน้า (รวมหักสแกนหน้าไม่สำเร็จ)',
-                          sub: empAdvances.length > 0 ? `${empAdvances.length} รายการเบิกในงวดนี้` : null,
-                          value: calc.deductAdvance,
+                          label: 'เบิกล่วงหน้า',
+                          sub: advRegular.length > 0 ? `${advRegular.length} รายการเบิกเงินล่วงหน้า` : null,
+                          value: advRegularTotal,
+                          showAlways: true,
                         },
+                        {
+                          label: 'หักสแกนหน้าไม่ผ่าน',
+                          sub: advScan.length > 0 ? `${advScan.length} รายการสแกนหน้าไม่สำเร็จ` : null,
+                          value: advScanTotal,
+                          showAlways: false,
+                        },
+                        {
+                          label: 'หักลงโทษขาดงานไม่มีคนแทน',
+                          sub: advDisc.length > 0 ? `${advDisc.length} รายการลงโทษขาดงาน (2 เท่า)` : null,
+                          value: advDiscTotal,
+                          showAlways: false,
+                        },
+                        ...(advSafetyFine.length > 0 ? advSafetyFine.map((adv) => {
+                          const infoMatch = (adv.note || '').match(/หักค่าปรับผิดระเบียบ\s*(\([^\)]+\))/)
+                          let infoStr = infoMatch ? infoMatch[1] : ''
+                          if (infoStr && /วันที่\s*\d{4}[-\/]/.test(infoStr)) {
+                            infoStr = infoStr.replace(/วันที่\s*([\d\/\-]+)/, (_, d) => `วันที่ ${formatThaiDateDDMMYYYY(d)}`)
+                          }
+                          const label = infoStr
+                            ? `หักค่าปรับผิดระเบียบ\n${infoStr}`
+                            : ((adv.note || '').match(/(หักค่าปรับผิดระเบียบ\s*\([^\)]+\))/)?.[1] || 'หักค่าปรับผิดระเบียบ')
+                          const reasonMatch = (adv.note || '').match(/สาเหตุ:\s*([^\|]+)/)
+                          const sub = reasonMatch ? `สาเหตุ: ${reasonMatch[1].trim()} (ยอดหักงวดละ ฿${monoNum(Number(adv.amount))})` : `ยอดหัก ฿${monoNum(Number(adv.amount))}`
+                          return {
+                            label,
+                            sub,
+                            value: Number(adv.amount),
+                            showAlways: false,
+                          }
+                        }) : []),
                         {
                           label: 'หักอุปกรณ์ความปลอดภัย',
                           sub: null,
                           value: extraEntries.deduct_safety_equipment,
+                          showAlways: false,
                         },
                         {
                           label: 'หักเครื่องแบบพนักงาน',
                           sub: null,
                           value: extraEntries.deduct_uniform,
+                          showAlways: false,
                         },
-                      ].filter(r => r.value !== 0 || r.label.includes('ประกัน') || r.label.includes('เบิก')).map((r, i) => (
-                        <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '7px 0', borderBottom: '1px dashed var(--vk-rule-soft)' }}>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: 13, fontWeight: 600 }}>{r.label}</div>
-                            {r.sub && <div style={{ fontSize: 10, color: 'var(--vk-ink-3)', marginTop: 1 }}>{r.sub}</div>}
+                      ].filter(r => r.value !== 0 || r.showAlways).map((r, i) => (
+                        <div key={i} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, padding: '7px 0', borderBottom: '1px dashed var(--vk-rule-soft)' }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'pre-line' }}>{r.label}</div>
+                            {r.sub && <div style={{ fontSize: 11, color: 'var(--vk-ink-3)', marginTop: 1, wordBreak: 'break-word', whiteSpace: 'normal' }}>{r.sub}</div>}
                           </div>
-                          <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 13, fontVariantNumeric: 'tabular-nums', color: 'var(--vk-crimson)', fontWeight: 700 }}>
+                          <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 13, fontVariantNumeric: 'tabular-nums', color: 'var(--vk-crimson)', fontWeight: 700, flexShrink: 0 }}>
                             {monoNum(r.value)}
                           </div>
                         </div>
                       ))}
 
-                      {/* Advance Breakdown Sub-items */}
-                      {empAdvances.length > 0 && (
-                        <div style={{ padding: '6px 8px', background: 'rgba(162, 35, 27, 0.04)', borderRadius: 4, marginTop: 6 }}>
-                          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--vk-crimson)', marginBottom: 4 }}>รายการเบิกล่วงหน้า:</div>
-                          {empAdvances.map((adv, idx) => (
-                            <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--vk-ink-2)', padding: '2px 0' }}>
-                              <span>• {adv.note || 'เบิกเงินสดทั่วไป'}</span>
-                              <span style={{ fontFamily: 'var(--vk-mono)', fontWeight: 600 }}>฿{monoNum(Number(adv.amount))}</span>
-                            </div>
-                          ))}
+                      {/* Advance Breakdown Sub-items: Separated into 3 clear cards with multiline notes */}
+                      {advRegular.length > 0 && (
+                        <div style={{ padding: '8px 10px', background: 'rgba(162, 35, 27, 0.04)', borderRadius: 6, marginTop: 8, border: '1px dashed rgba(162, 35, 27, 0.25)' }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--vk-crimson)', marginBottom: 6 }}>
+                            รายละเอียดเบิกล่วงหน้า ({advRegular.length} รายการ):
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            {advRegular.map((adv, idx) => (
+                              <div key={idx} style={{ padding: '7px 10px', background: '#ffffff', borderRadius: 4, border: '1px solid #fee2e2' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+                                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--vk-crimson)' }}>
+                                    รายการที่ {idx + 1}
+                                  </span>
+                                  <span style={{ fontFamily: 'var(--vk-mono)', fontWeight: 700, fontSize: 12, color: 'var(--vk-crimson)' }}>
+                                    –฿{monoNum(Number(adv.amount))}
+                                  </span>
+                                </div>
+                                <div style={{ fontSize: 11, color: 'var(--vk-ink-2)', lineHeight: 1.45, wordBreak: 'break-word', whiteSpace: 'normal' }}>
+                                  {adv.note || 'เบิกเงินสดทั่วไป'}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {advScan.length > 0 && (
+                        <div style={{ padding: '8px 10px', background: 'rgba(234, 88, 12, 0.05)', borderRadius: 6, marginTop: 8, border: '1px dashed #fed7aa' }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: '#c2410c', marginBottom: 6 }}>
+                            รายละเอียดหักสแกนหน้าไม่ผ่าน ({advScan.length} รายการ):
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            {advScan.map((adv, idx) => {
+                              const cleanNote = (adv.note || '').replace(/\[สแกนหน้าไม่สำเร็จ\]/g, '').trim()
+                              const parts = cleanNote.split('|').map(p => p.trim()).filter(Boolean)
+                              return (
+                                <div key={idx} style={{ padding: '7px 10px', background: '#ffffff', borderRadius: 4, border: '1px solid #ffedd5' }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                                    <span style={{ fontSize: 11, fontWeight: 700, color: '#c2410c' }}>
+                                      รายการที่ {idx + 1}
+                                    </span>
+                                    <span style={{ fontFamily: 'var(--vk-mono)', fontWeight: 700, fontSize: 12, color: '#ea580c' }}>
+                                      –฿{monoNum(Number(adv.amount))}
+                                    </span>
+                                  </div>
+                                  {parts.length > 1 ? (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 11, color: 'var(--vk-ink-2)', lineHeight: 1.45 }}>
+                                      {parts.map((p, pIdx) => (
+                                        <div key={pIdx} style={{ wordBreak: 'break-word', whiteSpace: 'normal', display: 'flex', alignItems: 'flex-start', gap: 4 }}>
+                                          <span style={{ color: '#ea580c', flexShrink: 0 }}>•</span>
+                                          <span style={{ flex: 1 }}>{p}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <div style={{ fontSize: 11, color: 'var(--vk-ink-2)', lineHeight: 1.45, wordBreak: 'break-word', whiteSpace: 'normal' }}>
+                                      {cleanNote || 'สแกนหน้าไม่สำเร็จ'}
+                                    </div>
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {advDisc.length > 0 && (
+                        <div style={{ padding: '8px 10px', background: 'rgba(153, 27, 27, 0.05)', borderRadius: 6, marginTop: 8, border: '1px dashed #fca5a5' }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: '#991b1b', marginBottom: 6 }}>
+                            รายละเอียดหักลงโทษขาดงานไม่มีคนแทน ({advDisc.length} รายการ):
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            {advDisc.map((adv, idx) => {
+                              const cleanNote = (adv.note || '')
+                                .replace(/\[ลงโทษ\s*(ขาดงานไม่มีคนแทน|ขาด\/ลา\/มาสาย|ขาดงาน)\]/g, '')
+                                .replace(/วันที่:\s*([\d\/\-]+)/, (_, d) => `วันที่: ${formatThaiDateDDMMYYYY(d)}`)
+                                .trim()
+                              const parts = cleanNote.split('|').map(p => p.trim()).filter(Boolean)
+                              return (
+                                <div key={idx} style={{ padding: '7px 10px', background: '#ffffff', borderRadius: 4, border: '1px solid #fee2e2' }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                                    <span style={{ fontSize: 11, fontWeight: 700, color: '#991b1b' }}>
+                                      รายการที่ {idx + 1}
+                                    </span>
+                                    <span style={{ fontFamily: 'var(--vk-mono)', fontWeight: 700, fontSize: 12, color: 'var(--vk-crimson)' }}>
+                                      –฿{monoNum(Number(adv.amount))}
+                                    </span>
+                                  </div>
+                                  {parts.length > 1 ? (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 11, color: 'var(--vk-ink-2)', lineHeight: 1.45 }}>
+                                      {parts.map((p, pIdx) => (
+                                        <div key={pIdx} style={{ wordBreak: 'break-word', whiteSpace: 'normal', display: 'flex', alignItems: 'flex-start', gap: 4 }}>
+                                          <span style={{ color: '#991b1b', flexShrink: 0 }}>•</span>
+                                          <span style={{ flex: 1 }}>{p}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <div style={{ fontSize: 11, color: 'var(--vk-ink-2)', lineHeight: 1.45, wordBreak: 'break-word', whiteSpace: 'normal' }}>
+                                      {cleanNote || 'หักลงโทษ 2 เท่า'}
+                                    </div>
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {advSafetyFine.length > 0 && (
+                        <div style={{ padding: '8px 10px', background: 'rgba(124, 58, 237, 0.05)', borderRadius: 6, marginTop: 8, border: '1px dashed #c4b5fd' }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: '#6d28d9', marginBottom: 6 }}>
+                            รายละเอียดหักค่าปรับผิดระเบียบวินัย จป. ({advSafetyFine.length} รายการ):
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            {advSafetyFine.map((adv, idx) => {
+                              const cleanNote = (adv.note || '').replace(/\[หักค่าปรับ จป\.\]/g, '').trim()
+                              const parts = cleanNote.split('|').map(p => p.trim()).filter(Boolean)
+                              return (
+                                <div key={idx} style={{ padding: '7px 10px', background: '#ffffff', borderRadius: 4, border: '1px solid #ede9fe' }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                                    <span style={{ fontSize: 11, fontWeight: 700, color: '#6d28d9' }}>
+                                      รายการที่ {idx + 1}
+                                    </span>
+                                    <span style={{ fontFamily: 'var(--vk-mono)', fontWeight: 700, fontSize: 12, color: '#7c3aed' }}>
+                                      –฿{monoNum(Number(adv.amount))}
+                                    </span>
+                                  </div>
+                                  {parts.length > 1 ? (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 11, color: 'var(--vk-ink-2)', lineHeight: 1.45 }}>
+                                      {parts.map((p, pIdx) => (
+                                        <div key={pIdx} style={{ wordBreak: 'break-word', whiteSpace: 'normal', display: 'flex', alignItems: 'flex-start', gap: 4 }}>
+                                          <span style={{ color: '#7c3aed', flexShrink: 0 }}>•</span>
+                                          <span style={{ flex: 1 }}>{p}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <div style={{ fontSize: 11, color: 'var(--vk-ink-2)', lineHeight: 1.45, wordBreak: 'break-word', whiteSpace: 'normal' }}>
+                                      {cleanNote || 'หักค่าปรับผิดระเบียบวินัย จป.'}
+                                    </div>
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
                         </div>
                       )}
 
                       {/* Deduct input fields */}
                       <div style={{ marginTop: 14, borderTop: '1px solid var(--vk-rule-soft)', paddingTop: 14, paddingBottom: 20, display: 'flex', flexDirection: 'column', gap: 8 }}>
                         <div className="vk-eyebrow" style={{ marginBottom: 2 }}>รายการหักเพิ่มเติม</div>
-                        {[
-                          { key: 'deduct_safety_equipment', label: 'ค่าอุปกรณ์ความปลอดภัย (฿)' },
-                          { key: 'deduct_uniform', label: 'ค่าเสื้อพนักงาน (฿)' },
-                        ].map(f => (
-                          <div key={f.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                            <label style={{ fontSize: 12, color: 'var(--vk-ink-2)' }}>{f.label}</label>
-                            <input
-                              type="number"
-                              min="0"
-                              value={extraEntries[f.key as keyof typeof extraEntries] || ''}
-                              onChange={e => setExtraEntries(prev => ({ ...prev, [f.key]: Number(e.target.value) || 0 }))}
-                              style={{ width: 90, fontFamily: 'var(--vk-mono)', fontSize: 13, textAlign: 'right', border: '1px solid var(--vk-rule)', background: 'var(--vk-paper)', padding: '4px 8px' }}
-                              placeholder="0"
-                            />
-                          </div>
-                        ))}
+                        <DeductionProductPicker
+                          key={`${selectedEmpId}:${currentPeriod?.id}`}
+                          onAdd={(field, amount) => setExtraEntries(prev => ({ ...prev, [field]: Math.max(0, prev[field] + amount) }))}
+                        />
+
                       </div>
 
                       <div style={{ display: 'flex', justifyContent: 'space-between', padding: '14px 0 0', marginTop: 'auto', borderTop: '2px solid var(--vk-rule)' }}>

@@ -16,6 +16,8 @@ import {
   Trash2,
   Briefcase,
   UserX,
+  ShieldAlert,
+  AlertTriangle,
 } from 'lucide-react'
 import type { Job, Employee, Entry, QuotaStatus } from '../features/tpi/model'
 import { AttendanceModal } from '../features/tpi/AttendanceModal'
@@ -425,6 +427,32 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
   const [modalShift2HasOt, setModalShift2HasOt] = useState<boolean>(false)
   const [modalShift2OtHours, setModalShift2OtHours] = useState<number>(1)
 
+  // ── Modal State for จป. Disciplinary Fine ────────────────────────────
+  const [modalSafetyFineEnabled, setModalSafetyFineEnabled] = useState<boolean>(false)
+  const [modalSafetyFineDate, setModalSafetyFineDate] = useState<string>('')
+  const [modalSafetyFineReason, setModalSafetyFineReason] = useState<string>('')
+  const [modalSafetyFineSubmitting, setModalSafetyFineSubmitting] = useState<boolean>(false)
+
+  // Query all active safety fine records
+  const { data: allSafetyAdvances = [], refetch: refetchSafetyAdvances } = useQuery<any[]>({
+    queryKey: ['all-safety-advances'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('advance_payments')
+        .select('id, employee_id, period_id, amount, notes, created_at')
+        .order('created_at', { ascending: false })
+      if (error) return []
+      return (data || []).filter(
+        (a: any) =>
+          (a.notes || '').includes('[หักค่าปรับ จป.]') ||
+          (a.notes || '').includes('หักค่าปรับผิดระเบียบ') ||
+          (a.notes || '').includes('ค่าปรับผิดระเบียบ')
+      )
+    },
+    enabled: !preview,
+    staleTime: 10000,
+  })
+
   // ── Dynamic Height for Split Panel (Diamond Pattern) ────────────────
   const splitRef = useRef<HTMLDivElement>(null)
   const [splitHeight, setSplitHeight] = useState<number | null>(null)
@@ -749,7 +777,144 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
       setModalShift2HasOt(!!(s2.ot_hours && s2.ot_hours > 0))
       setModalShift2OtHours(s2.ot_hours || defaultOtHours)
     }
+    setModalSafetyFineEnabled(false)
+    setModalSafetyFineDate(activeDateStr)
+    setModalSafetyFineReason('')
     setModalEmp(emp)
+  }
+
+  const handleDeleteSafetyFine = async (fineId: string) => {
+    if (!confirm('ยืนยันลบรายการหักค่าปรับ จป. นี้หรือไม่?')) return
+    try {
+      const { error } = await supabase.from('advance_payments').delete().eq('id', fineId)
+      if (error) throw error
+      toast.success('ลบรายการค่าปรับ จป. เรียบร้อยแล้ว')
+      queryClient.invalidateQueries({ queryKey: ['all-safety-advances'] })
+      queryClient.invalidateQueries({ queryKey: ['tpi-advances'] })
+      queryClient.invalidateQueries({ queryKey: ['advances'] })
+      queryClient.invalidateQueries({ queryKey: ['advances-v2'] })
+      queryClient.invalidateQueries({ queryKey: ['payslip-advances'] })
+      queryClient.invalidateQueries({ queryKey: ['all-payroll-entries'] })
+    } catch (e: any) {
+      toast.error('ลบรายการไม่สำเร็จ: ' + (e?.message || ''))
+    }
+  }
+
+  const handleSaveSafetyFine = async () => {
+    if (!modalEmp) return
+    if (!currentPeriod) {
+      toast.error('ไม่พบงวดการจ่ายเงินปัจจุบัน')
+      return
+    }
+    if (!modalSafetyFineReason.trim()) {
+      toast.error('กรุณาระบุสาเหตุความผิดระเบียบวินัยเพื่อเก็บเป็นหลักฐาน')
+      return
+    }
+    setModalSafetyFineSubmitting(true)
+    try {
+      const incidentDate = modalSafetyFineDate || activeDateStr
+      const [yr, mo, dy] = incidentDate.split('-')
+      const thYear = Number(yr) + 543
+      const thDateStr = `${dy}/${mo}/${thYear}`
+
+      // Check existing fines in current period for this employee
+      const existingInCurrent = allSafetyAdvances.filter(
+        (a) => a.employee_id === modalEmp.id && a.period_id === currentPeriod.id
+      )
+
+      const sortedPeriods = [...periods].sort((a, b) => a.period_start.localeCompare(b.period_start))
+      const currIdx = sortedPeriods.findIndex((p) => p.id === currentPeriod.id)
+      const futurePeriods = currIdx >= 0 ? sortedPeriods.slice(currIdx + 1) : []
+
+      if (existingInCurrent.length > 0) {
+        // 2nd violation in the same period: expand to 4 installments (2,000 THB total, 500 THB/period)
+        const first = existingInCurrent[0]
+        const prevNotes = first.notes || ''
+        const prevReasonMatch = prevNotes.match(/สาเหตุ:\s*([^\|]+)/)
+        const prevReason = prevReasonMatch ? prevReasonMatch[1].trim() : ''
+        const combinedReason = prevReason && !prevReason.includes(modalSafetyFineReason.trim())
+          ? `${prevReason}, ${modalSafetyFineReason.trim()}`
+          : (prevReason || modalSafetyFineReason.trim())
+
+        const updatedNote = `[หักค่าปรับ จป.] หักค่าปรับผิดระเบียบ (วันที่ ${thDateStr} [1/4]) | สาเหตุ: ${combinedReason} | ยอดปรับเต็ม 2,000 บ. (ผ่อนงวดละ 500 บ.)`
+        const { error: updErr } = await supabase
+          .from('advance_payments')
+          .update({ notes: updatedNote })
+          .eq('id', first.id)
+        if (updErr) throw updErr
+
+        // Queue future installments [2/4], [3/4], [4/4] into subsequent periods if available
+        if (futurePeriods[0]) {
+          const note2 = `[หักค่าปรับ จป.] หักค่าปรับผิดระเบียบ (วันที่ ${thDateStr} [2/4]) | สาเหตุ: ${combinedReason} | ยอดปรับเต็ม 2,000 บ. (ผ่อนงวดละ 500 บ.)`
+          await supabase.from('advance_payments').insert({
+            period_id: futurePeriods[0].id,
+            employee_id: modalEmp.id,
+            amount: 500,
+            notes: note2,
+            is_carryover: false,
+          })
+        }
+        if (futurePeriods[1]) {
+          const note3 = `[หักค่าปรับ จป.] หักค่าปรับผิดระเบียบ (วันที่ ${thDateStr} [3/4]) | สาเหตุ: ${combinedReason} | ยอดปรับเต็ม 2,000 บ. (ผ่อนงวดละ 500 บ.)`
+          await supabase.from('advance_payments').insert({
+            period_id: futurePeriods[1].id,
+            employee_id: modalEmp.id,
+            amount: 500,
+            notes: note3,
+            is_carryover: false,
+          })
+        }
+        if (futurePeriods[2]) {
+          const note4 = `[หักค่าปรับ จป.] หักค่าปรับผิดระเบียบ (วันที่ ${thDateStr} [4/4]) | สาเหตุ: ${combinedReason} | ยอดปรับเต็ม 2,000 บ. (ผ่อนงวดละ 500 บ.)`
+          await supabase.from('advance_payments').insert({
+            period_id: futurePeriods[2].id,
+            employee_id: modalEmp.id,
+            amount: 500,
+            notes: note4,
+            is_carryover: false,
+          })
+        }
+
+        toast.success(`บันทึกค่าปรับ จป. สำเร็จ (ยอดรวม 2,000 บ. ขยายเป็น 4 งวด หักงวดละ 500 บ. [1/4])`)
+      } else {
+        // 1st violation: 1,000 THB in 2 installments of 500 THB
+        const note1 = `[หักค่าปรับ จป.] หักค่าปรับผิดระเบียบ (วันที่ ${thDateStr} [1/2]) | สาเหตุ: ${modalSafetyFineReason.trim()} | ยอดปรับเต็ม 1,000 บ. (ผ่อนงวดละ 500 บ.)`
+        const { error: insErr } = await supabase.from('advance_payments').insert({
+          period_id: currentPeriod.id,
+          employee_id: modalEmp.id,
+          amount: 500,
+          notes: note1,
+          is_carryover: false,
+        })
+        if (insErr) throw insErr
+
+        if (futurePeriods[0]) {
+          const note2 = `[หักค่าปรับ จป.] หักค่าปรับผิดระเบียบ (วันที่ ${thDateStr} [2/2]) | สาเหตุ: ${modalSafetyFineReason.trim()} | ยอดปรับเต็ม 1,000 บ. (ผ่อนงวดละ 500 บ.)`
+          await supabase.from('advance_payments').insert({
+            period_id: futurePeriods[0].id,
+            employee_id: modalEmp.id,
+            amount: 500,
+            notes: note2,
+            is_carryover: false,
+          })
+        }
+
+        toast.success(`บันทึกค่าปรับ จป. สำเร็จ (ยอด 1,000 บ. หักงวดละ 500 บ. [1/2])`)
+      }
+
+      queryClient.invalidateQueries({ queryKey: ['all-safety-advances'] })
+      queryClient.invalidateQueries({ queryKey: ['tpi-advances'] })
+      queryClient.invalidateQueries({ queryKey: ['advances'] })
+      queryClient.invalidateQueries({ queryKey: ['advances-v2'] })
+      queryClient.invalidateQueries({ queryKey: ['payslip-advances'] })
+      queryClient.invalidateQueries({ queryKey: ['all-payroll-entries'] })
+      setModalSafetyFineEnabled(false)
+      setModalSafetyFineReason('')
+    } catch (err: any) {
+      toast.error('บันทึกค่าปรับ จป. ไม่สำเร็จ: ' + (err?.message || ''))
+    } finally {
+      setModalSafetyFineSubmitting(false)
+    }
   }
 
   const handleClearModalShifts = () => {
@@ -794,6 +959,10 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
         toast.error('กะที่ 1 และกะที่ 2 ต้องไม่เป็นช่วงเวลาเดียวกัน')
         return
       }
+      if (modalShift1Index === 2 && modalShift2Index === 0) {
+        toast.error('ตามกฎหมายแรงงาน ห้ามจัดกะดึกต่อกะเช้าโดยเด็ดขาด')
+        return
+      }
       if (!modalShift2JobId) {
         toast.error('กรุณาเลือกรหัสงานสำหรับกะที่ 2')
         return
@@ -827,6 +996,9 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
     }
 
     setEntries(candidateEntries)
+    if (modalSafetyFineEnabled && modalSafetyFineReason.trim()) {
+      handleSaveSafetyFine()
+    }
     toast.success(`✓ บันทึกการจัดกะของ ${modalEmp.first_name} ${modalEmp.last_name} เรียบร้อยแล้ว`)
     setModalEmp(null)
   }
@@ -846,6 +1018,10 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
       }
       if (u.count >= 2) {
         return { ok: false, reason: 'พนักงานลงครบ 2 กะแล้ว' }
+      }
+      // ตามกฎหมายห้ามทำดึกต่อเช้า
+      if (shiftIndex === 0 && u.shifts.has(2)) {
+        return { ok: false, reason: 'ตามกฎหมายห้ามจัดกะดึกต่อกะเช้า' }
       }
       return { ok: true }
     },
@@ -902,13 +1078,15 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
   // ── Render Grouped Consecutive 2-Shift Cards ───────────────────────
   const renderJobDoubleShifts = (
     jobId: string,
-    doubleShiftEmps: { empId: string; span: 'morning-afternoon' | 'afternoon-night' | 'night-morning' }[]
+    doubleShiftEmps: { empId: string; span: 'morning-afternoon' | 'afternoon-night' | 'morning-night' }[]
   ) => {
-    // Group & Sort: 1. เช้า+บ่าย (morning-afternoon) -> 2. บ่าย+ดึก (afternoon-night) -> 3. ดึก+เช้า (night-morning)
-    const spanPriority = { 'morning-afternoon': 1, 'afternoon-night': 2, 'night-morning': 3 }
+    // Group & Sort: 1. เช้า+บ่าย (morning-afternoon) -> 2. บ่าย+ดึก (afternoon-night) -> 3. เช้า+ดึก (morning-night)
+    const spanPriority: Record<string, number> = { 'morning-afternoon': 1, 'afternoon-night': 2, 'morning-night': 3 }
     const sorted = [...doubleShiftEmps].sort((a, b) => {
-      if (spanPriority[a.span] !== spanPriority[b.span]) {
-        return spanPriority[a.span] - spanPriority[b.span]
+      const pA = spanPriority[a.span] ?? 99
+      const pB = spanPriority[b.span] ?? 99
+      if (pA !== pB) {
+        return pA - pB
       }
       const empA = empMap.get(a.empId)
       const empB = empMap.get(b.empId)
@@ -1010,10 +1188,10 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
         )
       }
 
-      // span === 'night-morning' (ดึก + เช้า)
+      // span === 'morning-night' (เช้าแล้วกลับมาทำดึก)
       // Displays in column 1 (morning) and column 3 (night) with column 2 (afternoon) empty
       return (
-        <div key={`double-${empId}-nm`} className="vk-tpi-split-double-row">
+        <div key={`double-${empId}-mn`} className="vk-tpi-split-double-row">
           {/* Column 1: Morning Shift Box */}
           <div
             className="vk-tpi-split-double-card card-morning"
@@ -1026,7 +1204,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                   {emp.first_name} {emp.last_name}
                   {emp.nationality ? <span className="vk-pool-nat-txt"> ({emp.nationality})</span> : null}
                 </span>
-                <span className="vk-double-badge">ควบดึก + เช้า</span>
+                <span className="vk-double-badge">ควบเช้า + ดึก</span>
                 {hasHalf && <span className="vk-tpi-wp-half">ครึ่งกะ</span>}
                 {hasOt && (
                   <span className="vk-tpi-wp-ot">
@@ -1051,7 +1229,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
           </div>
 
           {/* Column 2: Afternoon Shift (Blank / Empty lane) */}
-          <div className="vk-tpi-split-double-empty" title="กะบ่าย: ไม่ได้ลงกะ (ควบดึก+เช้า)">
+          <div className="vk-tpi-split-double-empty" title="กะบ่าย: ไม่ได้ลงกะ (ควบเช้า+ดึก)">
             <div className="vk-tpi-split-bridge-line" />
           </div>
 
@@ -1067,7 +1245,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                   {emp.first_name} {emp.last_name}
                   {emp.nationality ? <span className="vk-pool-nat-txt"> ({emp.nationality})</span> : null}
                 </span>
-                <span className="vk-double-badge">ควบดึก + เช้า</span>
+                <span className="vk-double-badge">ควบเช้า + ดึก</span>
                 {hasHalf && <span className="vk-tpi-wp-half">ครึ่งกะ</span>}
                 {hasOt && (
                   <span className="vk-tpi-wp-ot">
@@ -1602,6 +1780,11 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                               OT
                             </span>
                           )}
+                          {allSafetyAdvances.some(a => a.employee_id === emp.id && a.period_id === currentPeriod?.id) && (
+                            <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 4, background: '#ede9fe', color: '#6d28d9', border: '1px solid #c4b5fd' }} title="มีบันทึกค่าปรับผิดระเบียบ จป. ในงวดนี้">
+                              จป.
+                            </span>
+                          )}
                         </div>
                       </div>
 
@@ -1696,7 +1879,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                       })
 
                       // Double-shift worker IDs in this job
-                      const doubleShiftEmps: { empId: string; span: 'morning-afternoon' | 'afternoon-night' | 'night-morning' }[] = []
+                      const doubleShiftEmps: { empId: string; span: 'morning-afternoon' | 'afternoon-night' | 'morning-night' }[] = []
                       const handledDoubleEmpIds = new Set<string>()
 
                       empShiftMapInJob.forEach((shiftsSet, empId) => {
@@ -1706,8 +1889,8 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                         } else if (shiftsSet.has(1) && shiftsSet.has(2)) {
                           doubleShiftEmps.push({ empId, span: 'afternoon-night' })
                           handledDoubleEmpIds.add(empId)
-                        } else if (shiftsSet.has(2) && shiftsSet.has(0)) {
-                          doubleShiftEmps.push({ empId, span: 'night-morning' })
+                        } else if (shiftsSet.has(0) && shiftsSet.has(2)) {
+                          doubleShiftEmps.push({ empId, span: 'morning-night' })
                           handledDoubleEmpIds.add(empId)
                         }
                       })
@@ -1811,6 +1994,11 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                                                   {emp.position === 'clerk' ? 'OT 8 ชม. (2x)' : `OT ${entry.ot_hours} ชม. (1.5x)`}
                                                 </span>
                                               )}
+                                              {allSafetyAdvances.some(a => a.employee_id === emp.id && a.period_id === currentPeriod?.id) && (
+                                                <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 4, background: '#ede9fe', color: '#6d28d9', border: '1px solid #c4b5fd' }} title="มีบันทึกค่าปรับผิดระเบียบ จป. ในงวดนี้">
+                                                  จป.
+                                                </span>
+                                              )}
                                             </div>
                                             <div className="vk-tpi-worker-pill-line2">
                                               <span className="vk-tpi-wp-code">{emp.employee_code}</span>
@@ -1902,7 +2090,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                         empShiftMapInJob.get(e.employee_id)!.add(e.shift_index)
                       })
 
-                      const doubleShiftEmps: { empId: string; span: 'morning-afternoon' | 'afternoon-night' | 'night-morning' }[] = []
+                      const doubleShiftEmps: { empId: string; span: 'morning-afternoon' | 'afternoon-night' | 'morning-night' }[] = []
                       const handledDoubleEmpIds = new Set<string>()
 
                       empShiftMapInJob.forEach((shiftsSet, empId) => {
@@ -1912,8 +2100,8 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                         } else if (shiftsSet.has(1) && shiftsSet.has(2)) {
                           doubleShiftEmps.push({ empId, span: 'afternoon-night' })
                           handledDoubleEmpIds.add(empId)
-                        } else if (shiftsSet.has(2) && shiftsSet.has(0)) {
-                          doubleShiftEmps.push({ empId, span: 'night-morning' })
+                        } else if (shiftsSet.has(0) && shiftsSet.has(2)) {
+                          doubleShiftEmps.push({ empId, span: 'morning-night' })
                           handledDoubleEmpIds.add(empId)
                         }
                       })
@@ -2017,6 +2205,11 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                                               {(Number(entry.ot_hours) || 0) > 0 && (
                                                 <span className="vk-tpi-wp-ot" title={emp.position === 'clerk' ? 'OT เสมียนเต็มกะ 8 ชม. (2 เท่า)' : `OT ${entry.ot_hours} ชม. (1.5 เท่า/ชม.)`}>
                                                   {emp.position === 'clerk' ? 'OT 8 ชม. (2x)' : `OT ${entry.ot_hours} ชม. (1.5x)`}
+                                                </span>
+                                              )}
+                                              {allSafetyAdvances.some(a => a.employee_id === emp.id && a.period_id === currentPeriod?.id) && (
+                                                <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 4, background: '#ede9fe', color: '#6d28d9', border: '1px solid #c4b5fd' }} title="มีบันทึกค่าปรับผิดระเบียบ จป. ในงวดนี้">
+                                                  จป.
                                                 </span>
                                               )}
                                             </div>
@@ -2140,6 +2333,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                       onClick={() => {
                         setModalShift1Index(0)
                         setModalHasShift2(true)
+                        setModalShift2Index(1)
                         if (!modalShift2JobId) setModalShift2JobId(modalShift1JobId)
                       }}
                     >
@@ -2161,25 +2355,13 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                       type="button"
                       className="vk-preset-chip"
                       onClick={() => {
-                        setModalShift1Index(2)
-                        setModalHasShift2(true)
-                        setModalShift2Index(0)
-                        if (!modalShift2JobId) setModalShift2JobId(modalShift1JobId)
-                      }}
-                    >
-                      ดึก + เช้า (23:40–16:00)
-                    </button>
-                    <button
-                      type="button"
-                      className="vk-preset-chip"
-                      onClick={() => {
                         setModalShift1Index(0)
                         setModalHasShift2(true)
                         setModalShift2Index(2)
                         if (!modalShift2JobId) setModalShift2JobId(modalShift1JobId)
                       }}
                     >
-                      เช้า + ดึก (เว้นบ่าย)
+                      เช้าแล้วกลับมาทำดึก (เว้นบ่าย)
                     </button>
                   </div>
                 </div>
@@ -2225,6 +2407,9 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                           setModalShift1Index(newIdx)
                           if (modalShift2Index === newIdx) {
                             setModalShift2Index((newIdx + 1) % 3)
+                          } else if (newIdx === 2 && modalShift2Index === 0) {
+                            // According to labor law, night-to-morning is prohibited
+                            setModalShift2Index(1)
                           }
                         }}
                       >
@@ -2447,11 +2632,20 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                             value={modalShift2Index}
                             onChange={(e) => setModalShift2Index(Number(e.target.value))}
                           >
-                            {SHIFTS.map((s, idx) => (
-                              <option key={idx} value={idx} disabled={idx === modalShift1Index}>
-                                กะ{s.name} ({s.time}){idx === modalShift1Index ? ' (ซ้ำกับกะที่ 1)' : ''}
-                              </option>
-                            ))}
+                            {SHIFTS.map((s, idx) => {
+                              const isSameShift = idx === modalShift1Index
+                              const isIllegalNightToMorning = modalShift1Index === 2 && idx === 0
+                              const isDisabled = isSameShift || isIllegalNightToMorning
+                              let labelSuffix = ''
+                              if (isSameShift) labelSuffix = ' (ซ้ำกับกะที่ 1)'
+                              else if (isIllegalNightToMorning) labelSuffix = ' (ห้ามดึกต่อเช้าตามกฎหมาย)'
+
+                              return (
+                                <option key={idx} value={idx} disabled={isDisabled}>
+                                  กะ{s.name} ({s.time}){labelSuffix}
+                                </option>
+                              )
+                            })}
                           </select>
                         </div>
                       </div>
@@ -2611,7 +2805,211 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                   )}
                 </div>
                 )} {/* end !modalShift1IsHalf */}
+
+              {/* ── Safety Disciplinary Fine Section ── */}
+              <div
+                style={{
+                  marginTop: 4,
+                  padding: '14px 16px',
+                  borderRadius: 8,
+                  background: '#faf5ff',
+                  border: '1.5px solid #d8b4fe',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, flexWrap: 'wrap', gap: 6 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <ShieldAlert style={{ width: 18, height: 18, color: '#7c3aed' }} />
+                    <span style={{ fontWeight: 700, fontSize: 13, color: '#581c87' }}>
+                      รายงานความผิดระเบียบวินัยจาก จป.
+                    </span>
+                  </div>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: '#7c3aed', background: '#ede9fe', padding: '2px 8px', borderRadius: 999, border: '1px solid #ddd6fe' }}>
+                    ปรับครั้งละ 1,000 บ. · หักงวดละ 500 บ.
+                  </span>
+                </div>
+
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', userSelect: 'none', fontSize: 13, fontWeight: 600, color: '#4c1d95', marginBottom: modalSafetyFineEnabled ? 12 : 6 }}>
+                  <input
+                    type="checkbox"
+                    checked={modalSafetyFineEnabled}
+                    onChange={(e) => setModalSafetyFineEnabled(e.target.checked)}
+                    style={{ accentColor: '#7c3aed', width: 16, height: 16 }}
+                  />
+                  <span>บันทึกความผิดระเบียบวินัยจาก จป. ในงวดนี้ (หักเงินงวดละ 500 บาท)</span>
+                </label>
+
+                {modalSafetyFineEnabled && (
+                  <div style={{ marginTop: 10, paddingTop: 12, borderTop: '1px dashed #d8b4fe', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 10 }}>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6d28d9', marginBottom: 4 }}>
+                          วันที่เกิดเหตุ:
+                        </label>
+                        <input
+                          type="date"
+                          value={modalSafetyFineDate}
+                          onChange={(e) => setModalSafetyFineDate(e.target.value)}
+                          style={{
+                            width: '100%',
+                            height: 32,
+                            padding: '0 8px',
+                            fontSize: 12,
+                            borderRadius: 6,
+                            border: '1px solid #c4b5fd',
+                            background: '#ffffff',
+                            color: '#1e1b4b',
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6d28d9', marginBottom: 4 }}>
+                          เลือกสาเหตุด่วน:
+                        </label>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                          {[
+                            'แอบใช้โทรศัพท์มือถือในพื้นที่ผลิต',
+                            'สูบบุหรี่ในพื้นที่ห้ามสูบ',
+                            'ไม่สวมใส่อุปกรณ์คุ้มครองความปลอดภัย (PPE)',
+                            'ละทิ้งจุดปฏิบัติงานโดยไม่ได้รับอนุญาต',
+                          ].map((preset) => (
+                            <button
+                              key={preset}
+                              type="button"
+                              onClick={() => setModalSafetyFineReason(preset)}
+                              style={{
+                                fontSize: 11,
+                                padding: '3px 8px',
+                                borderRadius: 4,
+                                border: `1px solid ${modalSafetyFineReason === preset ? '#7c3aed' : '#ddd6fe'}`,
+                                background: modalSafetyFineReason === preset ? '#7c3aed' : '#ffffff',
+                                color: modalSafetyFineReason === preset ? '#ffffff' : '#581c87',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              {preset}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6d28d9', marginBottom: 4 }}>
+                        ระบุสาเหตุ / รายละเอียดความผิด (ใช้เป็นหลักฐาน):
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="เช่น แอบใช้โทรศัพท์มือถือขณะเดินเครื่องจักร..."
+                        value={modalSafetyFineReason}
+                        onChange={(e) => setModalSafetyFineReason(e.target.value)}
+                        style={{
+                          width: '100%',
+                          height: 34,
+                          padding: '0 10px',
+                          fontSize: 12,
+                          borderRadius: 6,
+                          border: '1px solid #c4b5fd',
+                          background: '#ffffff',
+                          color: '#1e1b4b',
+                          boxSizing: 'border-box',
+                        }}
+                      />
+                    </div>
+
+                    <div style={{ background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: 6, padding: '8px 12px', fontSize: 11, color: '#5b21b6', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+                      <div>
+                        💡 <strong>ระบบผ่อนชำระ:</strong> ยอดปรับเต็ม 1,000 บาท · ระบบจะหักงวดละ 500 บาท และส่งต่องวดถัดไปให้อัตโนมัติ (แสดงงวด [X/Y])
+                      </div>
+                      <button
+                        type="button"
+                        disabled={modalSafetyFineSubmitting || !modalSafetyFineReason.trim()}
+                        onClick={handleSaveSafetyFine}
+                        style={{
+                          background: modalSafetyFineReason.trim() ? '#7c3aed' : '#d8b4fe',
+                          color: '#ffffff',
+                          border: 'none',
+                          borderRadius: 4,
+                          padding: '4px 12px',
+                          fontSize: 11,
+                          fontWeight: 700,
+                          cursor: modalSafetyFineReason.trim() ? 'pointer' : 'not-allowed',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 4,
+                        }}
+                      >
+                        {modalSafetyFineSubmitting ? 'กำลังบันทึก...' : 'บันทึกค่าปรับ จป. ทันที'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Existing safety fines list for this employee */}
+                {(() => {
+                  const empFines = allSafetyAdvances.filter((a) => a.employee_id === modalEmp.id)
+                  if (empFines.length === 0) return null
+                  return (
+                    <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px dashed #d8b4fe' }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: '#6d28d9', marginBottom: 6 }}>
+                        ประวัติรายการค่าปรับ จป. ของพนักงานคนนี้ ({empFines.length} รายการ):
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        {empFines.map((fine) => {
+                          const isCurrent = fine.period_id === currentPeriod?.id
+                          return (
+                            <div
+                              key={fine.id}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                background: '#ffffff',
+                                padding: '6px 10px',
+                                borderRadius: 4,
+                                border: `1px solid ${isCurrent ? '#c4b5fd' : '#e9d5ff'}`,
+                                fontSize: 11,
+                                gap: 8,
+                              }}
+                            >
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontWeight: 600, color: '#4c1d95', display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  <span>{fine.notes?.replace(/\[หักค่าปรับ จป\.\]/g, '').trim() || 'ค่าปรับ จป.'}</span>
+                                  {isCurrent && (
+                                    <span style={{ fontSize: 9, fontWeight: 700, background: '#ede9fe', color: '#6d28d9', padding: '1px 5px', borderRadius: 4 }}>
+                                      งวดปัจจุบัน
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                                <span style={{ fontFamily: 'var(--vk-mono)', fontWeight: 700, color: '#7c3aed' }}>
+                                  ฿{Number(fine.amount).toFixed(2)}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteSafetyFine(fine.id)}
+                                  style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    color: '#b91c1c',
+                                    cursor: 'pointer',
+                                    padding: 2,
+                                    display: 'flex',
+                                  }}
+                                  title="ลบรายการนี้"
+                                >
+                                  <Trash2 style={{ width: 13, height: 13 }} />
+                                </button>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )
+                })()}
               </div>
+            </div>
 
               {/* Modal Bottom Actions */}
               <div className="vk-modal-bottom-actions">

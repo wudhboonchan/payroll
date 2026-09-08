@@ -15,7 +15,7 @@ import { useAppStore } from '../../store/useAppStore'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
-import { compareEmployeeCode } from '../../lib/formatters'
+import { compareEmployeeCode, formatThaiDateDDMMYYYY } from '../../lib/formatters'
 import type { PaySlipData } from './PaySlipPreview'
 
 type Props = {
@@ -220,9 +220,10 @@ export default function PayslipExportModal({ isOpen, onClose, uniqueMonths }: Pr
       interface AdvanceRow {
         employee_id: string
         amount: number
+        notes?: string | null
       }
 
-      let advanceQuery = supabase.from('advance_payments').select('employee_id, amount').in('period_id', targetPeriodIds)
+      let advanceQuery = supabase.from('advance_payments').select('id, employee_id, amount, notes').in('period_id', targetPeriodIds)
       if (exportTarget === 'individual') advanceQuery = advanceQuery.eq('employee_id', selectedEmployeeId)
       const { data: advancesData } = await advanceQuery
       const advances = (advancesData as unknown as AdvanceRow[]) || []
@@ -232,6 +233,30 @@ export default function PayslipExportModal({ isOpen, onClose, uniqueMonths }: Pr
         const period = entry.period
         const empAdvances = advances.filter((a) => a.employee_id === emp.id)
         const totalAdvance = empAdvances.reduce((sum: number, a: AdvanceRow) => sum + Number(a.amount), 0)
+
+        const regAdvances = empAdvances.filter(a => {
+          const n = a.notes || ''
+          return !n.includes('[สแกนหน้าไม่สำเร็จ]') &&
+            !n.includes('สแกนหน้าไม่สำเร็จ') &&
+            !n.includes('[ลงโทษ ขาดงานไม่มีคนแทน]') &&
+            !n.includes('ลงโทษ ขาดงาน') &&
+            !n.includes('[ลงโทษ ขาด/ลา/มาสาย]') &&
+            !n.includes('ลงโทษ ขาด/ลา/มาสาย') &&
+            !n.includes('[หักค่าปรับ จป.]') &&
+            !n.includes('หักค่าปรับผิดระเบียบ') &&
+            !n.includes('ค่าปรับผิดระเบียบ')
+        })
+        const scanAdvances = empAdvances.filter(a => (a.notes || '').includes('[สแกนหน้าไม่สำเร็จ]') || (a.notes || '').includes('สแกนหน้าไม่สำเร็จ'))
+        const discAdvances = empAdvances.filter(a => {
+          const n = a.notes || ''
+          return n.includes('[ลงโทษ ขาดงานไม่มีคนแทน]') || n.includes('ลงโทษ ขาดงาน') || n.includes('[ลงโทษ ขาด/ลา/มาสาย]') || n.includes('ลงโทษ ขาด/ลา/มาสาย')
+        })
+        const safetyAdvances = empAdvances.filter(a => {
+          const n = a.notes || ''
+          return n.includes('[หักค่าปรับ จป.]') || n.includes('หักค่าปรับผิดระเบียบ') || n.includes('ค่าปรับผิดระเบียบ')
+        })
+
+        const sumAdv = (list: AdvanceRow[]) => list.reduce((s, a) => s + Number(a.amount || 0), 0)
 
         const amount_normal = Number(entry.amount_normal || 0)
         const amount_shift = Number(entry.amount_shift || 0)
@@ -247,6 +272,76 @@ export default function PayslipExportModal({ isOpen, onClose, uniqueMonths }: Pr
         const total_income = amount_normal + amount_shift + amount_ot + amount_wood_excess + amount_film + amount_special + amount_diligence + amount_position
         const total_deductions = deduct_social_security + totalAdvance + deduct_safety_equipment + deduct_uniform
 
+        const deduction_items: Array<{ label: string; value: number; detail?: string | null }> = []
+        if (deduct_social_security > 0) {
+          deduction_items.push({ label: 'ประกันสังคม', value: deduct_social_security })
+        }
+        if (regAdvances.length > 0) {
+          deduction_items.push({ label: 'เบิกล่วงหน้า', value: sumAdv(regAdvances) })
+        }
+        if (scanAdvances.length > 0) {
+          deduction_items.push({ label: 'หักสแกนหน้าไม่ผ่าน', value: sumAdv(scanAdvances), detail: `${scanAdvances.length} รายการ` })
+        }
+        if (discAdvances.length > 0) {
+          for (const d of discAdvances) {
+            const m = (d.notes || '').match(/วันที่:\s*([\d\/\-]+)/)
+            const thaiDate = m ? formatThaiDateDDMMYYYY(m[1]) : ''
+
+            let baseRate = 0
+            const rateMatch = (d.notes || '').match(/(?:ปกติ|ช่างฝีมือ)\s*฿([\d,]+(?:\.\d+)?)/)
+            if (rateMatch) {
+              baseRate = parseFloat(rateMatch[1].replace(/,/g, ''))
+            } else if (d.amount) {
+              baseRate = Number(d.amount) / 2
+            }
+
+            const rateStr = baseRate > 0 ? `฿${baseRate.toLocaleString('th-TH')}` : ''
+            const calcParts: string[] = []
+            if (rateStr) {
+              calcParts.push(`${rateStr} × 2 เท่า`)
+            } else {
+              calcParts.push('หัก 2 เท่า')
+            }
+            if (thaiDate) {
+              calcParts.push(`(วันที่ ${thaiDate})`)
+            }
+
+            deduction_items.push({
+              label: 'หักลงโทษขาดงานไม่มีคนแทน',
+              value: Number(d.amount || 0),
+              detail: calcParts.join(' '),
+            })
+          }
+        }
+        if (safetyAdvances.length > 0) {
+          for (const s of safetyAdvances) {
+            const infoMatch = (s.notes || '').match(/หักค่าปรับผิดระเบียบ\s*(\([^\)]+\))/)
+            let infoStr = infoMatch ? infoMatch[1] : ''
+            if (infoStr && /วันที่\s*\d{4}[-\/]/.test(infoStr)) {
+              infoStr = infoStr.replace(/วันที่\s*([\d\/\-]+)/, (_, d) => `วันที่ ${formatThaiDateDDMMYYYY(d)}`)
+            }
+            const label = infoStr
+              ? `หักค่าปรับผิดระเบียบ\n${infoStr}`
+              : ((s.notes || '').match(/(หักค่าปรับผิดระเบียบ\s*\([^\)]+\))/)?.[1] || 'หักค่าปรับผิดระเบียบ')
+            const reasonMatch = (s.notes || '').match(/สาเหตุ:\s*([^\|]+)/)
+            const reason = reasonMatch ? `สาเหตุ: ${reasonMatch[1].trim()}` : null
+            deduction_items.push({
+              label,
+              value: Number(s.amount || 0),
+              detail: reason,
+            })
+          }
+        }
+        if (deduction_items.length === 0 && totalAdvance > 0) {
+          deduction_items.push({ label: 'เบิกล่วงหน้า', value: totalAdvance })
+        }
+        if (deduct_safety_equipment > 0) {
+          deduction_items.push({ label: 'ค่าอุปกรณ์ความปลอดภัย', value: deduct_safety_equipment })
+        }
+        if (deduct_uniform > 0) {
+          deduction_items.push({ label: 'ค่าเสื้อพนักงาน', value: deduct_uniform })
+        }
+
         return {
           employee_code: emp.employee_code,
           first_name: emp.first_name,
@@ -258,6 +353,7 @@ export default function PayslipExportModal({ isOpen, onClose, uniqueMonths }: Pr
           position: emp.position || 'worker',
           amount_normal, amount_shift, amount_ot, amount_wood_excess, amount_film, amount_special, amount_diligence, amount_position,
           deduct_social_security, deduct_advance: totalAdvance, deduct_safety_equipment, deduct_uniform,
+          deduction_items,
           total_income, total_deductions,
           net_pay: total_income - total_deductions,
           payment_method: (emp.payment_method as 'cash' | 'bank_transfer') || 'cash',

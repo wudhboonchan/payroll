@@ -323,12 +323,14 @@ export default function EmployeeSlip() {
       { label: 'ค่าตำแหน่ง',      value: slipData.amount_position,    detail: null, subs: [] },
     ].filter(r => r.value > 0 && r.label !== '') as SlipIncomeRow[]
 
-    const deductions: SlipDeductRow[] = [
-      { label: 'ประกันสังคม',            value: slipData.deduct_social_security },
-      { label: 'เบิกล่วงหน้า',           value: slipData.deduct_advance },
-      { label: 'ค่าอุปกรณ์ความปลอดภัย', value: slipData.deduct_safety_equipment },
-      { label: 'ค่าเสื้อพนักงาน',        value: slipData.deduct_uniform },
-    ].filter(r => r.value > 0)
+    const deductions: SlipDeductRow[] = (slipData.deduction_items && slipData.deduction_items.length > 0)
+      ? (slipData.deduction_items as SlipDeductRow[])
+      : [
+          { label: 'ประกันสังคม',            value: slipData.deduct_social_security },
+          { label: 'เบิกล่วงหน้า',           value: slipData.deduct_advance },
+          { label: 'ค่าอุปกรณ์ความปลอดภัย', value: slipData.deduct_safety_equipment },
+          { label: 'ค่าเสื้อพนักงาน',        value: slipData.deduct_uniform },
+        ].filter(r => r.value > 0)
 
     const s = new Date(slipData.period_start), e = new Date(slipData.period_end)
     const periodLabel = `${s.getDate()} ${MONTHS_SHORT[s.getMonth()]} – ${e.getDate()} ${MONTHS_SHORT[e.getMonth()]} ${e.getFullYear() + 543}`

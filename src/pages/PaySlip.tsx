@@ -9,7 +9,7 @@ import { Printer, Search, X, AlertTriangle } from 'lucide-react'
 import { calculatePayroll } from '../lib/payrollCalc'
 import { calculateTpiPayroll, type TpiShiftRow, type TpiPayrollCalculationResult } from '../features/tpi/payrollCalc'
 import { VKSlipDocument } from '../components/VKSlipDocument'
-import { formatEmployeeFullName, compareEmployeeCode } from '../lib/formatters'
+import { formatEmployeeFullName, compareEmployeeCode, formatThaiDateDDMMYYYY } from '../lib/formatters'
 import { isTpiCompany } from '../features/tpi/model'
 import '../styles/tokens.css'
 
@@ -211,6 +211,23 @@ export default function PaySlip() {
       if (error) throw error
       return data?.[0] ?? null   // use array fetch to avoid .single() error on no-row
     }, enabled: !!currentPeriod?.id && !!selectedEmpId, staleTime: 0,
+  })
+
+  const { data: empAdvances = [] } = useQuery<any[]>({
+    queryKey: ['payslip-advances', currentPeriod?.id, selectedEmpId],
+    queryFn: async () => {
+      if (!currentPeriod?.id || !selectedEmpId) return []
+      const { data, error } = await supabase
+        .from('advance_payments')
+        .select('*')
+        .eq('period_id', currentPeriod.id)
+        .eq('employee_id', selectedEmpId)
+        .order('created_at', { ascending: true })
+      if (error) return []
+      return data || []
+    },
+    enabled: !!currentPeriod?.id && !!selectedEmpId,
+    staleTime: 0,
   })
 
   // Fetch ALL shifts for period (Diamond), filter by employee in JS
@@ -604,12 +621,105 @@ export default function PaySlip() {
     ].filter(r => r.value > 0 && r.label !== '')
   })() : []
 
-  const deductions = entry ? [
-    { label: 'ประกันสังคม',            value: Number(entry.deduct_social_security || 0) },
-    { label: 'เบิกล่วงหน้า',           value: Number(entry.deduct_advance || 0) },
-    { label: 'ค่าอุปกรณ์ความปลอดภัย', value: Number(entry.deduct_safety_equipment || 0) },
-    { label: 'ค่าเสื้อพนักงาน',        value: Number(entry.deduct_uniform || 0) },
-  ].filter(r => r.value > 0) : []
+  const deductions = entry ? (() => {
+    const list: SlipDeductRow[] = []
+    if (Number(entry.deduct_social_security || 0) > 0) {
+      list.push({ label: 'ประกันสังคม', value: Number(entry.deduct_social_security) })
+    }
+
+    if (empAdvances.length > 0) {
+      const regAdvances = empAdvances.filter(a => {
+        const n = a.notes || ''
+        return !n.includes('[สแกนหน้าไม่สำเร็จ]') &&
+          !n.includes('สแกนหน้าไม่สำเร็จ') &&
+          !n.includes('[ลงโทษ ขาดงานไม่มีคนแทน]') &&
+          !n.includes('ลงโทษ ขาดงาน') &&
+          !n.includes('[ลงโทษ ขาด/ลา/มาสาย]') &&
+          !n.includes('ลงโทษ ขาด/ลา/มาสาย') &&
+          !n.includes('[หักค่าปรับ จป.]') &&
+          !n.includes('หักค่าปรับผิดระเบียบ') &&
+          !n.includes('ค่าปรับผิดระเบียบ')
+      })
+      const scanAdvances = empAdvances.filter(a => (a.notes || '').includes('[สแกนหน้าไม่สำเร็จ]') || (a.notes || '').includes('สแกนหน้าไม่สำเร็จ'))
+      const discAdvances = empAdvances.filter(a => {
+        const n = a.notes || ''
+        return n.includes('[ลงโทษ ขาดงานไม่มีคนแทน]') || n.includes('ลงโทษ ขาดงาน') || n.includes('[ลงโทษ ขาด/ลา/มาสาย]') || n.includes('ลงโทษ ขาด/ลา/มาสาย')
+      })
+      const safetyAdvances = empAdvances.filter(a => {
+        const n = a.notes || ''
+        return n.includes('[หักค่าปรับ จป.]') || n.includes('หักค่าปรับผิดระเบียบ') || n.includes('ค่าปรับผิดระเบียบ')
+      })
+
+      const sumAdv = (arr: any[]) => arr.reduce((s, a) => s + Number(a.amount || 0), 0)
+
+      if (regAdvances.length > 0) {
+        list.push({ label: 'เบิกล่วงหน้า', value: sumAdv(regAdvances) })
+      }
+      if (scanAdvances.length > 0) {
+        list.push({ label: 'หักสแกนหน้าไม่ผ่าน', value: sumAdv(scanAdvances), detail: `${scanAdvances.length} รายการ` })
+      }
+      if (discAdvances.length > 0) {
+        for (const d of discAdvances) {
+          const m = (d.notes || '').match(/วันที่:\s*([\d\/\-]+)/)
+          const thaiDate = m ? formatThaiDateDDMMYYYY(m[1]) : ''
+
+          let baseRate = 0
+          const rateMatch = (d.notes || '').match(/(?:ปกติ|ช่างฝีมือ)\s*฿([\d,]+(?:\.\d+)?)/)
+          if (rateMatch) {
+            baseRate = parseFloat(rateMatch[1].replace(/,/g, ''))
+          } else if (d.amount) {
+            baseRate = Number(d.amount) / 2
+          }
+
+          const rateStr = baseRate > 0 ? `฿${baseRate.toLocaleString('th-TH')}` : ''
+          const calcParts: string[] = []
+          if (rateStr) {
+            calcParts.push(`${rateStr} × 2 เท่า`)
+          } else {
+            calcParts.push('หัก 2 เท่า')
+          }
+          if (thaiDate) {
+            calcParts.push(`(วันที่ ${thaiDate})`)
+          }
+
+          list.push({
+            label: 'หักลงโทษขาดงานไม่มีคนแทน',
+            value: Number(d.amount || 0),
+            detail: calcParts.join(' '),
+          })
+        }
+      }
+      if (safetyAdvances.length > 0) {
+        for (const s of safetyAdvances) {
+          const infoMatch = (s.notes || '').match(/หักค่าปรับผิดระเบียบ\s*(\([^\)]+\))/)
+          let infoStr = infoMatch ? infoMatch[1] : ''
+          if (infoStr && /วันที่\s*\d{4}[-\/]/.test(infoStr)) {
+            infoStr = infoStr.replace(/วันที่\s*([\d\/\-]+)/, (_, d) => `วันที่ ${formatThaiDateDDMMYYYY(d)}`)
+          }
+          const label = infoStr
+            ? `หักค่าปรับผิดระเบียบ\n${infoStr}`
+            : ((s.notes || '').match(/(หักค่าปรับผิดระเบียบ\s*\([^\)]+\))/)?.[1] || 'หักค่าปรับผิดระเบียบ')
+          const reasonMatch = (s.notes || '').match(/สาเหตุ:\s*([^\|]+)/)
+          const reason = reasonMatch ? `สาเหตุ: ${reasonMatch[1].trim()}` : null
+          list.push({
+            label,
+            value: Number(s.amount || 0),
+            detail: reason,
+          })
+        }
+      }
+    } else if (Number(entry.deduct_advance || 0) > 0) {
+      list.push({ label: 'เบิกล่วงหน้า', value: Number(entry.deduct_advance) })
+    }
+
+    if (Number(entry.deduct_safety_equipment || 0) > 0) {
+      list.push({ label: 'ค่าอุปกรณ์ความปลอดภัย', value: Number(entry.deduct_safety_equipment) })
+    }
+    if (Number(entry.deduct_uniform || 0) > 0) {
+      list.push({ label: 'ค่าเสื้อพนักงาน', value: Number(entry.deduct_uniform) })
+    }
+    return list
+  })() : []
 
   const totalIncome = income.reduce((s, r) => s + r.value, 0)
   const totalDeduct = deductions.reduce((s, r) => s + r.value, 0)

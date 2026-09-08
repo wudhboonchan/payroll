@@ -352,15 +352,13 @@ export default function Employees() {
       </div>{/* end inner wrapper */}
       </div>{/* end table scroll area */}
 
-      {/* Modals */}
-      {isModalOpen && (
-        <EmployeeFormModal
-          isOpen={isModalOpen}
-          onClose={() => { setIsModalOpen(false); setSelectedEmployeeId(null) }}
-          employeeId={selectedEmployeeId}
-          onSuccess={() => { queryClient.invalidateQueries({ queryKey: ['employees'] }); queryClient.invalidateQueries({ queryKey: ['employees-all'] }) }}
-        />
-      )}
+      {/* Modal — always mounted so React state (tpiRateTier etc.) survives close/reopen */}
+      <EmployeeFormModal
+        isOpen={isModalOpen}
+        onClose={() => { setIsModalOpen(false); setSelectedEmployeeId(null) }}
+        employeeId={selectedEmployeeId}
+        onSuccess={() => { queryClient.invalidateQueries({ queryKey: ['employees'] }); queryClient.invalidateQueries({ queryKey: ['employees-all'] }) }}
+      />
 
       <EmployeeImportModal
         isOpen={isImportOpen}
