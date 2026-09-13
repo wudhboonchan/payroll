@@ -26,6 +26,7 @@ import { loadDailyAttendance, formatAttendanceSummary } from '../features/tpi/at
 import {
   SHIFTS,
   isJobAvailable,
+  isClerkJob,
   wageTier,
   validateEntries,
   usage,
@@ -37,6 +38,7 @@ import { employeeWageForm } from '../features/tpi/employeeWageForm'
 import { demoJobs, demoEmployees, demoWageProfiles, demoInitialEntries } from '../features/tpi/demoData'
 import { loadDay, saveDay, errorMessage } from '../features/tpi/api'
 import { formatThaiBuddhistDate, compareEmployeeCode } from '../lib/formatters'
+import { ThaiDatePicker } from '../components/common/ThaiDatePicker'
 import '../styles/tokens.css'
 import './TpiShiftEntry.css'
 
@@ -179,6 +181,56 @@ async function ensureValidJobUuids(
   })
 }
 
+export const JobCodeBadge: React.FC<{
+  job: Job
+  style?: React.CSSProperties
+}> = ({ job, style }) => {
+  const isClerk = isClerkJob(job)
+  const normalRateVal = job.normal_rate ?? 357
+  const normalRateStr = `฿${normalRateVal.toLocaleString()}`
+  const skilledRateStr = job.skilled_rate != null ? `฿${job.skilled_rate.toLocaleString()}` : 'ไม่มี (ตามเรทปกติ)'
+  const clerkPrefix = isClerk ? '🏢 [กลุ่มเสมียน] ' : ''
+  const nativeTitle = `${clerkPrefix}รหัสงาน: ${job.code} (${job.department})\n• เรทปกติ: ${normalRateStr} / กะ\n• เรทฝีมือ: ${skilledRateStr}${isClerk ? '\n• พนักงานกลุ่มเสมียนได้รับเรทฝีมือ ฿377 อัตโนมัติ' : ''}`
+
+  return (
+    <div className="vk-tpi-code-tag-wrapper">
+      <span
+        className={`vk-tpi-code-tag ${isClerk ? 'is-clerk' : ''}`}
+        title={nativeTitle}
+        style={style}
+      >
+        {isClerk && (
+          <span className="vk-tpi-clerk-badge-prefix" title="รหัสงานกลุ่มเสมียน (Clerk)">
+            <span className="vk-tpi-clerk-icon">🏢</span>
+            <span className="vk-tpi-clerk-txt">เสมียน</span>
+          </span>
+        )}
+        <span className="vk-tpi-code-text">{job.code}</span>
+      </span>
+      <div className="vk-tpi-code-tooltip" role="tooltip">
+        <div className="vk-tpi-tooltip-title">
+          {isClerk && <span className="vk-tpi-tooltip-clerk-icon">🏢 </span>}
+          รหัสงาน {job.code}
+          {isClerk && <span className="vk-tpi-tooltip-clerk-pill">กลุ่มเสมียน</span>}
+        </div>
+        <div className="vk-tpi-tooltip-row">
+          <span className="vk-tpi-tooltip-label">เรทปกติ:</span>
+          <span className="vk-tpi-tooltip-val normal">{normalRateStr} / กะ</span>
+        </div>
+        <div className="vk-tpi-tooltip-row">
+          <span className="vk-tpi-tooltip-label">เรทฝีมือ:</span>
+          <span className="vk-tpi-tooltip-val skilled">{skilledRateStr}</span>
+        </div>
+        {isClerk && (
+          <div className="vk-tpi-tooltip-clerk-note">
+            ★ พนักงานเสมียนได้รับเรทฝีมือ ฿377 อัตโนมัติ
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
   preview = false,
   initialDate,
@@ -191,6 +243,8 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
   const queryClient = useQueryClient()
 
   // ── Periods & Dates ────────────────────────────────────────────────
+  const [selectedPeriodId, setSelectedPeriodId] = useState<string>('')
+
   const { data: periods = [] } = useQuery<Period[]>({
     queryKey: ['periods', user?.factory_id],
     queryFn: async () => {
@@ -205,26 +259,75 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
     enabled: !!user?.factory_id && !preview,
   })
 
-  const currentPeriod = periods[0] || null
+  const currentPeriod = useMemo(() => {
+    if (selectedPeriodId) {
+      return periods.find((p) => p.id === selectedPeriodId) || periods[0] || null
+    }
+    return periods[0] || null
+  }, [periods, selectedPeriodId])
+
   const periodStart = currentPeriod ? parseLocal(currentPeriod.period_start) : new Date(new Date().getFullYear(), new Date().getMonth(), 1)
   const periodEnd = currentPeriod ? parseLocal(currentPeriod.period_end) : new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0)
 
-  const [currentDate, setCurrentDate] = useState<Date>(
-    initialDate ? parseLocal(initialDate) : new Date()
-  )
+  // List of all dates strictly within the current open period
+  const periodDates = useMemo(() => {
+    if (!currentPeriod?.period_start || !currentPeriod?.period_end) return []
+    const dates: string[] = []
+    const start = parseLocal(currentPeriod.period_start)
+    const end = parseLocal(currentPeriod.period_end)
+    const d = new Date(start)
+    while (d <= end) {
+      dates.push(fmtDate(d))
+      d.setDate(d.getDate() + 1)
+    }
+    return dates
+  }, [currentPeriod?.period_start, currentPeriod?.period_end])
+
+  // Helper: Ensures a given date is strictly within the active period
+  const getValidDateForPeriod = (targetDate: Date | null, period: Period | null): Date => {
+    if (!period) return targetDate || new Date()
+    const targetStr = targetDate ? fmtDate(targetDate) : ''
+    // If targetDate is within the period, keep it
+    if (targetStr >= period.period_start && targetStr <= period.period_end) {
+      return targetDate!
+    }
+    // If today is within the period, use today
+    const today = new Date()
+    const todayStr = fmtDate(today)
+    if (todayStr >= period.period_start && todayStr <= period.period_end) {
+      return today
+    }
+    // Otherwise default strictly to day 1 of the period
+    return parseLocal(period.period_start)
+  }
+
+  const [currentDate, setCurrentDate] = useState<Date>(() => {
+    if (initialDate) {
+      return parseLocal(initialDate)
+    }
+    const initialPeriod = periods[0]
+    return getValidDateForPeriod(null, initialPeriod || null)
+  })
+
+  // Whenever currentPeriod updates or loads, clamp currentDate strictly into the period
+  useEffect(() => {
+    if (!currentPeriod) return
+    setCurrentDate((prev) => getValidDateForPeriod(prev, currentPeriod))
+  }, [currentPeriod?.id, currentPeriod?.period_start, currentPeriod?.period_end])
+
   const activeDateStr = fmtDate(currentDate)
   const weekend = isWeekend(activeDateStr)
   const [isHoliday, setIsHoliday] = useState(false)
 
-  const isAtStart = currentPeriod ? activeDateStr <= fmtDate(periodStart) : false
-  const isAtEnd = currentPeriod ? activeDateStr >= fmtDate(periodEnd) : false
+  const isAtStart = currentPeriod ? activeDateStr <= currentPeriod.period_start : true
+  const isAtEnd = currentPeriod ? activeDateStr >= currentPeriod.period_end : true
 
   const navigateDate = (dir: -1 | 1) => {
+    if (!currentPeriod) return
     const d = new Date(currentDate)
     d.setDate(d.getDate() + dir)
-    if (currentPeriod) {
-      if (fmtDate(d) < fmtDate(periodStart) || fmtDate(d) > fmtDate(periodEnd)) return
-    }
+    const dStr = fmtDate(d)
+    if (dStr < currentPeriod.period_start || dStr > currentPeriod.period_end) return
     setCurrentDate(d)
     setSelectedPoolIds(new Set())
   }
@@ -240,6 +343,21 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
         .order('code')
       if (error) throw error
 
+      const rawJobs = (data || []) as Job[]
+      const cleaned = rawJobs.map((j: Job) => {
+        let active = j.active
+        let needsActiveFix = false
+        if (!active && (['P315/69VRK', 'P322/69VRK', 'P422/69', 'Q121/69', 'Q131/69'].includes(j.code.trim()) || (j.notes && j.notes.includes('ระบุหยุด')))) {
+          active = true
+          needsActiveFix = true
+        }
+
+        if (needsActiveFix && j.id) {
+          supabase.from('tpi_job_codes').update({ active: true }).eq('id', j.id).then(() => {})
+        }
+        return { ...j, active }
+      })
+
       if ((!data || data.length === 0) && user?.factory_id) {
         try {
           const payload = demoJobs.map((ref) => formatJobForDb(ref, user.factory_id))
@@ -254,7 +372,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
           console.warn('Auto-seed jobs error:', e)
         }
       }
-      return data || []
+      return cleaned
     },
     enabled: !!user?.factory_id && !preview,
   })
@@ -681,10 +799,10 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
 
   const renderQuotaBadge = (status: QuotaStatus, assigned: number, target: number) => {
     if (status === 'paused') {
-      return <span className="vk-tpi-badge vk-badge-paused">งดจัดกะ</span>
+      return <span className="vk-tpi-badge vk-badge-paused">ยกเลิกรหัสงาน</span>
     }
     if (status === 'zero' || (target === 0 && assigned === 0)) {
-      return <span className="vk-tpi-badge vk-badge-paused">0/0 ไม่ใช้วันนี้</span>
+      return <span className="vk-tpi-badge vk-badge-paused">0/0 งดจัดกะวันนี้</span>
     }
     if (status === 'completed') {
       return <span className="vk-tpi-badge vk-badge-completed">✓ ครบ {assigned}/{target} คน</span>
@@ -958,13 +1076,13 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
     }
     const job1 = jobs.find((j) => j.id === modalShift1JobId)
     if (job1 && !job1.active) {
-      toast.error(`รหัสงาน ${job1.code} อยู่ในสถานะงดจัดกะ`)
+      toast.error(`รหัสงาน ${job1.code} ถูกยกเลิกรหัสงานแล้ว`)
       return
     }
 
     const isClerk = modalEmp.position === 'clerk'
     const tier1 = wageTier(wageProfiles.find((p) => p.employee_id === modalEmp.id), activeDateStr)
-    const isClerkJob1 = job1?.job_group === 'clerk' || (job1?.code && ['692021', '692032', '692041', '692050'].includes(job1.code.trim()))
+    const isClerkJob1 = isClerkJob(job1)
     const baseRate1 = isClerkJob1
       ? (tier1 === 'skilled' ? (job1?.skilled_rate ?? 377) : (job1?.normal_rate ?? 357))
       : ((tier1 === 'skilled' && job1?.skilled_rate) ? job1.skilled_rate : (job1?.normal_rate || 357))
@@ -998,12 +1116,12 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
       }
       const job2 = jobs.find((j) => j.id === modalShift2JobId)
       if (job2 && !job2.active) {
-        toast.error(`รหัสงาน ${job2.code} อยู่ในสถานะงดจัดกะ`)
+        toast.error(`รหัสงาน ${job2.code} ถูกยกเลิกรหัสงานแล้ว`)
         return
       }
 
       const tier2 = wageTier(wageProfiles.find((p) => p.employee_id === modalEmp.id), activeDateStr)
-      const isClerkJob2 = job2?.job_group === 'clerk' || (job2?.code && ['692021', '692032', '692041', '692050'].includes(job2.code.trim()))
+      const isClerkJob2 = isClerkJob(job2)
       const baseRate2 = isClerkJob2
         ? (tier2 === 'skilled' ? (job2?.skilled_rate ?? 377) : (job2?.normal_rate ?? 357))
         : ((tier2 === 'skilled' && job2?.skilled_rate) ? job2.skilled_rate : (job2?.normal_rate || 357))
@@ -1065,7 +1183,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
 
     const targetJob = jobs.find((j) => j.id === jobId)
     if (targetJob && !targetJob.active) {
-      toast.error('รหัสงานนี้อยู่ในสถานะงดจัดกะ')
+      toast.error('รหัสงานนี้ถูกยกเลิกรหัสงานแล้ว')
       return
     }
 
@@ -1154,6 +1272,11 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                   {emp.first_name} {emp.last_name}
                   {emp.nationality ? <span className="vk-pool-nat-txt"> ({emp.nationality})</span> : null}
                 </span>
+                {isSkilledWorker(emp.id) && (
+                  <span title="พนักงานค่าแรงฝีมือ" style={{ flexShrink: 0, fontSize: 11 }}>
+                    ⭐
+                  </span>
+                )}
                 <span className="vk-double-badge">ควบกะเช้า + กะบ่าย</span>
                 {hasHalf && <span className="vk-tpi-wp-half">ครึ่งกะ</span>}
                 {hasOt && (
@@ -1194,6 +1317,11 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                   {emp.first_name} {emp.last_name}
                   {emp.nationality ? <span className="vk-pool-nat-txt"> ({emp.nationality})</span> : null}
                 </span>
+                {isSkilledWorker(emp.id) && (
+                  <span title="พนักงานค่าแรงฝีมือ" style={{ flexShrink: 0, fontSize: 11 }}>
+                    ⭐
+                  </span>
+                )}
                 <span className="vk-double-badge">ควบกะบ่าย + กะดึก</span>
                 {hasHalf && <span className="vk-tpi-wp-half">ครึ่งกะ</span>}
                 {hasOt && (
@@ -1236,6 +1364,11 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                   {emp.first_name} {emp.last_name}
                   {emp.nationality ? <span className="vk-pool-nat-txt"> ({emp.nationality})</span> : null}
                 </span>
+                {isSkilledWorker(emp.id) && (
+                  <span title="พนักงานค่าแรงฝีมือ" style={{ flexShrink: 0, fontSize: 11 }}>
+                    ⭐
+                  </span>
+                )}
                 <span className="vk-double-badge">ควบเช้า + ดึก</span>
                 {hasHalf && <span className="vk-tpi-wp-half">ครึ่งกะ</span>}
                 {hasOt && (
@@ -1277,6 +1410,11 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                   {emp.first_name} {emp.last_name}
                   {emp.nationality ? <span className="vk-pool-nat-txt"> ({emp.nationality})</span> : null}
                 </span>
+                {isSkilledWorker(emp.id) && (
+                  <span title="พนักงานค่าแรงฝีมือ" style={{ flexShrink: 0, fontSize: 11 }}>
+                    ⭐
+                  </span>
+                )}
                 <span className="vk-double-badge">ควบเช้า + ดึก</span>
                 {hasHalf && <span className="vk-tpi-wp-half">ครึ่งกะ</span>}
                 {hasOt && (
@@ -1342,7 +1480,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
 
     const targetJob = jobs.find((j) => j.id === targetJobId)
     if (targetJob && !targetJob.active) {
-      toast.error('รหัสงานนี้อยู่ในสถานะงดจัดกะ')
+      toast.error('รหัสงานนี้ถูกยกเลิกรหัสงานแล้ว')
       return
     }
 
@@ -1429,6 +1567,12 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
         onMenuClick={onMenuClick}
       />
 
+      {!preview && !currentPeriod && (
+        <div style={{ background: '#fef2f2', borderBottom: '1px solid #fecaca', padding: '12px 20px', color: '#991b1b', fontSize: 14, fontWeight: 600, textAlign: 'center' }}>
+          ยังไม่มีงวดการจ่ายเงินที่เปิดอยู่ กรุณาสร้างงวดการจ่ายเงินในหน้าแดชบอร์ดก่อนดำเนินการจัดกะ
+        </div>
+      )}
+
       <div
         className="vk-date-strip"
         style={{
@@ -1443,72 +1587,148 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
           zIndex: 20,
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-          <button
-            type="button"
-            className="vk-btn vk-btn--ghost"
-            style={{ height: 32, padding: '0 10px' }}
-            disabled={isAtStart}
-            onClick={() => navigateDate(-1)}
-          >
-            <ChevronLeft style={{ width: 15, height: 15 }} />
-          </button>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 260, justifyContent: 'center' }}>
-            <div
-              style={{
-                fontFamily: 'var(--vk-sans)',
-                fontWeight: 700,
-                fontSize: 17,
-                letterSpacing: '-0.01em',
-                color: isHoliday ? '#6F4A0E' : weekend ? '#5b21b6' : 'var(--vk-ink)',
-              }}
-            >
-              {fmtDisplay(activeDateStr)}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, flexWrap: 'wrap' }}>
+          {/* Period selector if multiple periods */}
+          {periods.length > 1 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginRight: 6 }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--vk-ink-3)' }}>งวด:</span>
+              <select
+                value={currentPeriod?.id || ''}
+                onChange={(e) => setSelectedPeriodId(e.target.value)}
+                style={{
+                  fontSize: 12,
+                  padding: '3px 8px',
+                  borderRadius: 6,
+                  border: '1px solid var(--vk-rule-soft)',
+                  background: 'var(--vk-paper)',
+                  color: 'var(--vk-ink)',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                {periods.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.label || `${p.period_start} ถึง ${p.period_end}`}
+                  </option>
+                ))}
+              </select>
             </div>
-            {weekend && (
-              <span
-                style={{
-                  fontSize: 10,
-                  fontWeight: 700,
-                  letterSpacing: '0.08em',
-                  color: '#5b21b6',
-                  background: 'rgba(91,33,182,0.08)',
-                  padding: '2px 8px',
-                  borderRadius: 999,
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                วันหยุดสุดสัปดาห์
-              </span>
-            )}
-            {isHoliday && (
-              <span
-                style={{
-                  fontSize: 10,
-                  fontWeight: 700,
-                  letterSpacing: '0.08em',
-                  color: '#6F4A0E',
-                  background: 'rgba(235,160,0,0.18)',
-                  padding: '2px 8px',
-                  borderRadius: 999,
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                วันหยุดนักขัตฤกษ์
-              </span>
-            )}
-          </div>
+          )}
 
-          <button
-            type="button"
-            className="vk-btn vk-btn--ghost"
-            style={{ height: 32, padding: '0 10px' }}
-            disabled={isAtEnd}
-            onClick={() => navigateDate(1)}
-          >
-            <ChevronRight style={{ width: 15, height: 15 }} />
-          </button>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, position: 'relative' }}>
+            <button
+              type="button"
+              className="vk-btn vk-btn--ghost"
+              style={{ height: 32, padding: '0 10px' }}
+              disabled={isAtStart}
+              onClick={() => navigateDate(-1)}
+              title="วันก่อนหน้า"
+            >
+              <ChevronLeft style={{ width: 15, height: 15 }} />
+            </button>
+
+            {periodDates.length > 0 ? (
+              <select
+                value={activeDateStr}
+                onChange={(e) => {
+                  setCurrentDate(parseLocal(e.target.value))
+                  setSelectedPoolIds(new Set())
+                }}
+                style={{
+                  fontFamily: 'var(--vk-sans)',
+                  fontWeight: 700,
+                  fontSize: 16,
+                  letterSpacing: '-0.01em',
+                  color: isHoliday ? '#6F4A0E' : weekend ? '#5b21b6' : 'var(--vk-ink)',
+                  background: 'var(--vk-paper)',
+                  border: '1px solid var(--vk-rule-soft)',
+                  borderRadius: 6,
+                  padding: '4px 10px',
+                  cursor: 'pointer',
+                  outline: 'none',
+                  width: 240,
+                  textAlign: 'center',
+                }}
+                aria-label="เลือกวันที่ในงวด"
+              >
+                {periodDates.map((dStr) => (
+                  <option key={dStr} value={dStr}>
+                    {fmtDisplay(dStr)}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <div
+                style={{
+                  fontFamily: 'var(--vk-sans)',
+                  fontWeight: 700,
+                  fontSize: 17,
+                  letterSpacing: '-0.01em',
+                  color: isHoliday ? '#6F4A0E' : weekend ? '#5b21b6' : 'var(--vk-ink)',
+                  width: 240,
+                  textAlign: 'center',
+                }}
+              >
+                {fmtDisplay(activeDateStr)}
+              </div>
+            )}
+
+            <button
+              type="button"
+              className="vk-btn vk-btn--ghost"
+              style={{ height: 32, padding: '0 10px' }}
+              disabled={isAtEnd}
+              onClick={() => navigateDate(1)}
+              title="วันถัดไป"
+            >
+              <ChevronRight style={{ width: 15, height: 15 }} />
+            </button>
+
+            {/* Badges positioned next to ChevronRight without shifting arrow buttons */}
+            <div style={{
+              position: 'absolute',
+              left: '100%',
+              marginLeft: 10,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              whiteSpace: 'nowrap',
+              pointerEvents: 'none',
+            }}>
+              {weekend && (
+                <span
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: '0.08em',
+                    color: '#5b21b6',
+                    background: 'rgba(91,33,182,0.08)',
+                    padding: '2px 8px',
+                    borderRadius: 999,
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  วันหยุดสุดสัปดาห์
+                </span>
+              )}
+              {isHoliday && (
+                <span
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: '0.08em',
+                    color: '#6F4A0E',
+                    background: 'rgba(235,160,0,0.18)',
+                    padding: '2px 8px',
+                    borderRadius: 999,
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  วันหยุดนักขัตฤกษ์
+                </span>
+              )}
+            </div>
+          </div>
         </div>
 
         {/* Row 2: holiday checkbox + weekend badge (desktop) + save button */}
@@ -1939,7 +2159,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                           {/* Left Column: Job Info */}
                           <div className="vk-tpi-cell-info">
                             <div className="vk-tpi-code-line">
-                              <span className="vk-tpi-code-tag">{job.code}</span>
+                              <JobCodeBadge job={job} />
                               <span className="vk-tpi-dept-tag">{job.department}</span>
                             </div>
                             <div className="vk-tpi-desc">{job.description}</div>
@@ -2071,7 +2291,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
 
                                     {singleShiftEntries.length === 0 && totalShiftCount === 0 && !canDrop && (
                                       <div className="vk-tpi-cell-empty">
-                                        {isPaused ? 'งดจัดกะ' : 'ว่าง'}
+                                        {isPaused ? 'ยกเลิก' : 'ว่าง'}
                                       </div>
                                     )}
                                   </div>
@@ -2155,7 +2375,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                           {/* Left Column: Job Info */}
                           <div className="vk-tpi-cell-info">
                             <div className="vk-tpi-code-line">
-                              <span className="vk-tpi-code-tag">{job.code}</span>
+                              <JobCodeBadge job={job} />
                               <span className="vk-tpi-dept-tag">{job.department}</span>
                               {job.expires_on && (
                                 <span className="vk-tpi-exp-tag">ถึง {formatThaiBuddhistDate(job.expires_on)}</span>
@@ -2289,7 +2509,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
 
                                     {singleShiftEntries.length === 0 && totalShiftCount === 0 && !canDrop && (
                                       <div className="vk-tpi-cell-empty">
-                                        {isPaused ? 'งดจัดกะ' : 'ว่าง'}
+                                        {isPaused ? 'ยกเลิก' : 'ว่าง'}
                                       </div>
                                     )}
                                   </div>
@@ -2317,12 +2537,12 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
           wageProfiles.find((p) => p.employee_id === modalEmp.id),
           activeDateStr
         )
-        const isClerkJob1 = modalJob1?.job_group === 'clerk' || (modalJob1?.code && ['692021', '692032', '692041', '692050'].includes(modalJob1.code.trim()))
+        const isClerkJob1 = isClerkJob(modalJob1)
         const modalBaseRate1 = isClerkJob1
           ? (modalTier === 'skilled' ? (modalJob1?.skilled_rate ?? 377) : (modalJob1?.normal_rate ?? 357))
           : (modalTier === 'skilled' && modalJob1?.skilled_rate ? modalJob1.skilled_rate : (modalJob1?.normal_rate || 357))
 
-        const isClerkJob2 = modalJob2?.job_group === 'clerk' || (modalJob2?.code && ['692021', '692032', '692041', '692050'].includes(modalJob2.code.trim()))
+        const isClerkJob2 = isClerkJob(modalJob2)
         const modalBaseRate2 = isClerkJob2
           ? (modalTier === 'skilled' ? (modalJob2?.skilled_rate ?? 377) : (modalJob2?.normal_rate ?? 357))
           : (modalTier === 'skilled' && modalJob2?.skilled_rate ? modalJob2.skilled_rate : (modalJob2?.normal_rate || 357))
@@ -2436,18 +2656,30 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                         <optgroup label="1. ประเภทงานประจำ">
                           {regularJobs.map((j) => (
                             <option key={j.id} value={j.id}>
-                              {j.code} - {j.description.substring(0, 32)}...
+                              {isClerkJob(j) ? '🏢 [เสมียน] ' : ''}{j.code} - {j.description.substring(0, 32)}... (ปกติ ฿{j.normal_rate ?? 357}{j.skilled_rate != null ? ` | ฝีมือ ฿${j.skilled_rate}` : ''})
                             </option>
                           ))}
                         </optgroup>
                         <optgroup label="2. ประเภทงานชั่วคราว">
                           {temporaryJobs.map((j) => (
                             <option key={j.id} value={j.id}>
-                              {j.code} - {j.description.substring(0, 32)}...
+                              {isClerkJob(j) ? '🏢 [เสมียน] ' : ''}{j.code} - {j.description.substring(0, 32)}... (ปกติ ฿{j.normal_rate ?? 357}{j.skilled_rate != null ? ` | ฝีมือ ฿${j.skilled_rate}` : ''})
                             </option>
                           ))}
                         </optgroup>
                       </select>
+                      {modalJob1 && (
+                        <div style={{ fontSize: 11, color: 'var(--vk-ink-3)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          {isClerkJob(modalJob1) && (
+                            <span className="vk-tpi-clerk-badge-prefix" style={{ fontSize: 10 }}>
+                              🏢 รหัสงานกลุ่มเสมียน
+                            </span>
+                          )}
+                          <span>
+                            เรทงานนี้: เรทปกติ <strong style={{ color: 'var(--vk-ink)' }}>฿{modalJob1.normal_rate ?? 357}</strong> / กะ · เรทฝีมือ <strong style={{ color: modalJob1.skilled_rate ? '#b45309' : 'var(--vk-ink-3)' }}>{modalJob1.skilled_rate != null ? `฿${modalJob1.skilled_rate}` : 'ไม่มี (ตามเรทปกติ)'}</strong>
+                          </span>
+                        </div>
+                      )}
                     </div>
 
                     <div className="vk-field-group">
@@ -2664,18 +2896,30 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                             <optgroup label="1. ประเภทงานประจำ">
                               {regularJobs.map((j) => (
                                 <option key={j.id} value={j.id}>
-                                  {j.code} - {j.description.substring(0, 32)}...
+                                  {isClerkJob(j) ? '🏢 [เสมียน] ' : ''}{j.code} - {j.description.substring(0, 32)}... (ปกติ ฿{j.normal_rate ?? 357}{j.skilled_rate != null ? ` | ฝีมือ ฿${j.skilled_rate}` : ''})
                                 </option>
                               ))}
                             </optgroup>
                             <optgroup label="2. ประเภทงานชั่วคราว">
                               {temporaryJobs.map((j) => (
                                 <option key={j.id} value={j.id}>
-                                  {j.code} - {j.description.substring(0, 32)}...
+                                  {isClerkJob(j) ? '🏢 [เสมียน] ' : ''}{j.code} - {j.description.substring(0, 32)}... (ปกติ ฿{j.normal_rate ?? 357}{j.skilled_rate != null ? ` | ฝีมือ ฿${j.skilled_rate}` : ''})
                                 </option>
                               ))}
                             </optgroup>
                           </select>
+                          {modalJob2 && (
+                            <div style={{ fontSize: 11, color: 'var(--vk-ink-3)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                              {isClerkJob(modalJob2) && (
+                                <span className="vk-tpi-clerk-badge-prefix" style={{ fontSize: 10 }}>
+                                  🏢 รหัสงานกลุ่มเสมียน
+                                </span>
+                              )}
+                              <span>
+                                เรทงานนี้: เรทปกติ <strong style={{ color: 'var(--vk-ink)' }}>฿{modalJob2.normal_rate ?? 357}</strong> / กะ · เรทฝีมือ <strong style={{ color: modalJob2.skilled_rate ? '#b45309' : 'var(--vk-ink-3)' }}>{modalJob2.skilled_rate != null ? `฿${modalJob2.skilled_rate}` : 'ไม่มี (ตามเรทปกติ)'}</strong>
+                              </span>
+                            </div>
+                          )}
                         </div>
 
                         <div className="vk-field-group">
@@ -2898,20 +3142,10 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                         <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6d28d9', marginBottom: 4 }}>
                           วันที่เกิดเหตุ:
                         </label>
-                        <input
-                          type="date"
+                        <ThaiDatePicker
                           value={modalSafetyFineDate}
-                          onChange={(e) => setModalSafetyFineDate(e.target.value)}
-                          style={{
-                            width: '100%',
-                            height: 32,
-                            padding: '0 8px',
-                            fontSize: 12,
-                            borderRadius: 6,
-                            border: '1px solid #c4b5fd',
-                            background: '#ffffff',
-                            color: '#1e1b4b',
-                          }}
+                          onChange={(val) => setModalSafetyFineDate(val || '')}
+                          placeholder="วว/ดด/ปปปป (พ.ศ.)"
                         />
                       </div>
                       <div>
@@ -3206,9 +3440,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                         <tr key={job.id} style={{ background: isZero ? '#fafafa' : '#ffffff' }}>
                           {/* รหัสงาน */}
                           <td style={{ fontWeight: 700, fontFamily: 'var(--vk-mono)' }}>
-                            <span className="vk-tpi-code-tag" style={{ fontSize: 11 }}>
-                              {job.code}
-                            </span>
+                            <JobCodeBadge job={job} style={{ fontSize: 11 }} />
                           </td>
 
                           {/* แผนก */}

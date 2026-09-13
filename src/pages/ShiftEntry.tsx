@@ -99,13 +99,41 @@ export default function ShiftEntry() {
   const periodStart = currentPeriod ? parseLocal(currentPeriod.period_start) : new Date()
   const periodEnd   = currentPeriod ? parseLocal(currentPeriod.period_end)   : new Date()
 
+  // List of all dates strictly within the current open period
+  const periodDates = useMemo(() => {
+    if (!currentPeriod?.period_start || !currentPeriod?.period_end) return []
+    const dates: string[] = []
+    const start = parseLocal(currentPeriod.period_start)
+    const end = parseLocal(currentPeriod.period_end)
+    const d = new Date(start)
+    while (d <= end) {
+      dates.push(fmtDate(d))
+      d.setDate(d.getDate() + 1)
+    }
+    return dates
+  }, [currentPeriod?.period_start, currentPeriod?.period_end])
+
+  const getValidDateForPeriod = (targetDate: Date | null, period: Period | null): Date => {
+    if (!period) return targetDate || new Date()
+    const targetStr = targetDate ? fmtDate(targetDate) : ''
+    if (targetStr >= period.period_start && targetStr <= period.period_end) {
+      return targetDate!
+    }
+    const today = new Date()
+    const todayStr = fmtDate(today)
+    if (todayStr >= period.period_start && todayStr <= period.period_end) {
+      return today
+    }
+    return parseLocal(period.period_start)
+  }
+
   const [currentDate, setCurrentDate] = useState<Date | null>(null)
-  const activeDate = currentDate ?? new Date(Math.min(periodEnd.getTime(), Date.now()))
+  const activeDate = getValidDateForPeriod(currentDate, currentPeriod || null)
   const activeDateStr = fmtDate(activeDate)
   const weekend = isWeekend(activeDateStr)
 
-  const isAtStart = activeDateStr <= fmtDate(periodStart)
-  const isAtEnd   = activeDateStr >= fmtDate(periodEnd)
+  const isAtStart = currentPeriod ? activeDateStr <= currentPeriod.period_start : true
+  const isAtEnd   = currentPeriod ? activeDateStr >= currentPeriod.period_end : true
 
   // ── employees ──
   const { data: employees = [] } = useQuery<Employee[]>({
@@ -361,28 +389,64 @@ export default function ShiftEntry() {
         top: 'var(--vk-topbar-h)',
         zIndex: 20,
       }}>
-        {/* Row 1: prev / date + weekend badge / next */}
+        {/* Row 1: prev / date / next */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-          <button className="vk-btn vk-btn--ghost" style={{ height: 32, padding: '0 10px' }} disabled={isAtStart} onClick={() => navigate(-1)}>
-            <ChevronLeft style={{ width: 15, height: 15 }} />
-          </button>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 210, justifyContent: 'center' }}>
-            <div style={{
-              fontFamily: 'var(--vk-sans)', fontWeight: 700, fontSize: 17, letterSpacing: '-0.01em',
-              color: isHoliday ? '#6F4A0E' : weekend ? '#5b21b6' : 'var(--vk-ink)',
-            }}>
-              {fmtDisplay(activeDateStr)}
-            </div>
-            {/* Mobile only: badge inline with date */}
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, position: 'relative' }}>
+            <button className="vk-btn vk-btn--ghost" style={{ height: 32, padding: '0 10px' }} disabled={isAtStart} onClick={() => navigate(-1)} title="วันก่อนหน้า">
+              <ChevronLeft style={{ width: 15, height: 15 }} />
+            </button>
+            {periodDates.length > 0 ? (
+              <select
+                value={activeDateStr}
+                onChange={e => {
+                  setCurrentDate(parseLocal(e.target.value))
+                  clearSelection()
+                }}
+                style={{
+                  fontFamily: 'var(--vk-sans)',
+                  fontWeight: 700,
+                  fontSize: 16,
+                  letterSpacing: '-0.01em',
+                  color: isHoliday ? '#6F4A0E' : weekend ? '#5b21b6' : 'var(--vk-ink)',
+                  background: 'var(--vk-paper)',
+                  border: '1px solid var(--vk-rule-soft)',
+                  borderRadius: 6,
+                  padding: '4px 10px',
+                  cursor: 'pointer',
+                  outline: 'none',
+                  width: 240,
+                  textAlign: 'center',
+                }}
+                aria-label="เลือกวันที่ในงวด"
+              >
+                {periodDates.map(dStr => (
+                  <option key={dStr} value={dStr}>
+                    {fmtDisplay(dStr)}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <div style={{
+                fontFamily: 'var(--vk-sans)', fontWeight: 700, fontSize: 17, letterSpacing: '-0.01em',
+                color: isHoliday ? '#6F4A0E' : weekend ? '#5b21b6' : 'var(--vk-ink)',
+                width: 240, textAlign: 'center',
+              }}>
+                {fmtDisplay(activeDateStr)}
+              </div>
+            )}
+            <button className="vk-btn vk-btn--ghost" style={{ height: 32, padding: '0 10px' }} disabled={isAtEnd} onClick={() => navigate(1)} title="วันถัดไป">
+              <ChevronRight style={{ width: 15, height: 15 }} />
+            </button>
+
+            {/* Mobile only: badge inline with date positioned absolutely without pushing button */}
             {weekend && (
-              <span className="md:hidden" style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', color: '#5b21b6', background: 'rgba(91,33,182,0.08)', padding: '2px 8px', borderRadius: 999, whiteSpace: 'nowrap' }}>
-                วันหยุดสัปดาห์
-              </span>
+              <div style={{ position: 'absolute', left: '100%', marginLeft: 10, whiteSpace: 'nowrap', pointerEvents: 'none' }} className="md:hidden">
+                <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', color: '#5b21b6', background: 'rgba(91,33,182,0.08)', padding: '2px 8px', borderRadius: 999 }}>
+                  วันหยุดสัปดาห์
+                </span>
+              </div>
             )}
           </div>
-          <button className="vk-btn vk-btn--ghost" style={{ height: 32, padding: '0 10px' }} disabled={isAtEnd} onClick={() => navigate(1)}>
-            <ChevronRight style={{ width: 15, height: 15 }} />
-          </button>
         </div>
         {/* Row 2: holiday checkbox + weekend badge (desktop) + save button */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

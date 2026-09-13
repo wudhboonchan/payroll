@@ -11,8 +11,9 @@ import { calculateTpiPayroll, type TpiShiftRow, type TpiPayrollCalculationResult
 import { employeeWageForm } from '../features/tpi/employeeWageForm'
 import { referenceJobs } from '../features/tpi/referenceJobs'
 import { VKSlipDocument } from '../components/VKSlipDocument'
-import { formatEmployeeFullName, compareEmployeeCode, formatThaiDateDDMMYYYY } from '../lib/formatters'
-import { isTpiCompany } from '../features/tpi/model'
+import { formatEmployeeFullName, compareEmployeeCode, formatThaiDateDDMMYYYY, formatMonthlyCycleRange } from '../lib/formatters'
+import { isTpiCompany, isTpiJobCode } from '../features/tpi/model'
+import { formatSafetyEquipmentDetail, formatUniformDetail } from '../lib/deductionProducts'
 import '../styles/tokens.css'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -126,6 +127,7 @@ export default function PaySlip() {
   }, [periods, selectedPeriodId])
 
   const currentPeriod = periods.find(p => p.id === selectedPeriodId) || periods[0]
+  const monthCycle = formatMonthlyCycleRange(currentPeriod?.period_end)
 
   const handlePrint = () => {
     const el = slipRef.current
@@ -171,20 +173,20 @@ export default function PaySlip() {
     queryKey: ['employees-payslip', user?.factory_id],
     queryFn: async () => {
       const { data, error } = await supabase.from('employees')
-        .select('id,employee_code,prefix,first_name,last_name,nationality,position,job_title,wage_type,rate_per_12h,payment_method,bank_name,bank_account,exempt_social_security,status')
+        .select('id,employee_code,prefix,first_name,last_name,nationality,position,job_title,wage_type,rate_per_12h,payment_method,bank_name,bank_account,exempt_social_security,status,national_id,social_security_number,data_complete,is_safety_officer,has_position_allowance')
         .eq('factory_id', user?.factory_id ?? '').order('employee_code')
       if (error) throw error
       return (data || []).sort((a: any, b: any) => compareEmployeeCode(a.employee_code, b.employee_code))
-    }, enabled: !!user?.factory_id, staleTime: 0,
+    }, enabled: !!user?.factory_id, staleTime: 0, refetchOnMount: 'always',
   })
 
   const { data: allEntries = [] } = useQuery<any[]>({
-    queryKey: ['all-payroll-entries', currentPeriod?.id],
+    queryKey: ['payslip-all-entries', currentPeriod?.id],
     queryFn: async () => {
       const { data, error } = await supabase.from('payroll_entries' as any)
-        .select('employee_id, override_normal, override_shift, override_ot, override_special, amount_special, override_reason').eq('period_id', currentPeriod.id)
+        .select('*').eq('period_id', currentPeriod.id)
       if (error) throw error; return data
-    }, enabled: !!currentPeriod?.id, staleTime: 0,
+    }, enabled: !!currentPeriod?.id, staleTime: 0, refetchOnMount: 'always',
   })
 
   const { data: factoryData } = useQuery<any>({
@@ -256,7 +258,7 @@ export default function PaySlip() {
         .select('*').eq('period_id', currentPeriod.id).eq('employee_id', selectedEmpId!)
       if (error) throw error
       return data?.[0] ?? null   // use array fetch to avoid .single() error on no-row
-    }, enabled: !!currentPeriod?.id && !!selectedEmpId, staleTime: 0,
+    }, enabled: !!currentPeriod?.id && !!selectedEmpId, staleTime: 0, refetchOnMount: 'always',
   })
 
   const { data: empAdvances = [] } = useQuery<any[]>({
@@ -274,6 +276,7 @@ export default function PaySlip() {
     },
     enabled: !!currentPeriod?.id && !!selectedEmpId,
     staleTime: 0,
+    refetchOnMount: 'always',
   })
 
   // Fetch ALL shifts for period (Diamond), filter by employee in JS
@@ -426,67 +429,77 @@ export default function PaySlip() {
   const clerkHourly = clerkDaily / 8
   const isThai      = !selectedEmp?.nationality || selectedEmp.nationality === 'ไทย'
 
+  // ── calculations for selected employee ──
+  const tpiCalc = useMemo(() => {
+    if (!isTpi || !selectedEmp || !currentPeriod || empTpiShifts.length === 0) return null
+    return calculateTpiPayroll({
+      employee: selectedEmp,
+      shifts: empTpiShifts,
+      advances: (empAdvances.length > 0 ? empAdvances : (entry?.deduct_advance ? [{ amount: Number(entry.deduct_advance) }] : [])),
+      period: currentPeriod,
+      overrides: {
+        override_normal: entry?.override_normal != null ? Number(entry.override_normal) : null,
+        override_shift: entry?.override_shift != null ? Number(entry.override_shift) : null,
+      },
+      extras: {
+        amount_diligence: Number(entry?.amount_diligence || 0),
+        amount_position: Number(entry?.amount_position || 0),
+        amount_special: Number(entry?.amount_special || 0),
+        special_note: entry?.special_note || '',
+        deduct_safety_equipment: Number(entry?.deduct_safety_equipment || 0),
+        deduct_uniform: Number(entry?.deduct_uniform || 0),
+      },
+    })
+  }, [isTpi, selectedEmp, currentPeriod, empTpiShifts, empAdvances, entry])
+
+  const stdCalc = useMemo(() => {
+    if (isTpi || !selectedEmp || !currentPeriod || empShifts.length === 0) return null
+    const periodDays = (() => {
+      const s = new Date(currentPeriod.period_start + 'T00:00:00')
+      const e = new Date(currentPeriod.period_end + 'T00:00:00')
+      return Math.round((e.getTime() - s.getTime()) / 86400000) + 1
+    })()
+    const isExempt = !!selectedEmp?.exempt_social_security
+    const hasSsNumber = !isThai ? !!(selectedEmp?.national_id?.trim() || selectedEmp?.social_security_number?.trim()) : true
+    const isProfileComplete = !!selectedEmp?.data_complete
+    const isSsEligible = !isExempt && (isThai || (hasSsNumber && isProfileComplete))
+    return calculatePayroll({
+      position: selectedEmp.position as 'worker' | 'clerk',
+      wage_type: selectedEmp.wage_type as 'daily' | 'monthly',
+      rate_per_12h: empRate,
+      normal_days: empIsClerk ? clerkNorm : normDays,
+      period_days: empIsClerk ? periodDays : undefined,
+      half_shift_days: empIsClerk ? 0 : halfDays,
+      holiday_ot_full_days: holFull, holiday_ot_half_days: holHalf,
+      partial_hours_total: empIsClerk ? 0 : partialHrs,
+      clerk_ot_hours: clerkOt, clerk_ot_1x_hours: clerkOt1x,
+      override_normal: entry?.override_normal != null ? Number(entry.override_normal) : null,
+      override_special: null,
+      amount_wood_excess: 0, amount_film: 0, amount_special: 0,
+      amount_diligence: 0, amount_position: 0,
+      social_security_rate: isSsEligible ? Number(currentPeriod?.social_security_rate ?? 0.05) : 0,
+      deduct_advance: 0, deduct_safety_equipment: 0, deduct_uniform: 0,
+    })
+  }, [isTpi, selectedEmp, currentPeriod, empShifts, empRate, empIsClerk, clerkNorm, normDays, halfDays, holFull, holHalf, partialHrs, clerkOt, clerkOt1x, entry, isThai])
+
   // ── outdated detection ──
   let isOutdated = false
   if (entry && selectedEmp) {
-    if (isTpi) {
-      if (empTpiShifts.length > 0 && currentPeriod) {
-        const c = calculateTpiPayroll({
-          employee: selectedEmp,
-          shifts: empTpiShifts,
-          advances: entry.deduct_advance ? [{ amount: Number(entry.deduct_advance) }] : [],
-          period: currentPeriod,
-          overrides: {
-            override_normal: entry.override_normal != null ? Number(entry.override_normal) : null,
-            override_shift: entry.override_shift != null ? Number(entry.override_shift) : null,
-          },
-          extras: {
-            amount_diligence: Number(entry.amount_diligence || 0),
-            amount_position: Number(entry.amount_position || 0),
-            amount_special: Number(entry.amount_special || 0),
-            special_note: entry.special_note || '',
-            deduct_safety_equipment: Number(entry.deduct_safety_equipment || 0),
-            deduct_uniform: Number(entry.deduct_uniform || 0),
-          },
-        })
-        const eps = 0.5
-        const checks: [number, number][] = [
-          [c.effectiveNormal, Number(entry.amount_normal || 0)],
-          [c.effectiveShift,  Number(entry.amount_shift || 0)],
-          [c.totalOtPay,     Number(entry.amount_ot || 0)],
-          [c.deductSocialSecurity, Number(entry.deduct_social_security || 0)],
-        ]
-        isOutdated = checks.some(([a, b]) => Math.abs(a - b) > eps)
-      }
-    } else if (empShifts.length > 0) {
-      const periodDays = currentPeriod ? (() => {
-        const s = new Date(currentPeriod.period_start + 'T00:00:00')
-        const e = new Date(currentPeriod.period_end + 'T00:00:00')
-        return Math.round((e.getTime() - s.getTime()) / 86400000) + 1
-      })() : undefined
-      const c = calculatePayroll({
-        position: selectedEmp.position as 'worker' | 'clerk',
-        wage_type: selectedEmp.wage_type as 'daily' | 'monthly',
-        rate_per_12h: empRate,
-        normal_days: empIsClerk ? clerkNorm : normDays,
-        period_days: empIsClerk ? periodDays : undefined,
-        half_shift_days: empIsClerk ? 0 : halfDays,
-        holiday_ot_full_days: holFull, holiday_ot_half_days: holHalf,
-        partial_hours_total: empIsClerk ? 0 : partialHrs,
-        clerk_ot_hours: clerkOt, clerk_ot_1x_hours: clerkOt1x,
-        override_normal: entry.override_normal != null ? Number(entry.override_normal) : null,
-        override_special: null,
-        amount_wood_excess: 0, amount_film: 0, amount_special: 0,
-        amount_diligence: 0, amount_position: 0,
-        social_security_rate: (isThai && !selectedEmp?.exempt_social_security) ? Number(currentPeriod?.social_security_rate ?? 0.05) : 0,
-        deduct_advance: 0, deduct_safety_equipment: 0, deduct_uniform: 0,
-      })
-      const eps = 0.5
+    const eps = 0.5
+    if (isTpi && tpiCalc) {
       const checks: [number, number][] = [
-        [c.amount_normal,              Number(entry.amount_normal)],
-        [c.amount_shift,               Number(entry.amount_shift)],
-        [c.amount_ot + c.amount_ot_1x, Number(entry.amount_ot)],
-        [c.deduct_social_security,     Number(entry.deduct_social_security)],
+        [tpiCalc.effectiveNormal, Number(entry.amount_normal || 0)],
+        [tpiCalc.effectiveShift,  Number(entry.amount_shift || 0)],
+        [tpiCalc.totalOtPay,     Number(entry.amount_ot || 0)],
+        [tpiCalc.deductSocialSecurity, Number(entry.deduct_social_security || 0)],
+      ]
+      isOutdated = checks.some(([a, b]) => Math.abs(a - b) > eps)
+    } else if (!isTpi && stdCalc) {
+      const checks: [number, number][] = [
+        [stdCalc.amount_normal,              Number(entry.amount_normal || 0)],
+        [stdCalc.amount_shift,               Number(entry.amount_shift || 0)],
+        [stdCalc.amount_ot + stdCalc.amount_ot_1x, Number(entry.amount_ot || 0)],
+        [stdCalc.deduct_social_security,     Number(entry.deduct_social_security || 0)],
       ]
       isOutdated = checks.some(([a, b]) => Math.abs(a - b) > eps)
     }
@@ -502,20 +515,6 @@ export default function PaySlip() {
     const amtSpecial = Number(entry.amount_special  || 0) + Number(entry.override_special || 0)
 
     if (isTpi) {
-      let tpiCalc: TpiPayrollCalculationResult | null = null
-      if (selectedEmp && currentPeriod && empTpiShifts.length > 0) {
-        tpiCalc = calculateTpiPayroll({
-          employee: selectedEmp,
-          shifts: empTpiShifts,
-          advances: entry.deduct_advance ? [{ amount: Number(entry.deduct_advance) }] : [],
-          period: currentPeriod,
-          overrides: {
-            override_normal: entry.override_normal != null ? Number(entry.override_normal) : null,
-            override_shift: entry.override_shift != null ? Number(entry.override_shift) : null,
-          }
-        })
-      }
-
       // Base rate for TPI
       const tpiFallbackRate = empRate > 0 ? empRate : 357
 
@@ -599,17 +598,21 @@ export default function PaySlip() {
 
       const specialSubs: string[] = []
       if (amtPos > 0) {
-        specialSubs.push(`ค่าตำแหน่ง ฿${amtPos.toLocaleString()}`)
+        specialSubs.push(monthCycle ? `ค่าตำแหน่ง (${monthCycle}) ฿${amtPos.toLocaleString()}` : `ค่าตำแหน่ง ฿${amtPos.toLocaleString()}`)
       }
       if (entry.special_note) {
         const notes = (entry.special_note as string).split(',').map(s => s.trim()).filter(Boolean)
         notes.forEach(n => {
           if (!n.includes('ค่าตำแหน่ง') && !specialSubs.includes(n)) {
-            specialSubs.push(n)
+            if (n.startsWith('ค่า จป.') && monthCycle) {
+              specialSubs.push(n.replace('ค่า จป.', `ค่า จป. (${monthCycle})`))
+            } else {
+              specialSubs.push(n)
+            }
           }
         })
       } else if (amtSpec > 0) {
-        specialSubs.push(`ค่า จป. ฿${amtSpec.toLocaleString()}`)
+        specialSubs.push(monthCycle ? `ค่า จป. (${monthCycle}) ฿${amtSpec.toLocaleString()}` : `ค่า จป. ฿${amtSpec.toLocaleString()}`)
       }
 
       return [
@@ -617,7 +620,7 @@ export default function PaySlip() {
         { label: 'ค่ากะ',                                 value: amtShift,     detail: detailShift,     subs: [] },
         { label: 'OT วันหยุดนักขัตฤกษ์ (×2)',              value: amtHolidayOt, detail: detailHolidayOt, subs: [] },
         { label: empIsClerk ? 'OT ล่วงเวลา (×2)' : 'OT ล่วงเวลา (×1.5)', value: amtRegularOt, detail: detailRegularOt, subs: [] },
-        { label: 'เบี้ยขยัน',                             value: Number(entry.amount_diligence || 0),   detail: null, subs: [] },
+        { label: monthCycle ? `เบี้ยขยัน (${monthCycle})` : 'เบี้ยขยัน', value: Number(entry.amount_diligence || 0),   detail: null, subs: [] },
         { label: 'เงินพิเศษ',                             value: totalSpecial,                          detail: null, subs: specialSubs },
       ].filter(r => r.value > 0 && r.label !== '')
     }
@@ -652,7 +655,15 @@ export default function PaySlip() {
 
     // split special_note by comma into individual sub-lines
     const specialSubs = entry.special_note
-      ? (entry.special_note as string).split(',').map((s: string) => s.trim()).filter(Boolean)
+      ? (entry.special_note as string).split(',').map((s: string) => s.trim()).filter(Boolean).map(n => {
+          if (n.startsWith('ค่า จป.') && monthCycle) {
+            return n.replace('ค่า จป.', `ค่า จป. (${monthCycle})`)
+          }
+          if (n.startsWith('ค่าตำแหน่ง') && monthCycle) {
+            return n.replace('ค่าตำแหน่ง', `ค่าตำแหน่ง (${monthCycle})`)
+          }
+          return n
+        })
       : []
     return [
       { label: empIsClerk ? 'ค่าจ้างปกติ (วันธรรมดา)' : 'ค่าจ้างปกติ (8 ชม.)', value: Number(entry.amount_normal || 0), detail: detailNormal, subs: [] as string[] },
@@ -662,15 +673,23 @@ export default function PaySlip() {
       { label: 'ค่าไม้ส่วนเกิน',  value: Number(entry.amount_wood_excess || 0), detail: null, subs: [] },
       { label: 'ค่าฟิล์ม',        value: Number(entry.amount_film || 0),        detail: null, subs: [] },
       { label: 'เงินพิเศษ',       value: amtSpecial,                            detail: null, subs: specialSubs },
-      { label: 'เบี้ยขยัน',       value: Number(entry.amount_diligence || 0),   detail: null, subs: [] },
-      { label: 'ค่าตำแหน่ง',      value: Number(entry.amount_position || 0),    detail: null, subs: [] },
+      { label: monthCycle ? `เบี้ยขยัน (${monthCycle})` : 'เบี้ยขยัน',       value: Number(entry.amount_diligence || 0),   detail: null, subs: [] },
+      { label: monthCycle ? `ค่าตำแหน่ง (${monthCycle})` : 'ค่าตำแหน่ง',      value: Number(entry.amount_position || 0),    detail: null, subs: [] },
     ].filter(r => r.value > 0 && r.label !== '')
   })() : []
 
   const deductions = entry ? (() => {
     const list: SlipDeductRow[] = []
-    if (Number(entry.deduct_social_security || 0) > 0) {
-      list.push({ label: 'ประกันสังคม', value: Number(entry.deduct_social_security) })
+
+    // Social Security (ปกส):
+    // 1. Stored value in DB entry
+    // 2. Fallback to live calculated value from payroll engine if DB is 0 or null (e.g. stale cache or updated profile)
+    const dbSs = Number(entry.deduct_social_security || 0)
+    const calcSs = isTpi ? Number(tpiCalc?.deductSocialSecurity || 0) : Number(stdCalc?.deduct_social_security || 0)
+    const ssVal = dbSs > 0 ? dbSs : (calcSs > 0 ? calcSs : 0)
+
+    if (ssVal > 0) {
+      list.push({ label: 'ประกันสังคม', value: ssVal })
     }
 
     if (empAdvances.length > 0) {
@@ -759,10 +778,18 @@ export default function PaySlip() {
     }
 
     if (Number(entry.deduct_safety_equipment || 0) > 0) {
-      list.push({ label: 'ค่าอุปกรณ์ความปลอดภัย', value: Number(entry.deduct_safety_equipment) })
+      list.push({
+        label: 'ค่าอุปกรณ์ความปลอดภัย',
+        value: Number(entry.deduct_safety_equipment),
+        detail: formatSafetyEquipmentDetail(Number(entry.deduct_safety_equipment)),
+      })
     }
     if (Number(entry.deduct_uniform || 0) > 0) {
-      list.push({ label: 'ค่าเสื้อพนักงาน', value: Number(entry.deduct_uniform) })
+      list.push({
+        label: 'ค่าเสื้อพนักงาน',
+        value: Number(entry.deduct_uniform),
+        detail: formatUniformDetail(Number(entry.deduct_uniform)),
+      })
     }
     return list
   })() : []
@@ -1012,7 +1039,7 @@ export default function PaySlip() {
                       employeeCode={selectedEmp.employee_code}
                       isSkilled={isSkilledEmp(selectedEmp)}
                       positionLabel={posLabel}
-                      jobTitle={selectedEmp.job_title}
+                      jobTitle={(selectedEmp.job_title && (!isTpi || !isTpiJobCode(selectedEmp.job_title))) ? selectedEmp.job_title : undefined}
                       periodLabel={currentPeriod ? thaiPeriod(currentPeriod.period_start, currentPeriod.period_end) : '—'}
                       paymentMethod={selectedEmp.payment_method === 'bank_transfer' ? 'bank_transfer' : 'cash'}
                       bankName={selectedEmp.bank_name}

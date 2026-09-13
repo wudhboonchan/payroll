@@ -85,12 +85,13 @@ BEGIN
       RAISE EXCEPTION 'รหัสงานหมดอายุ หรือยังไม่เริ่มใช้งาน'; 
     END IF;
     
-    -- Check if employee has skilled wage tier AND this shift matches their regular skilled job
+    -- Check if employee has skilled wage tier AND this shift matches their regular skilled job (or clerk rotation)
     SELECT 
       CASE 
         WHEN wp.rate_tier = 'skilled' AND wp.skilled_from <= p_date 
              AND (
-               wp.job_id = item.job_id 
+               job.code IN ('692021', '692032', '692041', '692050')
+               OR wp.job_id = item.job_id 
                OR lower(coalesce(wp.job_code, '')) = lower(job.code)
                OR lower(coalesce(emp.job_title, '')) = lower(job.code)
              )
@@ -99,7 +100,7 @@ BEGIN
       END INTO tier
     FROM tpi_employee_wage_profiles wp
     LEFT JOIN employees emp ON emp.id = wp.employee_id
-    WHERE wp.employee_id=item.employee_id AND wp.factory_id=p_factory FOR SHARE;
+    WHERE wp.employee_id=item.employee_id AND wp.factory_id=p_factory;
     
     tier := coalesce(tier, 'normal');
     amount := CASE WHEN tier = 'skilled' THEN job.skilled_rate ELSE job.normal_rate END;

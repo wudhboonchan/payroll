@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAppStore } from '../../store/useAppStore'
 import { errorMessage, tpiDb } from './api'
 import { localDate, type WageProfile, type RateTier } from './model'
+import { ThaiDatePicker } from '../../components/common/ThaiDatePicker'
 export function WageFields({profile,onSave}:{profile?:WageProfile;onSave:(tier:RateTier,date:string|null)=>Promise<void>}) {
  const [tier,setTier]=useState<RateTier>(profile?.rate_tier||'normal')
  const [date,setDate]=useState(profile?.skilled_from||localDate())
@@ -10,7 +11,7 @@ export function WageFields({profile,onSave}:{profile?:WageProfile;onSave:(tier:R
  return <fieldset className="tpi-wage-fields"><legend>เรทค่าแรง</legend><p>เลือกประจำตัวพนักงานครั้งเดียว ระบบใช้เรทนี้กับทุกรหัสงานตามวันที่มีผล</p><div>
  <label><input type="radio" name="tpi-rate-tier" value="normal" checked={tier==='normal'} onChange={()=>setTier('normal')}/> ค่าแรงปกติ (ยังไม่ผ่านโปร)</label>
  <label><input type="radio" name="tpi-rate-tier" value="skilled" checked={tier==='skilled'} onChange={()=>setTier('skilled')}/> ค่าแรงฝีมือ (ผ่านโปรแล้ว)</label></div>
- {tier==='skilled'&&<label>วันที่เริ่มใช้เรทฝีมือ<input className="vk-input" type="date" value={date} onChange={e=>setDate(e.target.value)}/></label>}
+ {tier==='skilled'&&<div><label style={{ display: 'block', marginBottom: 4 }}>วันที่เริ่มใช้เรทฝีมือ</label><ThaiDatePicker value={date} onChange={val=>setDate(val||'')} placeholder="วว/ดด/ปปปป (พ.ศ.)"/></div>}
  <p>ปกติเริ่มต้น 357 บาท/กะ · ฝีมือตามรหัสงาน · กะที่บันทึกแล้วคงเรทเดิม</p>
  <button className="vk-btn" type="button" disabled={busy||(tier==='skilled'&&!date)} onClick={async()=>{setBusy(true);setMessage('');try{await onSave(tier,tier==='skilled'?date:null);setMessage('บันทึกเรทพนักงานแล้ว')}catch(e){setMessage(errorMessage(e))}finally{setBusy(false)}}}>{busy?'กำลังบันทึก...':'บันทึกเรทพนักงาน'}</button><p role="status">{message}</p></fieldset>
 }

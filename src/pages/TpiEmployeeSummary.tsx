@@ -7,7 +7,7 @@ import { TopBar } from '../components/layout/TopBar'
 import { Search, X, CreditCard, FileSpreadsheet, Printer, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatPeriodLabel, formatEmployeeFullName, compareEmployeeCode } from '../lib/formatters'
-import { SHIFTS } from '../features/tpi/model'
+import { SHIFTS, isTpiJobCode } from '../features/tpi/model'
 import { employeeWageForm } from '../features/tpi/employeeWageForm'
 import { referenceJobs } from '../features/tpi/referenceJobs'
 import { calculateTpiPayroll, type TpiShiftRow } from '../features/tpi/payrollCalc'
@@ -81,7 +81,7 @@ function buildTpiEmployeeSummaryPdfHtml(
     ? `${emp.bank_name} ${maskBank(emp.bank_account)}`
     : '—'
   const posLabel = emp.position === 'clerk' ? 'เสมียน (Clerk)' : 'พนักงานทั่วไป (Worker)'
-  const jobTitleLabel = emp.job_title ? ` · ${emp.job_title}` : ''
+  const jobTitleLabel = emp.job_title && !isTpiJobCode(emp.job_title) ? ` · ${emp.job_title}` : ''
 
   const dailyRowsHtml = dailyAudit.map(day => {
     const isWorked = day.shifts && day.shifts.length > 0
@@ -127,7 +127,6 @@ function buildTpiEmployeeSummaryPdfHtml(
 
   const periodIncomeRowsHtml = [
     stats.amountDiligence > 0 ? `<tr><td style="padding:5px 8px;border-bottom:1px solid #eee">เบี้ยขยัน</td><td style="padding:5px 8px;border-bottom:1px solid #eee">เบี้ยขยันประจำงวด (สิ้นเดือน)</td><td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:right;font-family:monospace">฿${monoNum(stats.amountDiligence)}</td></tr>` : '',
-    stats.amountPosition > 0 ? `<tr><td style="padding:5px 8px;border-bottom:1px solid #eee">ค่าตำแหน่ง</td><td style="padding:5px 8px;border-bottom:1px solid #eee">ค่าตำแหน่งประจำงวด</td><td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:right;font-family:monospace">฿${monoNum(stats.amountPosition)}</td></tr>` : '',
     stats.amountSpecial > 0 ? `<tr><td style="padding:5px 8px;border-bottom:1px solid #eee">เงินพิเศษ / ปรับปรุง</td><td style="padding:5px 8px;border-bottom:1px solid #eee">${stats.specialNote || 'บันทึกในงวดนี้'}</td><td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:right;font-family:monospace">฿${monoNum(stats.amountSpecial)}</td></tr>` : '',
   ].join('')
 
@@ -613,7 +612,6 @@ export default function TpiEmployeeSummary() {
       rows.push(['ประเภทรายการ', 'รายละเอียด / หมายเหตุ', 'จำนวนเงิน (บาท)'])
 
       if (payrollResult.amountDiligence > 0) rows.push(['รายได้', 'เบี้ยขยันประจำงวด (สิ้นเดือน)', payrollResult.amountDiligence])
-      if (payrollResult.amountPosition > 0) rows.push(['รายได้', 'ค่าตำแหน่งประจำงวด', payrollResult.amountPosition])
       if (payrollResult.amountSpecial > 0) rows.push(['รายได้', `เงินพิเศษ / ปรับปรุง (${payrollResult.specialNote || ''})`, payrollResult.amountSpecial])
 
       if (payrollResult.deductSocialSecurity > 0) rows.push(['รายการหัก', 'ประกันสังคม (5% กะแรก)', -payrollResult.deductSocialSecurity])
@@ -824,7 +822,7 @@ export default function TpiEmployeeSummary() {
                     <span style={{ color: 'var(--vk-rule)', fontSize: 11 }}>·</span>
                     <span style={{ fontSize: 12, color: 'var(--vk-ink-3)' }}>
                       {selectedEmp.position === 'clerk' ? 'กลุ่มงานเสมียน' : 'กลุ่มงานทั่วไป'}
-                      {selectedEmp.job_title ? ` · ${selectedEmp.job_title}` : ''}
+                      {selectedEmp.job_title && !isTpiJobCode(selectedEmp.job_title) ? ` · ${selectedEmp.job_title}` : ''}
                     </span>
                     <span style={{ color: 'var(--vk-rule)', fontSize: 11 }}>·</span>
                     <span style={{ fontSize: 12, color: 'var(--vk-persimmon)', fontFamily: 'var(--vk-mono)' }}>
@@ -1031,7 +1029,7 @@ export default function TpiEmployeeSummary() {
               </div>
 
               {/* ── D. Period-level income (TPI Allowances) ── */}
-              {(payrollResult.amountDiligence > 0 || payrollResult.amountPosition > 0 || payrollResult.amountSpecial > 0) && (
+              {(payrollResult.amountDiligence > 0 || payrollResult.amountSpecial > 0) && (
                 <div style={{ borderTop: '2px solid var(--vk-rule)', background: 'var(--vk-paper)', width: '100%', boxSizing: 'border-box' }}>
                   <div style={{ padding: '10px 24px 7px', display: 'flex', alignItems: 'center', gap: 8 }}>
                     <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--vk-jade)' }}>รายได้ประจำงวด (ทีพีไอ)</div>
@@ -1039,7 +1037,6 @@ export default function TpiEmployeeSummary() {
 
                   {[
                     { label: 'เบี้ยขยันประจำงวด (สิ้นเดือน)', val: payrollResult.amountDiligence, note: '300 บาท/เดือน' },
-                    { label: 'ค่าตำแหน่งงาน', val: payrollResult.amountPosition, note: '1,000 บาท/เดือน' },
                     { label: 'เงินพิเศษ / ปรับปรุง', val: payrollResult.amountSpecial, note: payrollResult.specialNote || 'บันทึกในงวดนี้' },
                   ].filter(x => x.val > 0).map((item, i) => (
                     <div key={i} style={{ display: 'grid', gridTemplateColumns: '120px 110px minmax(0, 1fr) 90px', gap: 8, padding: '8px 24px', borderTop: '1px solid var(--vk-rule-soft)', alignItems: 'center', borderLeft: '3px solid var(--vk-jade)', boxSizing: 'border-box' }}>

@@ -6,6 +6,7 @@ import { getLiffProfile } from '../lib/liff'
 import type { SlipIncomeRow, SlipDeductRow } from '../components/VKSlipDocument'
 import { isTpiCompany } from '../features/tpi/model'
 import { ShieldAlert, Eye, Loader2, AlertCircle, Link2, CheckCircle2 } from 'lucide-react'
+import { formatMonthlyCycleRange } from '../lib/formatters'
 import '../styles/tokens.css'
 
 // ── types ─────────────────────────────────────────────────────────────────────
@@ -462,7 +463,17 @@ export default function LiffSlip() {
                        : !isClerk && otDays > 0 ? `฿${Math.round(baseNormal + baseShift)} × 2 × ${otDays} วัน` : null
     const detailOt1x   = isClerk && ot1Hrs > 0 ? `฿${clerkHourly.toFixed(2)} × 1.0 × ${ot1Hrs} ชม.` : null
 
-    const specialSubs = (entry.special_note as string || '').split(',').map((s: string) => s.trim()).filter(Boolean)
+    const monthCycle = formatMonthlyCycleRange(period?.period_end)
+
+    const specialSubs = (entry.special_note as string || '').split(',').map((s: string) => s.trim()).filter(Boolean).map((n: string) => {
+      if (n.startsWith('ค่า จป.') && monthCycle) {
+        return n.replace('ค่า จป.', `ค่า จป. (${monthCycle})`)
+      }
+      if (n.startsWith('ค่าตำแหน่ง') && monthCycle) {
+        return n.replace('ค่าตำแหน่ง', `ค่าตำแหน่ง (${monthCycle})`)
+      }
+      return n
+    })
 
     const amtNormal  = Number(entry.override_normal != null ? entry.override_normal : (entry.amount_normal || 0))
     const amtShift   = isClerk ? 0 : Number(entry.override_shift != null ? entry.override_shift : (entry.amount_shift || 0))
@@ -485,17 +496,21 @@ export default function LiffSlip() {
     const tpiTotalSpecial = amtPos + amtSpecial
     const tpiSpecialSubs: string[] = []
     if (amtPos > 0) {
-      tpiSpecialSubs.push(`ค่าตำแหน่ง ฿${amtPos.toLocaleString()}`)
+      tpiSpecialSubs.push(monthCycle ? `ค่าตำแหน่ง (${monthCycle}) ฿${amtPos.toLocaleString()}` : `ค่าตำแหน่ง ฿${amtPos.toLocaleString()}`)
     }
     if (entry.special_note) {
       const notes = (entry.special_note as string).split(',').map(s => s.trim()).filter(Boolean)
       notes.forEach(n => {
         if (!n.includes('ค่าตำแหน่ง') && !tpiSpecialSubs.includes(n)) {
-          tpiSpecialSubs.push(n)
+          if (n.startsWith('ค่า จป.') && monthCycle) {
+            tpiSpecialSubs.push(n.replace('ค่า จป.', `ค่า จป. (${monthCycle})`))
+          } else {
+            tpiSpecialSubs.push(n)
+          }
         }
       })
     } else if (amtSpecial > 0) {
-      tpiSpecialSubs.push(`ค่า จป. ฿${amtSpecial.toLocaleString()}`)
+      tpiSpecialSubs.push(monthCycle ? `ค่า จป. (${monthCycle}) ฿${amtSpecial.toLocaleString()}` : `ค่า จป. ฿${amtSpecial.toLocaleString()}`)
     }
 
     const income: SlipIncomeRow[] = isTpiSlip ? [
@@ -505,7 +520,7 @@ export default function LiffSlip() {
       { label: isClerk ? 'OT ล่วงเวลา (×2)' : 'OT ล่วงเวลา (×1.5)',         value: amtRegularOt, detail: detailRegularOt, subs: [] },
       { label: 'ค่าไม้ส่วนเกิน',  value: amtWood,          detail: null, subs: [] },
       { label: 'ค่าฟิล์ม',        value: amtFilm,          detail: null, subs: [] },
-      { label: 'เบี้ยขยัน',       value: amtDilig,         detail: null, subs: [] },
+      { label: monthCycle ? `เบี้ยขยัน (${monthCycle})` : 'เบี้ยขยัน',       value: amtDilig,         detail: null, subs: [] },
       { label: 'เงินพิเศษ',       value: tpiTotalSpecial,  detail: null, subs: tpiSpecialSubs },
     ].filter(r => r.value > 0 && r.label !== '') as SlipIncomeRow[] : [
       { label: isClerk ? 'ค่าจ้างปกติ (วันธรรมดา)' : 'ค่าจ้างปกติ (8 ชม.)', value: amtNormal, detail: detailNormal, subs: [] },
@@ -515,8 +530,8 @@ export default function LiffSlip() {
       { label: 'ค่าไม้ส่วนเกิน',  value: amtWood,    detail: null, subs: [] },
       { label: 'ค่าฟิล์ม',        value: amtFilm,    detail: null, subs: [] },
       { label: 'เงินพิเศษ',       value: amtSpecial, detail: null, subs: specialSubs },
-      { label: 'เบี้ยขยัน',       value: amtDilig,   detail: null, subs: [] },
-      { label: 'ค่าตำแหน่ง',      value: amtPos,     detail: null, subs: [] },
+      { label: monthCycle ? `เบี้ยขยัน (${monthCycle})` : 'เบี้ยขยัน',       value: amtDilig,   detail: null, subs: [] },
+      { label: monthCycle ? `ค่าตำแหน่ง (${monthCycle})` : 'ค่าตำแหน่ง',      value: amtPos,     detail: null, subs: [] },
     ].filter(r => r.value > 0 && r.label !== '') as SlipIncomeRow[]
 
     const deductions: SlipDeductRow[] = [

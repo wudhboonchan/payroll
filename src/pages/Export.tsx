@@ -5,11 +5,11 @@ import { supabase } from '../lib/supabase'
 import { useAppStore } from '../store/useAppStore'
 import { TopBar } from '../components/layout/TopBar'
 import { toast } from 'sonner'
-import { Download, FileText, Grid3x3, ShieldCheck, Loader2, Search, Check, X, Users, FileSpreadsheet, Printer } from 'lucide-react'
+import { Download, FileText, Grid3x3, ShieldCheck, Loader2, Search, Check, X, Users, FileSpreadsheet, Printer, Archive, FolderArchive } from 'lucide-react'
 import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
 import { formatPeriodLabel, compareEmployeeCode, formatEmployeeFullName } from '../lib/formatters'
-import { isTpiCompany } from '../features/tpi/model'
+import { isTpiCompany, isTpiJobCode } from '../features/tpi/model'
 import { calculatePayroll } from '../lib/payrollCalc'
 import { calculateTpiPayroll } from '../features/tpi/payrollCalc'
 import '../styles/tokens.css'
@@ -21,6 +21,48 @@ const MONTHS_SHORT = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค
 function thaiPeriod(start: string, end: string) {
   const s = new Date(start), e = new Date(end)
   return `${s.getDate()} ${MONTHS_SHORT[s.getMonth()]} – ${e.getDate()} ${MONTHS_SHORT[e.getMonth()]} ${e.getFullYear() + 543}`
+}
+
+function formatPeriodForFilename(start: string, end: string): string {
+  const s = new Date(start + 'T00:00:00')
+  const e = new Date(end + 'T00:00:00')
+  const sDay = s.getDate()
+  const eDay = e.getDate()
+  const sMonth = MONTHS_SHORT[s.getMonth()]
+  const eMonth = MONTHS_SHORT[e.getMonth()]
+  const year2 = String(e.getFullYear() + 543).slice(-2)
+
+  if (s.getMonth() === e.getMonth() && s.getFullYear() === e.getFullYear()) {
+    return `งวด_${sDay}-${eDay}_${sMonth}${year2}`
+  }
+  const sYear2 = String(s.getFullYear() + 543).slice(-2)
+  return `งวด_${sDay}${sMonth}${sYear2}-${eDay}${eMonth}${year2}`
+}
+
+let cachedLogoDataUrl: string | null = null
+function getLogoDataUrl(): Promise<string> {
+  if (cachedLogoDataUrl) return Promise.resolve(cachedLogoDataUrl)
+  return new Promise(resolve => {
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas')
+        canvas.width = img.naturalWidth || img.width
+        canvas.height = img.naturalHeight || img.height
+        const ctx = canvas.getContext('2d')
+        if (ctx) {
+          ctx.drawImage(img, 0, 0)
+          cachedLogoDataUrl = canvas.toDataURL('image/png')
+          resolve(cachedLogoDataUrl)
+          return
+        }
+      } catch {}
+      resolve('/logo.png')
+    }
+    img.onerror = () => resolve('/logo.png')
+    img.src = '/logo.png'
+  })
 }
 function maskBank(a?: string | null) {
   if (!a) return undefined
@@ -583,6 +625,8 @@ export default function Export() {
   const [pdfMonths,        setPdfMonths]        = useState<string[]>([])
   const [empSearch,        setEmpSearch]        = useState('')
   const [isGeneratingPDF,  setIsGeneratingPDF]  = useState(false)
+  const [pdfFormat,        setPdfFormat]        = useState<'merged' | 'zip'>('merged')
+  const [zipProgress,      setZipProgress]      = useState<{ current: number; total: number } | null>(null)
 
   // Summary modal state
   const [showSummaryModal,    setShowSummaryModal]    = useState(false)
@@ -916,36 +960,32 @@ export default function Export() {
         return
       }
 
-      const rows = Object.values(map).map((x: any) => {
-        const income = x.n + x.s + x.ot + x.w + x.f + x.sp + x.d + x.p
+      const items = Object.values(map).map((x: any) => {
+        const income = x.n + x.s + x.ot + x.w + x.f + x.sp + x.d + (isTpi ? 0 : x.p)
         const deduct = x.ss + x.adv + x.safe + x.uni
         const payMethod = x.emp.payment_method === 'bank_transfer' ? 'โอนธนาคาร' : (x.emp.payment_method === 'cash' ? 'เงินสด' : (x.emp.payment_method || '-'))
         const bankName = x.emp.payment_method === 'bank_transfer' ? (x.emp.bank_name || '-') : '-'
         const bankAccount = x.emp.payment_method === 'bank_transfer' ? (x.emp.bank_account || '-') : '-'
+        const channel = x.emp.payment_method === 'cash' ? 'เงินสด' : ((x.emp.bank_name || '').trim() || 'ไม่ระบุธนาคาร')
 
-        if (isTpi) {
-          return {
-            'รหัสพนักงาน': x.emp.employee_code,
-            'ชื่อ-นามสกุล': `${x.emp.first_name} ${x.emp.last_name}`.trim(),
-            'วิธีการรับเงิน': payMethod,
-            'ธนาคาร': bankName,
-            'เลขที่บัญชี': bankAccount,
-            'ค่าจ้างรวม': x.n + x.s,
-            'ค่าจ้างปกติ': x.n,
-            'ค่ากะ': x.s,
-            'OT': x.ot,
-            'เงินพิเศษ': x.sp,
-            'เบี้ยขยัน': x.d,
-            'ค่าตำแหน่ง': x.p,
-            'ประกันสังคม': x.ss,
-            'เบิกล่วงหน้า': x.adv,
-            'ค่าอุปกรณ์ความปลอดภัย': x.safe,
-            'ค่าเสื้อพนักงาน': x.uni,
-            'รวม': income - deduct
-          }
-        }
-
-        return {
+        const row = isTpi ? {
+          'รหัสพนักงาน': x.emp.employee_code,
+          'ชื่อ-นามสกุล': `${x.emp.first_name} ${x.emp.last_name}`.trim(),
+          'วิธีการรับเงิน': payMethod,
+          'ธนาคาร': bankName,
+          'เลขที่บัญชี': bankAccount,
+          'ค่าจ้างรวม': x.n + x.s,
+          'ค่าจ้างปกติ': x.n,
+          'ค่ากะ': x.s,
+          'OT': x.ot,
+          'เงินพิเศษ': x.sp,
+          'เบี้ยขยัน': x.d,
+          'ประกันสังคม': x.ss,
+          'เบิกล่วงหน้า': x.adv,
+          'ค่าอุปกรณ์ความปลอดภัย': x.safe,
+          'ค่าเสื้อพนักงาน': x.uni,
+          'รวม': income - deduct
+        } : {
           'รหัสพนักงาน': x.emp.employee_code,
           'ชื่อ-นามสกุล': `${x.emp.first_name} ${x.emp.last_name}`.trim(),
           'วิธีการรับเงิน': payMethod,
@@ -966,30 +1006,117 @@ export default function Export() {
           'ค่าเสื้อพนักงาน': x.uni,
           'รวม': income - deduct
         }
-      }).sort((a, b) => compareEmployeeCode(a['รหัสพนักงาน'], b['รหัสพนักงาน']))
+
+        return {
+          row,
+          channel,
+          empCode: x.emp.employee_code,
+        }
+      }).sort((a, b) => compareEmployeeCode(a.empCode, b.empCode))
+
+      const createSummaryRow = (rowsToSum: any[]) => {
+        const sum = (field: string) => rowsToSum.reduce((acc, r) => acc + (Number(r[field]) || 0), 0)
+        if (isTpi) {
+          return {
+            'รหัสพนักงาน': 'รวมทั้งสิ้น',
+            'ชื่อ-นามสกุล': `${rowsToSum.length} คน`,
+            'วิธีการรับเงิน': '',
+            'ธนาคาร': '',
+            'เลขที่บัญชี': '',
+            'ค่าจ้างรวม': sum('ค่าจ้างรวม'),
+            'ค่าจ้างปกติ': sum('ค่าจ้างปกติ'),
+            'ค่ากะ': sum('ค่ากะ'),
+            'OT': sum('OT'),
+            'เงินพิเศษ': sum('เงินพิเศษ'),
+            'เบี้ยขยัน': sum('เบี้ยขยัน'),
+            'ประกันสังคม': sum('ประกันสังคม'),
+            'เบิกล่วงหน้า': sum('เบิกล่วงหน้า'),
+            'ค่าอุปกรณ์ความปลอดภัย': sum('ค่าอุปกรณ์ความปลอดภัย'),
+            'ค่าเสื้อพนักงาน': sum('ค่าเสื้อพนักงาน'),
+            'รวม': sum('รวม'),
+          }
+        }
+        return {
+          'รหัสพนักงาน': 'รวมทั้งสิ้น',
+          'ชื่อ-นามสกุล': `${rowsToSum.length} คน`,
+          'วิธีการรับเงิน': '',
+          'ธนาคาร': '',
+          'เลขที่บัญชี': '',
+          'ค่าจ้างรวม': sum('ค่าจ้างรวม'),
+          'ค่าจ้างปกติ': sum('ค่าจ้างปกติ'),
+          'ค่ากะ': sum('ค่ากะ'),
+          'OT': sum('OT'),
+          'ค่าไม้เกิน': sum('ค่าไม้เกิน'),
+          'ค่าฟิล์ม': sum('ค่าฟิล์ม'),
+          'เงินพิเศษ': sum('เงินพิเศษ'),
+          'เบี้ยขยัน': sum('เบี้ยขยัน'),
+          'ค่าตำแหน่ง': sum('ค่าตำแหน่ง'),
+          'ประกันสังคม': sum('ประกันสังคม'),
+          'เบิกล่วงหน้า': sum('เบิกล่วงหน้า'),
+          'ค่าอุปกรณ์ความปลอดภัย': sum('ค่าอุปกรณ์ความปลอดภัย'),
+          'ค่าเสื้อพนักงาน': sum('ค่าเสื้อพนักงาน'),
+          'รวม': sum('รวม'),
+        }
+      }
+
+      const cols = isTpi ? [
+        { wch: 14 }, { wch: 24 }, { wch: 14 }, { wch: 16 }, { wch: 18 },
+        { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 12 },
+        { wch: 14 }, { wch: 12 }, { wch: 14 },
+        { wch: 14 }, { wch: 20 }, { wch: 16 }, { wch: 16 }
+      ] : [
+        { wch: 14 }, { wch: 24 }, { wch: 14 }, { wch: 16 }, { wch: 18 },
+        { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 12 },
+        { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 14 },
+        { wch: 14 }, { wch: 20 }, { wch: 16 }, { wch: 16 }
+      ]
 
       const label = getExportLabel()
       const wb = XLSX.utils.book_new()
-      const ws = XLSX.utils.aoa_to_sheet([[`ค่าแรง ${label}`]])
-      XLSX.utils.sheet_add_json(ws, rows, { origin: 'A2' })
-      if (isTpi) {
-        ws['!cols'] = [
-          { wch: 14 }, { wch: 24 }, { wch: 14 }, { wch: 16 }, { wch: 18 },
-          { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 12 },
-          { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 14 },
-          { wch: 14 }, { wch: 20 }, { wch: 16 }, { wch: 16 }
-        ]
-      } else {
-        ws['!cols'] = [
-          { wch: 14 }, { wch: 24 }, { wch: 14 }, { wch: 16 }, { wch: 18 },
-          { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 12 },
-          { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 14 },
-          { wch: 14 }, { wch: 20 }, { wch: 16 }, { wch: 16 }
-        ]
+      const usedSheetNames = new Set<string>()
+
+      const getSafeSheetName = (name: string): string => {
+        const cleaned = name.replace(/[\\/*?:[\]]/g, '').trim().slice(0, 31) || 'Sheet'
+        let unique = cleaned
+        let counter = 1
+        while (usedSheetNames.has(unique.toLowerCase())) {
+          const suffix = ` (${counter})`
+          unique = cleaned.slice(0, 31 - suffix.length) + suffix
+          counter++
+        }
+        usedSheetNames.add(unique.toLowerCase())
+        return unique
       }
-      XLSX.utils.book_append_sheet(wb, ws, 'Payroll Summary')
+
+      // Tab 1: Master sheet (all employees)
+      const masterRows = items.map(it => it.row)
+      const masterDataWithSummary = [...masterRows, createSummaryRow(masterRows)]
+      const masterWs = XLSX.utils.aoa_to_sheet([[`ค่าแรง ${label} (รวมทุกช่องทาง)`]])
+      XLSX.utils.sheet_add_json(masterWs, masterDataWithSummary, { origin: 'A2' })
+      masterWs['!cols'] = cols
+      XLSX.utils.book_append_sheet(wb, masterWs, getSafeSheetName('Payroll Summary'))
+
+      // Tabs 2..N: Split by payment channel (e.g. เงินสด, ธนาคาร A, ธนาคาร B)
+      const distinctChannels = Array.from(new Set(items.map(it => it.channel))).sort((a, b) => {
+        if (a === 'เงินสด') return -1
+        if (b === 'เงินสด') return 1
+        return a.localeCompare(b, 'th')
+      })
+
+      for (const ch of distinctChannels) {
+        const chItems = items.filter(it => it.channel === ch)
+        if (chItems.length === 0) continue
+
+        const chRows = chItems.map(it => it.row)
+        const chDataWithSummary = [...chRows, createSummaryRow(chRows)]
+        const chWs = XLSX.utils.aoa_to_sheet([[`ค่าแรง ${label} (${ch})`]])
+        XLSX.utils.sheet_add_json(chWs, chDataWithSummary, { origin: 'A2' })
+        chWs['!cols'] = cols
+        XLSX.utils.book_append_sheet(wb, chWs, getSafeSheetName(ch))
+      }
+
       XLSX.writeFile(wb, `Payroll_Summary_${label.replace(/[\s/*?:[\]]/g, '_')}.xlsx`)
-      toast.success('ดาวน์โหลด Payroll Excel สำเร็จ')
+      toast.success(`ดาวน์โหลด Payroll Excel สำเร็จ (สร้าง 1 แท็ปรวม + ${distinctChannels.length} แท็บตามช่องทางรับเงิน)`)
     } catch(e: any) {
       toast.error('เกิดข้อผิดพลาด', { description: e.message })
     } finally {
@@ -1062,14 +1189,15 @@ export default function Export() {
           'ชื่อ-นามสกุล': fullName,
           'สัญชาติ': nat,
           'เลขประจำตัวประชาชน/พาสปอร์ต': emp.national_id || '',
-          'ตำแหน่ง': posLabel,
-          'หน้าที่/แผนก': emp.job_title || '',
+          'กลุ่มงาน': posLabel,
+          'ตำแหน่ง': (!isTpi || !isTpiJobCode(emp.job_title)) ? (emp.job_title || '') : '',
           'ประเภทค่าจ้าง': emp.wage_type === 'monthly' ? 'รายเดือน' : 'รายวัน (12 ชม.)',
           'อัตราค่าจ้าง (บาท)': Number(emp.rate_per_12h) || 0,
         }
 
         if (isTpi) {
           row['ระดับค่าแรง TPI'] = profile?.rate_tier === 'skilled' ? 'ค่าแรงฝีมือ (Skilled)' : 'ทั่วไป (Normal)'
+          row['รหัสงานฝีมือ TPI'] = profile?.job_code || (isTpiJobCode(emp.job_title) ? emp.job_title : '-')
           row['วันที่เริ่มเป็นค่าแรงฝีมือ'] = (profile?.rate_tier === 'skilled' && profile?.skilled_from) ? profile.skilled_from : '-'
         }
 
@@ -1079,7 +1207,9 @@ export default function Export() {
         row['เลขประจำตัวผู้เสียภาษี/ประกันสังคม'] = emp.social_security_number || emp.national_id || '-'
         row['ยกเว้นประกันสังคม'] = emp.exempt_social_security ? 'ยกเว้น' : 'หัก ปกส.'
         row['เจ้าหน้าที่ จป.'] = emp.is_safety_officer ? 'เป็น จป.' : '-'
-        row['ค่าตำแหน่ง'] = emp.has_position_allowance ? 'มี' : '-'
+        if (!isTpi) {
+          row['ค่าตำแหน่ง'] = emp.has_position_allowance ? 'มี' : '-'
+        }
         row['สถานะ'] = emp.status === 'active' ? 'ปฏิบัติงานอยู่' : 'พ้นสภาพ'
         row['ความสมบูรณ์ข้อมูล'] = emp.data_complete ? 'สมบูรณ์' : 'ไม่สมบูรณ์'
         row['หมายเหตุ'] = emp.notes || ''
@@ -1097,18 +1227,18 @@ export default function Export() {
         { wch: 26 }, // ชื่อ-นามสกุล
         { wch: 12 }, // สัญชาติ
         { wch: 24 }, // เลขประจำตัวประชาชน/พาสปอร์ต
-        { wch: 16 }, // ตำแหน่ง
-        { wch: 18 }, // หน้าที่/แผนก
+        { wch: 16 }, // กลุ่มงาน
+        { wch: 18 }, // ตำแหน่ง
         { wch: 16 }, // ประเภทค่าจ้าง
         { wch: 16 }, // อัตราค่าจ้าง
-        ...(isTpi ? [{ wch: 20 }, { wch: 20 }] : []),
+        ...(isTpi ? [{ wch: 20 }, { wch: 18 }, { wch: 22 }] : []),
         { wch: 14 }, // วิธีรับเงิน
         { wch: 20 }, // ธนาคาร
         { wch: 20 }, // เลขบัญชี
         { wch: 24 }, // เลข ปกส.
         { wch: 16 }, // ยกเว้นประกันสังคม
         { wch: 14 }, // เจ้าหน้าที่ จป.
-        { wch: 14 }, // ค่าตำแหน่ง
+        ...(!isTpi ? [{ wch: 14 }] : []), // ค่าตำแหน่ง
         { wch: 14 }, // สถานะ
         { wch: 16 }, // ความสมบูรณ์ข้อมูล
         { wch: 24 }, // หมายเหตุ
@@ -1263,23 +1393,153 @@ export default function Export() {
       })
 
       const generatedAt = thaiDateTimeNow()
-      const slipsHtml = sorted.map((e,i) => {
-        const empShifts = isTpi
-          ? (allShifts as any[]).filter(s => s.employee_id === e.employee_id && s.work_date >= e.period.period_start && s.work_date <= e.period.period_end)
-          : (allShifts as any[]).filter(s => s.employee_id === e.employee_id && s.period_id === e.period_id)
-        return `<div style="page-break-after:${i<sorted.length-1?'always':'auto'};padding:0;margin:0">${buildSlipHtml(e, e.period, empShifts, branchName, generatedAt)}</div>`
-      }).join('')
 
-      const first = sorted[0]
-      const mm = String(new Date(first.period.period_start).getMonth()+1).padStart(2,'0')
-      const yyyy = new Date(first.period.period_start).getFullYear()
-      const filename = pdfTarget === 'individual'
-        ? `${first.employee.employee_code}_${first.employee.first_name}_${mm}${yyyy}`
-        : `All_Payslip_${mm}${yyyy}`
+      if (pdfFormat === 'zip') {
+        const html2canvas = (await import('html2canvas')).default
+        const { jsPDF } = await import('jspdf')
+        const fflate = await import('fflate')
 
-      const win = window.open('','_blank','width=900,height=700')
-      if (!win) { alert('กรุณาอนุญาต popup สำหรับการพิมพ์'); return }
-      win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${filename}</title>
+        setZipProgress({ current: 0, total: sorted.length })
+        const logoDataUrl = await getLogoDataUrl()
+
+        // Create an isolated iframe for clean rendering without parent stylesheets (avoids Tailwind oklch parse error)
+        const iframe = document.createElement('iframe')
+        iframe.id = 'slip-export-iframe'
+        iframe.style.position = 'fixed'
+        iframe.style.left = '-9999px'
+        iframe.style.top = '0'
+        iframe.style.width = '800px'
+        iframe.style.height = '1200px'
+        iframe.style.border = 'none'
+        iframe.style.background = '#ffffff'
+        document.body.appendChild(iframe)
+
+        const idoc = iframe.contentDocument || iframe.contentWindow?.document
+        if (!idoc) throw new Error('ไม่สามารถเข้าถึงหน้าต่างจำลองสำหรับสร้าง PDF ได้')
+
+        idoc.open()
+        idoc.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box}
+body{margin:0;padding:0;background:#fff;font-family:'Sarabun','Noto Sans Thai',sans-serif}
+</style>
+</head><body><div id="slip-wrapper" style="width:794px;background:#fff"></div></body></html>`)
+        idoc.close()
+
+        if (idoc.fonts && idoc.fonts.ready) {
+          await idoc.fonts.ready
+        }
+
+        const slipWrapper = idoc.getElementById('slip-wrapper')!
+        const zipFiles: Record<string, Uint8Array> = {}
+
+        try {
+          for (let i = 0; i < sorted.length; i++) {
+            const e = sorted[i]
+            setZipProgress({ current: i + 1, total: sorted.length })
+
+            const empShifts = isTpi
+              ? (allShifts as any[]).filter(s => s.employee_id === e.employee_id && s.work_date >= e.period.period_start && s.work_date <= e.period.period_end)
+              : (allShifts as any[]).filter(s => s.employee_id === e.employee_id && s.period_id === e.period_id)
+
+            const slipHtml = buildSlipHtml(e, e.period, empShifts, branchName, generatedAt)
+              .replace('src="/logo.png"', `src="${logoDataUrl}"`)
+
+            slipWrapper.innerHTML = slipHtml
+            // Wait briefly for layout & rendering to stabilize
+            await new Promise(r => setTimeout(r, 40))
+
+            const canvas = await html2canvas(slipWrapper, {
+              scale: 2,
+              useCORS: true,
+              logging: false,
+              backgroundColor: '#ffffff',
+              width: 794,
+              windowWidth: 794,
+            })
+
+            const pdf = new jsPDF({
+              orientation: 'portrait',
+              unit: 'mm',
+              format: 'a4',
+            })
+
+            const imgData = canvas.toDataURL('image/jpeg', 0.95)
+            const targetWidth = 200
+            let targetHeight = (canvas.height * targetWidth) / canvas.width
+            let x = 5
+            let y = 6
+
+            if (targetHeight > 285) {
+              const ratio = 285 / targetHeight
+              targetHeight = 285
+              const scaledWidth = targetWidth * ratio
+              x = (210 - scaledWidth) / 2
+            }
+
+            pdf.addImage(imgData, 'JPEG', x, y, targetWidth, targetHeight)
+            const pdfBytes = new Uint8Array(pdf.output('arraybuffer'))
+
+            const periodStr = formatPeriodForFilename(e.period.period_start, e.period.period_end)
+            const empCode = (e.employee?.employee_code || 'EMP').trim()
+            const fName = (e.employee?.first_name || '').trim()
+            const lName = (e.employee?.last_name || '').trim()
+            const namePart = lName ? `${fName}_${lName}` : fName
+            const baseFilename = `${empCode}_${namePart}_${periodStr}`.replace(/[\/\\:*?"<>|]/g, '_').replace(/\s+/g, '_')
+
+            let finalFilename = `${baseFilename}.pdf`
+            let counter = 1
+            while (zipFiles[finalFilename]) {
+              finalFilename = `${baseFilename}_(${counter}).pdf`
+              counter++
+            }
+            zipFiles[finalFilename] = pdfBytes
+          }
+        } finally {
+          if (iframe.parentNode) {
+            iframe.parentNode.removeChild(iframe)
+          }
+        }
+
+        const zipped = fflate.zipSync(zipFiles)
+        const blob = new Blob([zipped], { type: 'application/zip' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+
+        const firstPeriod = sorted[0]?.period
+        const zipPeriodStr = firstPeriod ? formatPeriodForFilename(firstPeriod.period_start, firstPeriod.period_end) : 'All'
+        const zipDownloadName = targetPeriodIds.length > 1 && pdfMonth
+          ? `PaySlips_${pdfMonth.replace(/\s+/g, '_')}.zip`
+          : `PaySlips_${zipPeriodStr}.zip`
+
+        a.download = zipDownloadName
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+
+        toast.success(`ดาวน์โหลดไฟล์ .ZIP รวมสลิปพนักงาน ${sorted.length} คน เรียบร้อยแล้ว`)
+        setShowPdfModal(false)
+      } else {
+        const slipsHtml = sorted.map((e,i) => {
+          const empShifts = isTpi
+            ? (allShifts as any[]).filter(s => s.employee_id === e.employee_id && s.work_date >= e.period.period_start && s.work_date <= e.period.period_end)
+            : (allShifts as any[]).filter(s => s.employee_id === e.employee_id && s.period_id === e.period_id)
+          return `<div style="page-break-after:${i<sorted.length-1?'always':'auto'};padding:0;margin:0">${buildSlipHtml(e, e.period, empShifts, branchName, generatedAt)}</div>`
+        }).join('')
+
+        const first = sorted[0]
+        const periodStr = formatPeriodForFilename(first.period.period_start, first.period.period_end)
+        const filename = pdfTarget === 'individual'
+          ? `${first.employee.employee_code}_${first.employee.first_name}_${periodStr}`
+          : `All_Payslip_${periodStr}`
+
+        const win = window.open('','_blank','width=900,height=700')
+        if (!win) { alert('กรุณาอนุญาต popup สำหรับการพิมพ์'); return }
+        win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${filename}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
@@ -1291,12 +1551,16 @@ body>div>div{border:none!important;box-shadow:none!important;border-bottom:1px s
 @media print{html,body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
 </style>
 </head><body>${slipsHtml}</body></html>`)
-      win.document.close(); win.focus()
-      setTimeout(()=>{win.print();win.close()},500)
-      toast.success('เปิดหน้าต่างพิมพ์แล้ว')
-      setShowPdfModal(false)
+        win.document.close(); win.focus()
+        setTimeout(()=>{win.print();win.close()},500)
+        toast.success('เปิดหน้าต่างพิมพ์แล้ว')
+        setShowPdfModal(false)
+      }
     } catch(e:any) { toast.error('เกิดข้อผิดพลาด',{description:e.message}) }
-    finally { setIsGeneratingPDF(false) }
+    finally {
+      setIsGeneratingPDF(false)
+      setZipProgress(null)
+    }
   }
 
   // ── Employee Summary Export (PDF & Excel) ───────────────────────────────────
@@ -1476,7 +1740,7 @@ body{margin:0;padding:0;background:#fff;font-family:'Sarabun',sans-serif}
 
           if (stats.clerkPeriodBase > 0) allRows.push(['รายได้', 'ค่าจ้างพื้นฐาน (ครึ่งเดือน)', stats.clerkPeriodBase])
           if (stats.entryDiligence > 0) allRows.push(['รายได้', 'เบี้ยขยันประจำงวด', stats.entryDiligence])
-          if (stats.entryPosition > 0) allRows.push(['รายได้', 'ค่าตำแหน่งประจำงวด', stats.entryPosition])
+          if (!isTpi && stats.entryPosition > 0) allRows.push(['รายได้', 'ค่าตำแหน่งประจำงวด', stats.entryPosition])
           if (stats.entrySpecial > 0) allRows.push(['รายได้', `เงินพิเศษ / ปรับปรุง (${e.special_note || ''})`, stats.entrySpecial])
 
           if (stats.entrySS > 0) allRows.push(['รายการหัก', 'ประกันสังคม', -stats.entrySS])
@@ -1529,7 +1793,7 @@ body{margin:0;padding:0;background:#fff;font-family:'Sarabun',sans-serif}
   })
 
   const allCards = [
-    { icon: Grid3x3,      color: 'var(--vk-jade)',      title: 'ตาราง Payroll รวม',        desc: 'ดาวน์โหลดข้อมูล Payroll ทุกคนในรูปแบบ .xlsx',                      btn: 'Download Excel', loading: isExportingXlsx, onClick: handleExportPayroll, adminOnly: true  },
+    { icon: Grid3x3,      color: 'var(--vk-jade)',      title: 'ตาราง Payroll รวม',        desc: 'ดาวน์โหลดข้อมูล Payroll ทุกคนในรูปแบบ .xlsx พร้อมแยก Tab ตามวิธีการรับเงิน (เงินสด/แต่ละธนาคาร)', btn: 'Download Excel', loading: isExportingXlsx, onClick: handleExportPayroll, adminOnly: true  },
     { icon: FileSpreadsheet, color: '#0284c7',          title: 'ฐานข้อมูลพนักงาน (Excel)',  desc: 'ส่งออกทะเบียนประวัติพนักงานทุกคน พร้อมตัวเลือกกรองสถานะ และแยก Sheet ตามสัญชาติ', btn: 'Export ฐานข้อมูล', loading: isExportingEmployees, onClick: () => setShowEmployeeExportModal(true), adminOnly: true },
     { icon: FileText,     color: 'var(--vk-crimson)',    title: 'PDF – Pay Slip รายบุคคล',  desc: 'สร้างไฟล์ PDF Pay Slip แยกตามรายชื่อพนักงาน หรือพิมพ์ทั้งบริษัท', btn: 'Download PDF',   loading: false,           onClick: ()=>setShowPdfModal(true), adminOnly: false },
     { icon: Users,        color: 'var(--vk-jade)',      title: 'สรุปภาพรวมพนักงาน',       desc: 'ส่งออกรายงานสรุปรายได้และบันทึกรายวัน (PDF/Excel) รายบุคคล หรือทั้งบริษัท', btn: 'ส่งออกข้อมูล',  loading: false,           onClick: ()=>setShowSummaryModal(true), adminOnly: false },
@@ -1741,15 +2005,66 @@ body{margin:0;padding:0;background:#fff;font-family:'Sarabun',sans-serif}
               )}
               </>
               )}
+
+              {/* Output format toggle */}
+              <div>
+                <div className="vk-eyebrow" style={{ marginBottom: 10 }}>รูปแบบไฟล์ที่ต้องการ (Output Format)</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  {[
+                    { v: 'merged', label: 'รวมเป็นไฟล์เดียว (Print/PDF)', sub: 'พิมพ์หรือบันทึก PDF รวมเล่มเดียว' },
+                    { v: 'zip',    label: 'แยกไฟล์เดี่ยวรายคน (.ZIP)', sub: 'ไฟล์ PDF แยกรายคนตามงวด' }
+                  ].map(opt => (
+                    <div key={opt.v} onClick={() => setPdfFormat(opt.v as any)}
+                      style={{
+                        padding: '12px 14px',
+                        border: `1px solid ${pdfFormat === opt.v ? 'var(--vk-persimmon)' : 'var(--vk-rule)'}`,
+                        background: pdfFormat === opt.v ? 'var(--vk-persimmon)' : 'var(--vk-paper)',
+                        cursor: 'pointer',
+                        transition: 'all 0.12s'
+                      }}>
+                      <div style={{ fontWeight: 700, fontSize: 13, color: pdfFormat === opt.v ? '#fff' : 'var(--vk-ink)' }}>{opt.label}</div>
+                      <div style={{ fontSize: 11, color: pdfFormat === opt.v ? 'rgba(255,255,255,0.75)' : 'var(--vk-ink-3)', marginTop: 3 }}>{opt.sub}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Progress indicator for ZIP generation */}
+              {zipProgress && (
+                <div style={{ padding: '12px 16px', background: 'var(--vk-paper)', border: '1px solid var(--vk-rule)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, fontWeight: 600 }}>
+                    <span style={{ color: 'var(--vk-ink)' }}>กำลังสร้างไฟล์ PDF รายบุคคล...</span>
+                    <span style={{ color: 'var(--vk-persimmon)' }}>{zipProgress.current} / {zipProgress.total} คน ({Math.round((zipProgress.current / zipProgress.total) * 100)}%)</span>
+                  </div>
+                  <div style={{ height: 6, background: '#eee', borderRadius: 3, overflow: 'hidden' }}>
+                    <div style={{ height: '100%', background: 'var(--vk-persimmon)', width: `${(zipProgress.current / zipProgress.total) * 100}%`, transition: 'width 0.15s ease' }} />
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Modal footer */}
             <div style={{ padding: '14px 24px', borderTop: '1px solid var(--vk-rule)', background: 'var(--vk-paper)', display: 'flex', gap: 8, flexShrink: 0 }}>
               <button className="vk-btn vk-btn--primary" onClick={handleGeneratePDF} disabled={isGeneratingPDF}
                 style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-                {isGeneratingPDF ? <><Loader2 style={{ width: 13, height: 13 }} />กำลังสร้าง PDF...</> : <><Download style={{ width: 13, height: 13 }} />ดาวน์โหลด PDF</>}
+                {isGeneratingPDF ? (
+                  <>
+                    <Loader2 style={{ width: 13, height: 13 }} className="animate-spin" />
+                    {zipProgress ? `กำลังสร้าง PDF (${zipProgress.current}/${zipProgress.total} คน)...` : 'กำลังสร้าง PDF...'}
+                  </>
+                ) : pdfFormat === 'zip' ? (
+                  <>
+                    <FolderArchive style={{ width: 14, height: 14 }} />
+                    ดาวน์โหลด .ZIP แยกรายคน
+                  </>
+                ) : (
+                  <>
+                    <Printer style={{ width: 14, height: 14 }} />
+                    เปิดพิมพ์ / บันทึก PDF รวม
+                  </>
+                )}
               </button>
-              <button className="vk-btn" onClick={() => setShowPdfModal(false)}>ยกเลิก</button>
+              <button className="vk-btn" onClick={() => setShowPdfModal(false)} disabled={isGeneratingPDF}>ยกเลิก</button>
             </div>
           </div>
         </div>

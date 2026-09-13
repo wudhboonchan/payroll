@@ -7,9 +7,10 @@ import { useState, useMemo } from 'react'
 import { Plus, Trash2, Pencil, AlertTriangle, Search, X, Camera, ShieldAlert, UserX } from 'lucide-react'
 import { toast } from 'sonner'
 import type { Job, WageProfile } from '../features/tpi/model'
-import { wageTier, localDate } from '../features/tpi/model'
+import { localDate, isTpiCompany } from '../features/tpi/model'
 import { demoJobs } from '../features/tpi/demoData'
 import { compareEmployeeCode, formatThaiDateDDMMYYYY } from '../lib/formatters'
+import { ThaiDatePicker } from '../components/common/ThaiDatePicker'
 import '../styles/tokens.css'
 
 function fmtNationality(nationality: string | null) {
@@ -105,8 +106,27 @@ function renderNotes(notes: string | null) {
 
 export default function Advances() {
   const { onMenuClick } = useOutletContext<{ onMenuClick: () => void }>()
-  const { user } = useAppStore()
+  const { user, companyContext } = useAppStore()
   const queryClient = useQueryClient()
+
+  const { data: factories = [] } = useQuery({
+    queryKey: ['factories-list'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('factories').select('id, name')
+      if (error) return []
+      return data || []
+    },
+    staleTime: 60000,
+  })
+
+  const currentFactoryName =
+    factories.find((f) => f.id === user?.factory_id)?.name ||
+    companyContext?.factoryName ||
+    companyContext?.name ||
+    ''
+
+  const isTpi = isTpiCompany(currentFactoryName)
+
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [modalMode, setModalMode] = useState<'advance' | 'carryover'>('advance')
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null)
@@ -207,13 +227,15 @@ export default function Advances() {
     }, enabled: !!user?.factory_id,
   })
 
-  const { data: advances = [] } = useQuery<any[]>({
+  const { data: advances = [], refetch: refetchAdvances } = useQuery<any[]>({
     queryKey: ['advances-v2', currentPeriod?.id],
     queryFn: async () => {
       if (!currentPeriod) return []
       const { data, error } = await supabase.from('advance_payments').select('id,employee_id,amount,notes,is_carryover,created_at,employee:employees(employee_code,first_name,last_name,nationality)').eq('period_id', currentPeriod.id).order('is_carryover', { ascending: false }).order('created_at', { ascending: false })
       if (error) throw error; return data
-    }, enabled: !!currentPeriod,
+    },
+    enabled: !!currentPeriod,
+    staleTime: 0,
   })
 
   // Auto-compute carryovers from previous period's payroll entries
@@ -263,7 +285,7 @@ export default function Advances() {
       if (error) return []
       return data || []
     },
-    enabled: !!user?.factory_id,
+    enabled: !!user?.factory_id && isTpi,
   })
 
   const jobs: Job[] = useMemo(() => {
@@ -294,7 +316,7 @@ export default function Advances() {
       if (error) return []
       return data || []
     },
-    enabled: !!user?.factory_id,
+    enabled: !!user?.factory_id && isTpi,
   })
 
   // ── Unified First Shift Lookup for Deductions ────────────────────
@@ -329,11 +351,12 @@ export default function Advances() {
             (firstShift.job_code_snapshot &&
               j.code.trim().toLowerCase() === firstShift.job_code_snapshot.trim().toLowerCase())
         )
+        const isClerk = matchedJob?.job_group === 'clerk' || (matchedJob?.code && ['692021', '692032', '692041', '692050'].includes(matchedJob.code.trim()))
         const baseRate =
           Number(firstShift.rate_snapshot) ||
           (firstShift.rate_tier === 'skilled'
-            ? matchedJob?.skilled_rate || 380
-            : matchedJob?.normal_rate || 357)
+            ? (matchedJob?.skilled_rate ?? (isClerk ? 377 : (matchedJob?.normal_rate || 357)))
+            : (matchedJob?.normal_rate || 357))
         const shiftNames = ['กะที่ 1 (กะเช้า)', 'กะที่ 2 (กะบ่าย)', 'กะที่ 3 (กะดึก)']
         const sName = shiftNames[firstShift.shift_index] || `กะที่ ${firstShift.shift_index + 1}`
 
@@ -474,7 +497,8 @@ export default function Advances() {
     if (!job) return
     let base = job.normal_rate || 357
     if (scanForm.rate_tier === 'skilled') {
-      base = job.skilled_rate || 380
+      const isClerk = job.job_group === 'clerk' || ['692021', '692032', '692041', '692050'].includes(job.code.trim())
+      base = job.skilled_rate ?? (isClerk ? 377 : (job.normal_rate || 357))
     } else if (scanForm.rate_tier === 'custom') {
       base = scanForm.base_rate
     }
@@ -492,7 +516,8 @@ export default function Advances() {
     if (tier === 'normal') {
       base = job?.normal_rate || 357
     } else if (tier === 'skilled') {
-      base = job?.skilled_rate || 380
+      const isClerk = job?.job_group === 'clerk' || (job?.code && ['692021', '692032', '692041', '692050'].includes(job.code.trim()))
+      base = job?.skilled_rate ?? (isClerk ? 377 : (job?.normal_rate || 357))
     }
     setScanForm((prev) => ({
       ...prev,
@@ -532,11 +557,14 @@ export default function Advances() {
       })
       if (error) throw error
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['advances-v2'] })
-      queryClient.invalidateQueries({ queryKey: ['advances'] })
-      queryClient.invalidateQueries({ queryKey: ['v2-stats'] })
-      queryClient.invalidateQueries({ queryKey: ['payment-channel-stats'] })
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['advances-v2'] }),
+        queryClient.invalidateQueries({ queryKey: ['advances'] }),
+        queryClient.invalidateQueries({ queryKey: ['v2-stats'] }),
+        queryClient.invalidateQueries({ queryKey: ['payment-channel-stats'] }),
+      ])
+      await refetchAdvances()
       toast.success('บันทึกรายการหักเงินสแกนหน้าไม่สำเร็จแล้ว')
       closeScanModal()
     },
@@ -585,7 +613,8 @@ export default function Advances() {
     if (!job) return
     let base = job.normal_rate || 357
     if (discForm.rate_tier === 'skilled') {
-      base = job.skilled_rate || 380
+      const isClerk = job.job_group === 'clerk' || ['692021', '692032', '692041', '692050'].includes(job.code.trim())
+      base = job.skilled_rate ?? (isClerk ? 377 : (job.normal_rate || 357))
     } else if (discForm.rate_tier === 'custom') {
       base = discForm.base_rate
     }
@@ -603,7 +632,8 @@ export default function Advances() {
     if (tier === 'normal') {
       base = job?.normal_rate || 357
     } else if (tier === 'skilled') {
-      base = job?.skilled_rate || 380
+      const isClerk = job?.job_group === 'clerk' || (job?.code && ['692021', '692032', '692041', '692050'].includes(job.code.trim()))
+      base = job?.skilled_rate ?? (isClerk ? 377 : (job?.normal_rate || 357))
     }
     setDiscForm((prev) => ({
       ...prev,
@@ -643,11 +673,14 @@ export default function Advances() {
       })
       if (error) throw error
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['advances-v2'] })
-      queryClient.invalidateQueries({ queryKey: ['advances'] })
-      queryClient.invalidateQueries({ queryKey: ['v2-stats'] })
-      queryClient.invalidateQueries({ queryKey: ['payment-channel-stats'] })
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['advances-v2'] }),
+        queryClient.invalidateQueries({ queryKey: ['advances'] }),
+        queryClient.invalidateQueries({ queryKey: ['v2-stats'] }),
+        queryClient.invalidateQueries({ queryKey: ['payment-channel-stats'] }),
+      ])
+      await refetchAdvances()
       toast.success('บันทึกรายการหักเงินลงโทษ ขาดงาน (ไม่มีคนแทน) แล้ว')
       closeDiscModal()
     },
@@ -676,11 +709,14 @@ export default function Advances() {
         if (error) throw error
       }
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['advances-v2'] })
-      queryClient.invalidateQueries({ queryKey: ['advances'] })
-      queryClient.invalidateQueries({ queryKey: ['v2-stats'] })
-      queryClient.invalidateQueries({ queryKey: ['payment-channel-stats'] })
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['advances-v2'] }),
+        queryClient.invalidateQueries({ queryKey: ['advances'] }),
+        queryClient.invalidateQueries({ queryKey: ['v2-stats'] }),
+        queryClient.invalidateQueries({ queryKey: ['payment-channel-stats'] }),
+      ])
+      await refetchAdvances()
       toast.success(isEdit ? 'อัปเดตรายการแล้ว' : 'บันทึกการเบิกล่วงหน้าแล้ว')
       closeModal()
     },
@@ -700,11 +736,14 @@ export default function Advances() {
       const { error } = await supabase.from('advance_payments').insert(rows)
       if (error) throw error
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['advances-v2'] })
-      queryClient.invalidateQueries({ queryKey: ['advances'] })
-      queryClient.invalidateQueries({ queryKey: ['v2-stats'] })
-      queryClient.invalidateQueries({ queryKey: ['payment-channel-stats'] })
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['advances-v2'] }),
+        queryClient.invalidateQueries({ queryKey: ['advances'] }),
+        queryClient.invalidateQueries({ queryKey: ['v2-stats'] }),
+        queryClient.invalidateQueries({ queryKey: ['payment-channel-stats'] }),
+      ])
+      await refetchAdvances()
       toast.success(`บันทึกยอดตกค้าง ${pendingCarryovers.length} รายการแล้ว`)
     },
     onError: (e: Error) => toast.error('บันทึกไม่สำเร็จ', { description: e.message }),
@@ -715,11 +754,14 @@ export default function Advances() {
       const { error } = await supabase.from('advance_payments').delete().eq('id', id)
       if (error) throw error
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['advances-v2'] })
-      queryClient.invalidateQueries({ queryKey: ['advances'] })
-      queryClient.invalidateQueries({ queryKey: ['v2-stats'] })
-      queryClient.invalidateQueries({ queryKey: ['payment-channel-stats'] })
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['advances-v2'] }),
+        queryClient.invalidateQueries({ queryKey: ['advances'] }),
+        queryClient.invalidateQueries({ queryKey: ['v2-stats'] }),
+        queryClient.invalidateQueries({ queryKey: ['payment-channel-stats'] }),
+      ])
+      await refetchAdvances()
       toast.success('ลบรายการแล้ว')
     },
   })
@@ -755,38 +797,42 @@ export default function Advances() {
               style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, borderColor: '#d97706', color: '#92400e' }}>
               <AlertTriangle style={{ width: 13, height: 13 }} /> บันทึกยอดค้างจากงวดก่อน
             </button>
-            <button
-              className="vk-btn vk-btn--ghost"
-              onClick={openScanModal}
-              disabled={!currentPeriod}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                fontSize: 12,
-                borderColor: '#ef4444',
-                color: '#b91c1c',
-                background: '#fef2f2',
-              }}
-            >
-              <Camera style={{ width: 13, height: 13 }} /> หักเงินสแกนหน้าไม่สำเร็จ
-            </button>
-            <button
-              className="vk-btn vk-btn--ghost"
-              onClick={openDiscModal}
-              disabled={!currentPeriod}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                fontSize: 12,
-                borderColor: '#ea580c',
-                color: '#c2410c',
-                background: '#fff7ed',
-              }}
-            >
-              <UserX style={{ width: 13, height: 13 }} /> หักลงโทษ ขาดงาน (ไม่มีคนแทน)
-            </button>
+            {isTpi && (
+              <>
+                <button
+                  className="vk-btn vk-btn--ghost"
+                  onClick={openScanModal}
+                  disabled={!currentPeriod}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    fontSize: 12,
+                    borderColor: '#ef4444',
+                    color: '#b91c1c',
+                    background: '#fef2f2',
+                  }}
+                >
+                  <Camera style={{ width: 13, height: 13 }} /> หักเงินสแกนหน้าไม่สำเร็จ
+                </button>
+                <button
+                  className="vk-btn vk-btn--ghost"
+                  onClick={openDiscModal}
+                  disabled={!currentPeriod}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    fontSize: 12,
+                    borderColor: '#ea580c',
+                    color: '#c2410c',
+                    background: '#fff7ed',
+                  }}
+                >
+                  <UserX style={{ width: 13, height: 13 }} /> หักลงโทษ ขาดงาน (ไม่มีคนแทน)
+                </button>
+              </>
+            )}
             <button className="vk-btn vk-btn--primary" onClick={() => openCreate('advance')} disabled={!currentPeriod}>
               <Plus style={{ width: 15, height: 15 }} /> เพิ่มรายการเบิก
             </button>
@@ -800,13 +846,13 @@ export default function Advances() {
       <div style={{ maxWidth: 1136, width: '100%', margin: '0 auto', padding: '0 36px 48px', boxSizing: 'border-box' }}>
 
         {/* ── ตารางรวม (columns align ทุกแถว) ─────────────────────── */}
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
           <colgroup>
-            <col style={{ width: 90 }} />
-            <col style={{ width: 240 }} />
+            <col style={{ width: 110 }} />
+            <col style={{ width: 300 }} />
             <col />
-            <col style={{ width: 160 }} />
-            <col style={{ width: 80 }} />
+            <col style={{ width: 170 }} />
+            <col style={{ width: 74 }} />
           </colgroup>
           <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
             <tr>
@@ -839,11 +885,11 @@ export default function Advances() {
                   return (
                     <tr key={e.employee_id} style={{ borderBottom: '1px solid #fde68a', background: '#fef9ec', borderLeft: '3px dashed #d97706', opacity: 0.85 }}>
                       <td style={{ padding: '13px 14px', fontFamily: 'var(--vk-mono)', fontSize: 12, color: '#92400e' }}>{emp?.employee_code}</td>
-                      <td style={{ padding: '13px 14px', fontWeight: 600, fontSize: 14, color: '#78350f', whiteSpace: 'nowrap' }}>
+                      <td style={{ padding: '13px 14px', fontWeight: 600, fontSize: 14, color: '#78350f', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {emp?.first_name} {emp?.last_name}{fmtNationality(emp?.nationality) ? ` (${fmtNationality(emp?.nationality)})` : ''}
                       </td>
-                      <td style={{ padding: '13px 14px', fontSize: 13, color: '#92400e', fontStyle: 'italic' }}>ยอดเบิกเกินค้างจากงวดก่อน</td>
-                      <td style={{ padding: '13px 14px', textAlign: 'right', fontFamily: 'var(--vk-mono)', fontSize: 14, fontVariantNumeric: 'tabular-nums', color: '#b45309', fontWeight: 700 }}>
+                      <td style={{ padding: '13px 14px', fontSize: 13, color: '#92400e', fontStyle: 'italic', wordBreak: 'break-word' }}>ยอดเบิกเกินค้างจากงวดก่อน</td>
+                      <td style={{ padding: '13px 14px', textAlign: 'right', fontFamily: 'var(--vk-mono)', fontSize: 14, fontVariantNumeric: 'tabular-nums', color: '#b45309', fontWeight: 700, whiteSpace: 'nowrap' }}>
                         – {e.deficit.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                       </td>
                       <td style={{ padding: '13px 14px', textAlign: 'right' }}>
@@ -875,11 +921,11 @@ export default function Advances() {
                   onMouseEnter={e => (e.currentTarget.style.background = '#fef3c7')}
                   onMouseLeave={e => (e.currentTarget.style.background = '#fffbeb')}>
                   <td style={{ padding: '13px 14px', fontFamily: 'var(--vk-mono)', fontSize: 12, color: '#92400e' }}>{emp?.employee_code}</td>
-                  <td style={{ padding: '13px 14px', fontWeight: 600, fontSize: 14, color: '#78350f', whiteSpace: 'nowrap' }}>
+                  <td style={{ padding: '13px 14px', fontWeight: 600, fontSize: 14, color: '#78350f', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {emp?.first_name} {emp?.last_name}{fmtNationality(emp?.nationality) ? ` (${fmtNationality(emp?.nationality)})` : ''}
                   </td>
-                  <td style={{ padding: '13px 14px', fontSize: 13, color: '#92400e' }}>{renderNotes(a.notes)}</td>
-                  <td style={{ padding: '13px 14px', textAlign: 'right', fontFamily: 'var(--vk-mono)', fontSize: 14, fontVariantNumeric: 'tabular-nums', color: '#b45309', fontWeight: 700 }}>
+                  <td style={{ padding: '13px 14px', fontSize: 13, color: '#92400e', wordBreak: 'break-word' }}>{renderNotes(a.notes)}</td>
+                  <td style={{ padding: '13px 14px', textAlign: 'right', fontFamily: 'var(--vk-mono)', fontSize: 14, fontVariantNumeric: 'tabular-nums', color: '#b45309', fontWeight: 700, whiteSpace: 'nowrap' }}>
                     – {Number(a.amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                   </td>
                   <td style={{ padding: '13px 14px', textAlign: 'right' }}>
@@ -919,11 +965,11 @@ export default function Advances() {
                   onMouseEnter={e => (e.currentTarget.style.background = 'var(--vk-persimmon-tint)')}
                   onMouseLeave={e => (e.currentTarget.style.background = '')}>
                   <td style={{ padding: '13px 14px', fontFamily: 'var(--vk-mono)', fontSize: 12 }}>{emp?.employee_code}</td>
-                  <td style={{ padding: '13px 14px', fontWeight: 600, fontSize: 14, whiteSpace: 'nowrap' }}>
+                  <td style={{ padding: '13px 14px', fontWeight: 600, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {emp?.first_name} {emp?.last_name}{fmtNationality(emp?.nationality) ? ` (${fmtNationality(emp?.nationality)})` : ''}
                   </td>
-                  <td style={{ padding: '13px 14px', fontSize: 13, color: 'var(--vk-ink-3)' }}>{renderNotes(a.notes)}</td>
-                  <td style={{ padding: '13px 14px', textAlign: 'right', fontFamily: 'var(--vk-mono)', fontSize: 14, fontVariantNumeric: 'tabular-nums', color: 'var(--vk-crimson)' }}>
+                  <td style={{ padding: '13px 14px', fontSize: 13, color: 'var(--vk-ink-3)', wordBreak: 'break-word' }}>{renderNotes(a.notes)}</td>
+                  <td style={{ padding: '13px 14px', textAlign: 'right', fontFamily: 'var(--vk-mono)', fontSize: 14, fontVariantNumeric: 'tabular-nums', color: 'var(--vk-crimson)', whiteSpace: 'nowrap' }}>
                     – {Number(a.amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                   </td>
                   <td style={{ padding: '13px 14px', textAlign: 'right' }}>
@@ -1068,7 +1114,7 @@ export default function Advances() {
       )}
 
       {/* ── Modal หักเงินสแกนหน้าไม่สำเร็จ (TPI) ─────────────────────── */}
-      {isScanModalOpen && (
+      {isTpi && isScanModalOpen && (
         <div
           className="vk-root"
           style={{
@@ -1296,19 +1342,11 @@ export default function Advances() {
                 <label className="vk-eyebrow" style={{ display: 'block', marginBottom: 5 }}>
                   2. วันที่เกิดเหตุตามรายงานจาก HR <span style={{ color: '#b91c1c' }}>*</span>
                 </label>
-                <input
-                  type="date"
-                  className="vk-input vk-input-date"
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    height: 38,
-                    lineHeight: '38px',
-                    paddingTop: 0,
-                    paddingBottom: 0,
-                  }}
+                <ThaiDatePicker
                   value={scanForm.work_date}
-                  onChange={(e) => handleScanDateChange(e.target.value)}
+                  onChange={(val) => handleScanDateChange(val || localDate())}
+                  placeholder="วว/ดด/ปปปป (พ.ศ.)"
+                  required
                 />
                 <div style={{ fontSize: 11, color: 'var(--vk-ink-3)', marginTop: 4 }}>
                   ระบุวันที่เกิดเหตุในอดีต (รายงานจาก HR ย้อนหลังอย่างน้อย 1 เดือน) ระบบจะดึงข้อมูลกะแรกของวันนั้นให้อัตโนมัติ
@@ -1367,7 +1405,7 @@ export default function Advances() {
                       fontWeight: 600,
                     }}
                   >
-                    กำลังดึงข้อมูลกะแรกของวันที่ {scanForm.work_date}...
+                    กำลังดึงข้อมูลกะแรกของวันที่ {formatThaiDateDDMMYYYY(scanForm.work_date)}...
                   </div>
                 ) : scanLookupResult?.source === 'shift' ? (
                   <div
@@ -1489,7 +1527,8 @@ export default function Advances() {
                 {(() => {
                   const job = jobs.find((j) => j.id === scanForm.job_id)
                   const normalRate = job?.normal_rate ?? 357
-                  const skilledRate = job?.skilled_rate ?? 380
+                  const isClerk = job?.job_group === 'clerk' || (job?.code && ['692021', '692032', '692041', '692050'].includes(job.code.trim()))
+                  const skilledRate = job?.skilled_rate ?? (isClerk ? 377 : normalRate)
                   return (
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
                       <label
@@ -1684,7 +1723,7 @@ export default function Advances() {
       )}
 
       {/* ── Modal หักเงินลงโทษ ขาดงาน (ไม่มีคนแทน) ─────────────────────── */}
-      {isDiscModalOpen && (
+      {isTpi && isDiscModalOpen && (
         <div
           className="vk-root"
           style={{
@@ -1912,19 +1951,11 @@ export default function Advances() {
                 <label className="vk-eyebrow" style={{ display: 'block', marginBottom: 5 }}>
                   2. วันที่เกิดเหตุตามรายงานจาก HR <span style={{ color: '#c2410c' }}>*</span>
                 </label>
-                <input
-                  type="date"
-                  className="vk-input vk-input-date"
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    height: 38,
-                    lineHeight: '38px',
-                    paddingTop: 0,
-                    paddingBottom: 0,
-                  }}
+                <ThaiDatePicker
                   value={discForm.work_date}
-                  onChange={(e) => handleDiscDateChange(e.target.value)}
+                  onChange={(val) => handleDiscDateChange(val || localDate())}
+                  placeholder="วว/ดด/ปปปป (พ.ศ.)"
+                  required
                 />
                 <div style={{ fontSize: 11, color: 'var(--vk-ink-3)', marginTop: 4 }}>
                   ระบุวันที่เกิดเหตุในอดีต ระบบจะดึงข้อมูลกะแรกของวันนั้นให้อัตโนมัติ
@@ -1983,7 +2014,7 @@ export default function Advances() {
                       fontWeight: 600,
                     }}
                   >
-                    กำลังดึงข้อมูลกะแรกของวันที่ {discForm.work_date}...
+                    กำลังดึงข้อมูลกะแรกของวันที่ {formatThaiDateDDMMYYYY(discForm.work_date)}...
                   </div>
                 ) : discLookupResult?.source === 'shift' ? (
                   <div
@@ -2105,7 +2136,8 @@ export default function Advances() {
                 {(() => {
                   const job = jobs.find((j) => j.id === discForm.job_id)
                   const normalRate = job?.normal_rate ?? 357
-                  const skilledRate = job?.skilled_rate ?? 380
+                  const isClerk = job?.job_group === 'clerk' || (job?.code && ['692021', '692032', '692041', '692050'].includes(job.code.trim()))
+                  const skilledRate = job?.skilled_rate ?? (isClerk ? 377 : normalRate)
                   return (
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
                       <label

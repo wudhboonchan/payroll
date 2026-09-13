@@ -14,13 +14,12 @@ import {
   Edit2,
   X,
   Save,
-  DownloadCloud,
-  Loader2,
 } from 'lucide-react'
 import type { Job } from '../features/tpi/model'
 import { demoJobs } from '../features/tpi/demoData'
 import { cleanJobNotes } from '../features/tpi/referenceJobs'
 import { formatThaiBuddhistDate } from '../lib/formatters'
+import { ThaiDatePicker } from '../components/common/ThaiDatePicker'
 import { toast } from 'sonner'
 import '../styles/tokens.css'
 import './TpiShiftEntry.css'
@@ -77,14 +76,24 @@ export default function TpiJobManagement() {
       }
       return (data || []).map((j: Job) => {
         let active = j.active
-        if (j.notes && j.notes.includes('ระบุหยุด') && j.active) {
-          active = false
+        let needsActiveFix = false
+
+        // คืนค่าสถานะเปิดใช้งาน: Master Data ไม่มีสถานะงดรับกะ (การงดรับกะเป็นเรื่องของการปฏิบัติงานรายวัน)
+        if (!active && (['P315/69VRK', 'P322/69VRK', 'P422/69', 'Q121/69', 'Q131/69'].includes(j.code.trim()) || (j.notes && j.notes.includes('ระบุหยุด')))) {
+          active = true
+          needsActiveFix = true
         }
+
         const cleanNotes = cleanJobNotes(j.notes)
-        if ((j.notes && j.notes !== cleanNotes) || j.active !== active) {
+        const notesChanged = j.notes && j.notes !== cleanNotes
+
+        if (needsActiveFix || notesChanged) {
           supabase
             .from('tpi_job_codes')
-            .update({ active, notes: cleanNotes })
+            .update({
+              active,
+              notes: cleanNotes,
+            })
             .eq('id', j.id)
             .then(() => {})
         }
@@ -97,13 +106,17 @@ export default function TpiJobManagement() {
   // Seamlessly merge DB jobs with demo/reference jobs so that all standard reference jobs
   // remain accessible even if only some of them have been individually edited and saved to DB
   const jobs: Job[] = useMemo(() => {
+    const normalizeCodeKey = (c: string) => c.trim().toLowerCase().replace(/\/69(vrk)?$/i, '')
     const dbMap = new Map(dbJobs.map((j) => [j.code.trim().toLowerCase(), j]))
+    const dbNormMap = new Map(dbJobs.map((j) => [normalizeCodeKey(j.code), j]))
 
     const merged: Job[] = demoJobs.map((refJob) => {
       const key = refJob.code.trim().toLowerCase()
-      const dbMatch = dbMap.get(key)
+      const normKey = normalizeCodeKey(refJob.code)
+      const dbMatch = dbMap.get(key) || dbNormMap.get(normKey)
       if (dbMatch) {
-        dbMap.delete(key)
+        dbMap.delete(dbMatch.code.trim().toLowerCase())
+        dbNormMap.delete(normalizeCodeKey(dbMatch.code))
         return dbMatch
       }
       return refJob
@@ -206,11 +219,6 @@ export default function TpiJobManagement() {
   // ── 5. Save Mutation ───────────────────────────────────────────────
   const saveMutation = useMutation({
     mutationFn: async (payload: Partial<Job>) => {
-      if (!user?.factory_id) {
-        toast.info('โหมดตัวอย่าง (Preview Mode): บันทึกข้อมูลจำลองเรียบร้อย')
-        return
-      }
-
       const quota = Number(payload.quota) || 0
       const pm = payload.planned_morning !== null && payload.planned_morning !== undefined ? Number(payload.planned_morning) : null
       const pa = payload.planned_afternoon !== null && payload.planned_afternoon !== undefined ? Number(payload.planned_afternoon) : null
@@ -222,6 +230,16 @@ export default function TpiJobManagement() {
       const skilledRate = payload.skilled_rate !== null && payload.skilled_rate !== undefined && payload.skilled_rate !== ''
         ? Number(payload.skilled_rate)
         : (isClerk ? 377 : null)
+
+      if (!user?.factory_id) {
+        const key = (payload.code || '').trim().toLowerCase()
+        const normKey = key.replace(/\/69(vrk)?$/i, '')
+        const idx = demoJobs.findIndex((j) => j.id === editingJob?.id || j.code.trim().toLowerCase() === key || j.code.trim().toLowerCase().replace(/\/69(vrk)?$/i, '') === normKey)
+        if (idx >= 0) {
+          demoJobs[idx] = { ...demoJobs[idx], ...payload, skilled_rate: skilledRate } as Job
+        }
+        return { ...payload, skilled_rate: skilledRate }
+      }
 
       const jobPayload: any = {
         factory_id: user.factory_id,
@@ -243,25 +261,42 @@ export default function TpiJobManagement() {
         updated_at: new Date().toISOString(),
       }
 
-      const doSave = (p: any) => {
+      const doSave = async (p: any) => {
         if (editingJob && editingJob.id && !editingJob.id.startsWith('reference-')) {
-          return supabase.from('tpi_job_codes').update(p).eq('id', editingJob.id)
+          const res = await supabase.from('tpi_job_codes').update(p).eq('id', editingJob.id).select()
+          if (res.data && res.data.length > 0) return res
+          // If no row updated by id, fallback to upsert by factory_id + code
+          return supabase.from('tpi_job_codes').upsert(p, { onConflict: 'factory_id,code' }).select()
         } else {
-          return supabase.from('tpi_job_codes').upsert(p, { onConflict: 'factory_id,code' })
+          return supabase.from('tpi_job_codes').upsert(p, { onConflict: 'factory_id,code' }).select()
         }
       }
 
-      let { error } = await doSave(jobPayload)
+      let res = await doSave(jobPayload)
+      let error = res.error
       // Graceful fallback if job_group column is not yet migrated in remote Supabase
       if (error && error.message?.includes('job_group')) {
         delete jobPayload.job_group
-        const retry = await doSave(jobPayload)
-        error = retry.error
+        res = await doSave(jobPayload)
+        error = res.error
       }
 
       if (error) throw error
+      return (res.data && res.data[0]) ? res.data[0] : jobPayload
     },
-    onSuccess: () => {
+    onSuccess: (savedData: any) => {
+      if (savedData) {
+        queryClient.setQueryData(['tpi-jobs-manager', user?.factory_id], (old: Job[] | undefined) => {
+          if (!old) return old
+          const key = (savedData.code || '').trim().toLowerCase()
+          const normKey = key.replace(/\/69(vrk)?$/i, '')
+          const exists = old.some((j) => (savedData.id && j.id === savedData.id) || j.code.trim().toLowerCase() === key || j.code.trim().toLowerCase().replace(/\/69(vrk)?$/i, '') === normKey)
+          if (exists) {
+            return old.map((j) => ((savedData.id && j.id === savedData.id) || j.code.trim().toLowerCase() === key || j.code.trim().toLowerCase().replace(/\/69(vrk)?$/i, '') === normKey) ? { ...j, ...savedData } : j)
+          }
+          return [...old, savedData]
+        })
+      }
       queryClient.invalidateQueries({ queryKey: ['tpi-jobs-manager'] })
       queryClient.invalidateQueries({ queryKey: ['tpi-jobs'] })
       queryClient.invalidateQueries({ queryKey: ['tpi-job-codes'] })
@@ -301,67 +336,6 @@ export default function TpiJobManagement() {
     saveMutation.mutate(formData)
   }
 
-  const [isImporting, setIsImporting] = useState(false)
-  const handleImportAllStandardJobs = async () => {
-    if (!user?.factory_id) {
-      toast.info('โหมดตัวอย่าง (Preview Mode): บันทึกข้อมูลจำลองเรียบร้อย')
-      return
-    }
-    setIsImporting(true)
-    try {
-      const payload = demoJobs.map((ref) => {
-        const quota = ref.quota || 0
-        const pm = ref.planned_morning ?? null
-        const pa = ref.planned_afternoon ?? null
-        const pn = ref.planned_night ?? null
-        const isPlanValid = pm !== null && pa !== null && pn !== null && (pm + pa + pn === quota)
-        const isClerk = ref.job_group === 'clerk' || ['692021', '692032', '692041', '692050'].includes(ref.code.trim())
-
-        return {
-          factory_id: user.factory_id,
-          code: ref.code.trim(),
-          department: ref.department.trim(),
-          description: ref.description.trim(),
-          job_type: ref.job_type || 'regular',
-          job_group: isClerk ? 'clerk' : 'general',
-          quota,
-          planned_morning: isPlanValid ? pm : null,
-          planned_afternoon: isPlanValid ? pa : null,
-          planned_night: isPlanValid ? pn : null,
-          normal_rate: ref.normal_rate || 357,
-          skilled_rate: isClerk ? 377 : (ref.skilled_rate ?? null),
-          valid_from: ref.valid_from || null,
-          expires_on: ref.expires_on || null,
-          active: ref.active ?? true,
-          notes: cleanJobNotes(ref.notes),
-          updated_at: new Date().toISOString(),
-        }
-      })
-
-      let { error } = await supabase
-        .from('tpi_job_codes')
-        .upsert(payload, { onConflict: 'factory_id,code' })
-
-      if (error && error.message?.includes('job_group')) {
-        // Fallback if column not yet in DB
-        const strippedPayload = payload.map(({ job_group, ...rest }: any) => rest)
-        const retry = await supabase.from('tpi_job_codes').upsert(strippedPayload, { onConflict: 'factory_id,code' })
-        error = retry.error
-      }
-
-      if (error) throw error
-
-      queryClient.invalidateQueries({ queryKey: ['tpi-jobs-manager'] })
-      queryClient.invalidateQueries({ queryKey: ['tpi-jobs'] })
-      queryClient.invalidateQueries({ queryKey: ['tpi-job-codes'] })
-      toast.success('✓ นำเข้ารหัสงานมาตรฐานทั้งหมด (25 รายการ) เข้าสู่ฐานข้อมูลเรียบร้อยแล้ว')
-    } catch (err: any) {
-      toast.error(`เกิดข้อผิดพลาดในการนำเข้า: ${err.message}`)
-    } finally {
-      setIsImporting(false)
-    }
-  }
-
   return (
     <div className="vk-root" style={{ background: 'var(--vk-paper)', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
       {/* 1. Header Bar */}
@@ -383,16 +357,6 @@ export default function TpiJobManagement() {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <button
-              type="button"
-              className="vk-btn"
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5, borderColor: 'var(--vk-jade)', color: 'var(--vk-jade)', background: '#ffffff' }}
-              onClick={handleImportAllStandardJobs}
-              disabled={isImporting}
-            >
-              {isImporting ? <Loader2 style={{ width: 14, height: 14 }} className="animate-spin" /> : <DownloadCloud style={{ width: 14, height: 14 }} />}
-              บันทึกรหัสมาตรฐานทั้งหมด (25 รายการ) ลงฐานข้อมูล
-            </button>
             <button
               type="button"
               className="vk-btn vk-btn--primary"
@@ -639,7 +603,7 @@ export default function TpiJobManagement() {
                   transition: 'all 0.15s ease',
                 }}
               >
-                งดจัดกะ ({stats.totalJobs - stats.activeJobsCount})
+                ยกเลิกรหัสงาน ({stats.totalJobs - stats.activeJobsCount})
               </button>
             </div>
           </div>
@@ -782,11 +746,11 @@ export default function TpiJobManagement() {
                         <td style={{ padding: '12px 12px', textAlign: 'center', whiteSpace: 'nowrap' }}>
                           {job.active ? (
                             <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 6px', borderRadius: 4, background: '#dcfce7', color: '#15803d' }}>
-                              ใช้งาน
+                              เปิดใช้งาน
                             </span>
                           ) : (
-                            <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 6px', borderRadius: 4, background: '#f1f5f9', color: '#64748b' }}>
-                              งดจัดกะ
+                            <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 6px', borderRadius: 4, background: '#fee2e2', color: '#dc2626' }}>
+                              ยกเลิกรหัสงาน
                             </span>
                           )}
                         </td>
@@ -920,7 +884,7 @@ export default function TpiJobManagement() {
                         setFormData({
                           ...formData,
                           job_group: newGroup,
-                          skilled_rate: newGroup === 'clerk' && (!formData.skilled_rate || formData.skilled_rate === 400) ? 377 : formData.skilled_rate,
+                          skilled_rate: newGroup === 'clerk' ? (formData.skilled_rate ?? 377) : formData.skilled_rate,
                         })
                       }}
                       className="vk-modal-select"
@@ -991,7 +955,7 @@ export default function TpiJobManagement() {
                       type="number"
                       min={0}
                       step={1}
-                      placeholder={formData.job_group === 'clerk' ? '377' : 'เช่น 400, 450 (เว้นว่างได้)'}
+                      placeholder={formData.job_group === 'clerk' ? '377' : 'เว้นว่างได้ (หากไม่มีเรทฝีมือ)'}
                       value={formData.skilled_rate ?? ''}
                       onChange={(e) => setFormData({ ...formData, skilled_rate: e.target.value === '' ? null : Number(e.target.value) })}
                       className="vk-input"
@@ -1005,16 +969,14 @@ export default function TpiJobManagement() {
                   </div>
                 )}
 
-                {/* Line 5: Dates */}
+                {/* Line 5: Dates (Thai Buddhist Era format) */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                   <div className="vk-field-group">
                     <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--vk-ink-2)' }}>วันที่เริ่มใช้ (ถ้ามี)</label>
-                    <input
-                      type="date"
-                      value={formData.valid_from || ''}
-                      onChange={(e) => setFormData({ ...formData, valid_from: e.target.value || null })}
-                      className="vk-input"
-                      style={{ background: '#ffffff', borderColor: '#cbd5e1' }}
+                    <ThaiDatePicker
+                      value={formData.valid_from}
+                      onChange={(val) => setFormData({ ...formData, valid_from: val })}
+                      placeholder="วว/ดด/ปปปป (พ.ศ.)"
                     />
                   </div>
 
@@ -1022,13 +984,11 @@ export default function TpiJobManagement() {
                     <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--vk-ink-2)' }}>
                       วันหมดอายุ {formData.job_type === 'temporary' ? <span style={{ color: 'var(--vk-crimson)' }}>*</span> : '(ถ้ามี)'}
                     </label>
-                    <input
-                      type="date"
+                    <ThaiDatePicker
                       required={formData.job_type === 'temporary'}
-                      value={formData.expires_on || ''}
-                      onChange={(e) => setFormData({ ...formData, expires_on: e.target.value || null })}
-                      className="vk-input"
-                      style={{ background: '#ffffff', borderColor: '#cbd5e1' }}
+                      value={formData.expires_on}
+                      onChange={(val) => setFormData({ ...formData, expires_on: val })}
+                      placeholder="วว/ดด/ปปปป (พ.ศ.)"
                     />
                   </div>
                 </div>
@@ -1067,7 +1027,7 @@ export default function TpiJobManagement() {
                       style={{ width: 18, height: 18, accentColor: 'var(--vk-persimmon)', cursor: 'pointer' }}
                     />
                     <span>
-                      {(formData.active ?? true) ? 'เปิดใช้งาน (พร้อมจัดกะ)' : 'งดจัดกะ (ไม่แสดงในตารางจัดกะ)'}
+                      {(formData.active ?? true) ? 'เปิดใช้งาน' : 'ยกเลิกรหัสงาน'}
                     </span>
                   </label>
                 </div>

@@ -28,3 +28,21 @@ export function productDeduction(id: string, quantity: number) {
   if (!Number.isSafeInteger(amount)) return null
   return { field: product.field, amount }
 }
+
+export function formatSafetyEquipmentDetail(amount: number, customDetail?: string): string {
+  if (customDetail && customDetail.trim()) return customDetail.trim()
+  if (!amount || amount <= 0) return ''
+  if (amount === 550) return 'รองเท้าเซฟตี้ 1 คู่ × ฿550'
+  if (amount === 1100) return 'รองเท้าเซฟตี้ 2 คู่ × ฿550'
+  if (amount % 550 === 0) {
+    const qty = amount / 550
+    return `รองเท้าเซฟตี้ ${qty} คู่ × ฿550`
+  }
+  return `รองเท้าเซฟตี้ / อุปกรณ์ความปลอดภัย (฿${amount.toLocaleString('th-TH')})`
+}
+
+export function formatUniformDetail(amount: number, customDetail?: string): string {
+  if (customDetail && customDetail.trim()) return customDetail.trim()
+  if (!amount || amount <= 0) return ''
+  return `เสื้อเครื่องแบบพนักงาน (฿${amount.toLocaleString('th-TH')})`
+}

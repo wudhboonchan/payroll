@@ -49,6 +49,11 @@ export const isTpiCompany = (name?: string | null) => {
   const str = String(name || '')
   return (/ทีพีไอ|\btpi\b/i.test(str)) && !(/ตราเพชร|\bdrt\b|diamond/i.test(str))
 }
+export function isTpiJobCode(code?: string | null): boolean {
+  if (!code) return false
+  const trimmed = code.trim()
+  return /^\d{6}(?:\/[a-zA-Z0-9]+)?$/i.test(trimmed) || /^[PQ]\d+(?:\/[a-zA-Z0-9]+)?$/i.test(trimmed)
+}
 export function localDate(d = new Date()) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` }
 export function isJobAvailable(job: Job, date: string) { return job.active && (!job.valid_from || date >= job.valid_from) && (!job.expires_on || date <= job.expires_on) }
 export function wageTier(profile: WageProfile | undefined, date: string): RateTier { return profile?.rate_tier === 'skilled' && profile.skilled_from && profile.skilled_from <= date ? 'skilled' : 'normal' }
@@ -76,6 +81,15 @@ export function calculateEntryOt(
   }
 }
 
+export function isClerkJob(job?: { job_group?: string; code?: string; description?: string } | null): boolean {
+  if (!job) return false
+  if (job.job_group === 'clerk') return true
+  const code = (job.code || '').trim()
+  if (['692021', '692032', '692041', '692050'].includes(code)) return true
+  if (job.description && job.description.includes('เสมียน')) return true
+  return false
+}
+
 export function entryRate(entry: Entry, jobs: Job[], profiles: WageProfile[], date: string, employees?: Employee[]): number | null {
   if (entry.rate_snapshot !== undefined) {
     const r = Number(entry.rate_snapshot)
@@ -90,10 +104,10 @@ export function entryRate(entry: Entry, jobs: Job[], profiles: WageProfile[], da
   // Clerk group jobs (692021, 692032, 692041, 692050):
   // Skilled clerk employees receive skilled_rate (377) on any clerk job without single-job lock.
   // Regular clerk employees receive normal_rate (357).
-  const isClerkJob = job.job_group === 'clerk' || ['692021', '692032', '692041', '692050'].includes(job.code.trim())
+  const isClerkJobMatched = isClerkJob(job)
 
   let isSkilledApplicable = false
-  if (isClerkJob) {
+  if (isClerkJobMatched) {
     isSkilledApplicable = isSkilledTier
   } else {
     // General jobs: skilled rate applies if this is the employee's regular assigned job

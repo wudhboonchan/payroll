@@ -12,6 +12,8 @@ import { Button } from '../components/ui/button'
 import { Label } from '../components/ui/label'
 
 import { CheckCircle2, AlertCircle, Clock, Loader2, ShieldAlert, Eye } from 'lucide-react'
+import { formatMonthlyCycleRange } from '../lib/formatters'
+import { formatSafetyEquipmentDetail, formatUniformDetail } from '../lib/deductionProducts'
 import '../styles/tokens.css'
 
 interface PayslipRPCResponse {
@@ -73,15 +75,66 @@ export default function EmployeeSlip() {
     queryKey: ['slip_token_data', token],
     queryFn: async () => {
       if (!token) throw new Error('No token provided')
-      const { data, error } = await supabase.rpc('get_payslip_data', { p_token: token })
+      const cleanToken = token.trim()
+      const { data, error } = await supabase.rpc('get_payslip_data', { p_token: cleanToken })
       
+      if (data) {
+        return data as PayslipRPCResponse | string
+      }
+
+      // Fallback for authenticated users / admins previewing or testing in browser
+      try {
+        const { data: authData } = await supabase.auth.getSession()
+        if (authData?.session?.user) {
+          const { data: tokRow } = await supabase
+            .from('payslip_tokens')
+            .select('*, employees(*), payroll_periods(*)')
+            .eq('token', cleanToken)
+            .maybeSingle()
+
+          if (tokRow && tokRow.employees && tokRow.payroll_periods) {
+            const emp = tokRow.employees as any
+            const per = tokRow.payroll_periods as any
+
+            const { data: entryRow } = await supabase
+              .from('payroll_entries')
+              .select('*')
+              .eq('period_id', tokRow.period_id)
+              .eq('employee_id', tokRow.employee_id)
+              .maybeSingle()
+
+            const { data: shiftsData } = await supabase
+              .from('shift_assignments')
+              .select('is_holiday_ot,is_half_shift,ot_hours,work_date')
+              .eq('period_id', tokRow.period_id)
+              .eq('employee_id', tokRow.employee_id)
+              .order('work_date')
+
+            const { data: factData } = await supabase
+              .from('factories')
+              .select('*')
+              .eq('id', emp.factory_id)
+              .maybeSingle()
+
+            return {
+              token_data: tokRow,
+              employee: emp,
+              period: per,
+              entry: entryRow || null,
+              shifts: shiftsData || [],
+              factory: factData || null
+            } as unknown as PayslipRPCResponse
+          }
+        }
+      } catch (fbErr) {
+        console.error('Fallback query error:', fbErr)
+      }
+
       if (error) {
         console.error('RPC Error:', error)
-        throw new Error('ไม่สามารถดึงข้อมูลได้ (โปรดตรวจสอบการตั้งค่าฐานข้อมูล)')
+        throw new Error(`ไม่สามารถดึงข้อมูลได้ (${error.message || 'โปรดตรวจสอบการตั้งค่าฐานข้อมูล หรือรัน SQL Migration'})`)
       }
-      if (!data) throw new Error('ไม่พบข้อมูลสลิป (Token ไม่ถูกต้อง หรือหมดอายุ)')
-      
-      return data as PayslipRPCResponse | string
+      throw new Error('ไม่พบข้อมูลสลิป (Token ไม่ถูกต้อง หรือหมดอายุ)')
     },
     enabled: !!token,
     retry: false
@@ -155,8 +208,28 @@ export default function EmployeeSlip() {
     const computed_ot_1x = isClerkSlip ? clerkHourly * 1.0 * autoClerkOt1x : 0
     const amount_ot_1_5x = isClerkSlip ? Math.max(0, (entry.amount_ot || 0) - computed_ot_1x) : (entry.amount_ot || 0)
 
+    const rate = Number(e?.rate_per_12h) || 0
+    const isTpiSlip = isTpiCompany(parsedData.factory?.name)
+    const fallbackRate = isTpiSlip ? (rate > 0 ? rate : 357) : (rate === 0 ? 0 : 357)
+    const baseNormal = fallbackRate
+
+    const hasSavedEntry = !!parsedData.entry && (parsedData.entry.id != null || parsedData.entry.amount_normal != null)
+    const fallbackNormal = isClerkSlip
+      ? Math.round((clerkMonthly / 30) * days_normal)
+      : (baseNormal * days_normal)
+    const fallbackShift = isClerkSlip
+      ? 0
+      : (isTpiSlip ? baseNormal * days_shift : Math.round(0.5 * baseNormal * days_shift))
+    const fallbackOt = isClerkSlip
+      ? Math.round(clerkHourly * 1.5 * autoClerkOt1_5x)
+      : (days_ot * 2 * baseNormal)
+
+    const finalNormal = hasSavedEntry ? (entry.amount_normal || 0) : fallbackNormal
+    const finalShift  = hasSavedEntry ? (entry.amount_shift || 0)  : fallbackShift
+    const finalOt     = hasSavedEntry ? amount_ot_1_5x              : fallbackOt
+
     const totalIncome = 
-      (entry.amount_normal || 0) + (entry.amount_shift || 0) + amount_ot_1_5x + computed_ot_1x + 
+      finalNormal + finalShift + finalOt + computed_ot_1x + 
       (entry.amount_wood_excess || 0) + (entry.amount_film || 0) + (entry.amount_special || 0) + 
       (entry.amount_diligence || 0) + (entry.amount_position || 0)
 
@@ -171,9 +244,9 @@ export default function EmployeeSlip() {
       factory_name: parsedData.factory?.name || 'บริษัท ผลิตภัณฑ์ตราเพชร จำกัด (มหาชน)',
       period_start: p.period_start,
       period_end: p.period_end,
-      amount_normal: entry.amount_normal || 0,
-      amount_shift: entry.amount_shift || 0,
-      amount_ot: amount_ot_1_5x,
+      amount_normal: finalNormal,
+      amount_shift: finalShift,
+      amount_ot: finalOt,
       amount_ot_1x: computed_ot_1x,
       amount_wood_excess: entry.amount_wood_excess || 0,
       amount_film: entry.amount_film || 0,
@@ -280,8 +353,18 @@ export default function EmployeeSlip() {
       ? `฿${clerkHourly.toFixed(2)} × 1.0 × ${ot1Hrs} ชม.`
       : null
 
+    const monthCycle = formatMonthlyCycleRange(slipData.period_end)
+
     const specialSubs = slipData.special_note
-      ? slipData.special_note.split(',').map(s => s.trim()).filter(Boolean)
+      ? slipData.special_note.split(',').map(s => s.trim()).filter(Boolean).map(n => {
+          if (n.startsWith('ค่า จป.') && monthCycle) {
+            return n.replace('ค่า จป.', `ค่า จป. (${monthCycle})`)
+          }
+          if (n.startsWith('ค่าตำแหน่ง') && monthCycle) {
+            return n.replace('ค่าตำแหน่ง', `ค่าตำแหน่ง (${monthCycle})`)
+          }
+          return n
+        })
       : []
 
     const amtPos = slipData.amount_position || 0
@@ -289,17 +372,21 @@ export default function EmployeeSlip() {
     const tpiTotalSpecial = amtPos + amtSpec
     const tpiSpecialSubs: string[] = []
     if (amtPos > 0) {
-      tpiSpecialSubs.push(`ค่าตำแหน่ง ฿${amtPos.toLocaleString()}`)
+      tpiSpecialSubs.push(monthCycle ? `ค่าตำแหน่ง (${monthCycle}) ฿${amtPos.toLocaleString()}` : `ค่าตำแหน่ง ฿${amtPos.toLocaleString()}`)
     }
     if (slipData.special_note) {
       const notes = (slipData.special_note as string).split(',').map(s => s.trim()).filter(Boolean)
       notes.forEach(n => {
         if (!n.includes('ค่าตำแหน่ง') && !tpiSpecialSubs.includes(n)) {
-          tpiSpecialSubs.push(n)
+          if (n.startsWith('ค่า จป.') && monthCycle) {
+            tpiSpecialSubs.push(n.replace('ค่า จป.', `ค่า จป. (${monthCycle})`))
+          } else {
+            tpiSpecialSubs.push(n)
+          }
         }
       })
     } else if (amtSpec > 0) {
-      tpiSpecialSubs.push(`ค่า จป. ฿${amtSpec.toLocaleString()}`)
+      tpiSpecialSubs.push(monthCycle ? `ค่า จป. (${monthCycle}) ฿${amtSpec.toLocaleString()}` : `ค่า จป. ฿${amtSpec.toLocaleString()}`)
     }
 
     const income: SlipIncomeRow[] = isTpiSlip ? [
@@ -309,7 +396,7 @@ export default function EmployeeSlip() {
       { label: isClerkSlip ? 'OT ล่วงเวลา (×2)' : 'OT ล่วงเวลา (×1.5)',         value: amtRegularOt, detail: detailRegularOt, subs: [] },
       { label: 'ค่าไม้ส่วนเกิน',  value: slipData.amount_wood_excess, detail: null, subs: [] },
       { label: 'ค่าฟิล์ม',        value: slipData.amount_film,        detail: null, subs: [] },
-      { label: 'เบี้ยขยัน',       value: slipData.amount_diligence,   detail: null, subs: [] },
+      { label: monthCycle ? `เบี้ยขยัน (${monthCycle})` : 'เบี้ยขยัน',       value: slipData.amount_diligence,   detail: null, subs: [] },
       { label: 'เงินพิเศษ',       value: tpiTotalSpecial,             detail: null, subs: tpiSpecialSubs },
     ].filter(r => r.value > 0 && r.label !== '') as SlipIncomeRow[] : [
       { label: isClerkSlip ? 'ค่าจ้างปกติ (วันธรรมดา)' : 'ค่าจ้างปกติ (8 ชม.)', value: amtNormal, detail: detailNormal, subs: [] },
@@ -319,8 +406,8 @@ export default function EmployeeSlip() {
       { label: 'ค่าไม้ส่วนเกิน',  value: slipData.amount_wood_excess, detail: null, subs: [] },
       { label: 'ค่าฟิล์ม',        value: slipData.amount_film,        detail: null, subs: [] },
       { label: 'เงินพิเศษ',       value: slipData.amount_special,     detail: null, subs: specialSubs },
-      { label: 'เบี้ยขยัน',       value: slipData.amount_diligence,   detail: null, subs: [] },
-      { label: 'ค่าตำแหน่ง',      value: slipData.amount_position,    detail: null, subs: [] },
+      { label: monthCycle ? `เบี้ยขยัน (${monthCycle})` : 'เบี้ยขยัน',       value: slipData.amount_diligence,   detail: null, subs: [] },
+      { label: monthCycle ? `ค่าตำแหน่ง (${monthCycle})` : 'ค่าตำแหน่ง',      value: slipData.amount_position,    detail: null, subs: [] },
     ].filter(r => r.value > 0 && r.label !== '') as SlipIncomeRow[]
 
     const deductions: SlipDeductRow[] = (slipData.deduction_items && slipData.deduction_items.length > 0)
@@ -328,8 +415,16 @@ export default function EmployeeSlip() {
       : [
           { label: 'ประกันสังคม',            value: slipData.deduct_social_security },
           { label: 'เบิกล่วงหน้า',           value: slipData.deduct_advance },
-          { label: 'ค่าอุปกรณ์ความปลอดภัย', value: slipData.deduct_safety_equipment },
-          { label: 'ค่าเสื้อพนักงาน',        value: slipData.deduct_uniform },
+          {
+            label: 'ค่าอุปกรณ์ความปลอดภัย',
+            value: slipData.deduct_safety_equipment,
+            detail: formatSafetyEquipmentDetail(slipData.deduct_safety_equipment),
+          },
+          {
+            label: 'ค่าเสื้อพนักงาน',
+            value: slipData.deduct_uniform,
+            detail: formatUniformDetail(slipData.deduct_uniform),
+          },
         ].filter(r => r.value > 0)
 
     const s = new Date(slipData.period_start), e = new Date(slipData.period_end)
@@ -372,16 +467,38 @@ export default function EmployeeSlip() {
 
   const confirmMutation = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase.rpc('update_payslip_status', { p_token: token, p_status: 'confirmed' })
-      if (error) throw error
+      const cleanToken = token?.trim()
+      if (!cleanToken) throw new Error('ไม่พบ Token')
+      const { error } = await supabase.rpc('update_payslip_status', { p_token: cleanToken, p_status: 'confirmed' })
+      if (error) {
+        const { data: auth } = await supabase.auth.getSession()
+        if (auth?.session?.user) {
+          const { error: updErr } = await supabase.from('payslip_tokens')
+            .update({ employee_status: 'confirmed', confirmed_at: new Date().toISOString() })
+            .eq('token', cleanToken)
+          if (!updErr) return
+        }
+        throw error
+      }
     },
     onSuccess: () => setManuallyUpdatedStatus('confirmed')
   })
 
   const disputeMutation = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase.rpc('update_payslip_status', { p_token: token, p_status: 'disputed', p_reason: disputeReason })
-      if (error) throw error
+      const cleanToken = token?.trim()
+      if (!cleanToken) throw new Error('ไม่พบ Token')
+      const { error } = await supabase.rpc('update_payslip_status', { p_token: cleanToken, p_status: 'disputed', p_reason: disputeReason })
+      if (error) {
+        const { data: auth } = await supabase.auth.getSession()
+        if (auth?.session?.user) {
+          const { error: updErr } = await supabase.from('payslip_tokens')
+            .update({ employee_status: 'disputed', dispute_reason: disputeReason.trim() })
+            .eq('token', cleanToken)
+          if (!updErr) return
+        }
+        throw error
+      }
     },
     onSuccess: () => setManuallyUpdatedStatus('disputed')
   })

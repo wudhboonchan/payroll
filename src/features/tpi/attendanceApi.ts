@@ -135,3 +135,54 @@ export async function loadMonthlyAttendanceLogs(
   }
   return (data || []) as AttendanceLog[]
 }
+
+/**
+ * Load full attendance history for a specific employee across all time
+ */
+export async function loadEmployeeAttendanceHistory(
+  factoryId: string,
+  employeeId: string
+): Promise<AttendanceLog[]> {
+  const { data, error } = await (supabase as any)
+    .from('tpi_attendance_logs')
+    .select('*, employee:employees(id,employee_code,first_name,last_name,position,nationality)')
+    .eq('factory_id', factoryId)
+    .eq('employee_id', employeeId)
+    .order('work_date', { ascending: false })
+
+  if (error) {
+    if (error.message?.includes('does not exist') || error.code === '42P01') {
+      return []
+    }
+    throw error
+  }
+  return (data || []) as AttendanceLog[]
+}
+
+/**
+ * Update an existing attendance log entry by ID
+ */
+export async function updateAttendanceLog(
+  id: string,
+  payload: {
+    work_date?: string
+    type?: AttendanceType
+    leave_type?: LeaveType | null
+    minutes_late?: number | null
+    reason?: string | null
+  }
+): Promise<AttendanceLog> {
+  const { data, error } = await (supabase as any)
+    .from('tpi_attendance_logs')
+    .update({
+      ...payload,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', id)
+    .select('*, employee:employees(id,employee_code,first_name,last_name,position,nationality)')
+    .single()
+
+  if (error) throw error
+  return data as AttendanceLog
+}
+

@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx'
+import { cleanEmployeeNameData } from './formatters'
 
 // ─── Column definitions ────────────────────────────────────────────────────────
 
@@ -17,7 +18,6 @@ export const IMPORT_COLUMNS_TPI = [
   { key: 'bank_account',           header: 'เลขที่บัญชี',           example: '1234567890',    required: false, note: 'บังคับถ้าวิธีรับเงิน = โอนธนาคาร' },
   { key: 'status',                 header: 'สถานะ',                 example: 'ปกติ',          required: false, note: 'ปกติ (active) / พ้นสภาพ (inactive)' },
   { key: 'is_safety_officer',      header: 'เจ้าหน้าที่ จป.',        example: 'ไม่ใช่',        required: false, note: 'ใช่ / ไม่ใช่ (+500 บาท/เดือน)' },
-  { key: 'has_position_allowance', header: 'ค่าตำแหน่ง',            example: 'ไม่ใช่',        required: false, note: 'ใช่ / ไม่ใช่ (+1,000 บาท/เดือน)' },
   { key: 'exempt_social_security', header: 'ยกเว้น ปกส',            example: 'ไม่ใช่',        required: false, note: 'ใช่ / ไม่ใช่ (สำหรับคนไทยที่ได้รับการยกเว้น)' },
   { key: 'data_complete',          header: 'ข้อมูลสมบูรณ์',          example: 'ใช่',           required: false, note: 'ใช่ / ไม่ใช่ (ยืนยันข้อมูลพร้อมหัก ปกส)' },
   { key: 'notes',                  header: 'หมายเหตุ',              example: '',              required: false, note: 'ข้อมูลเพิ่มเติม (ไม่บังคับ)' },
@@ -113,11 +113,11 @@ export function downloadEmployeeTemplate(options?: TemplateOptions) {
   if (isTpi) {
     exRows = [
       // Example 1: Thai, worker, normal rate tier, complete profile
-      ['001', 'นาย', 'สมชาย', 'ใจดี', 'ไทย', '1234567890123', 'พนักงานทั่วไป', 'พนักงานฝ่ายผลิต', 'ปกติ', 'โอนธนาคาร', 'กสิกรไทย', '1234567890', 'ปกติ', 'ไม่ใช่', 'ไม่ใช่', 'ไม่ใช่', 'ใช่', ''],
+      ['001', 'นาย', 'สมชาย', 'ใจดี', 'ไทย', '1234567890123', 'พนักงานทั่วไป', 'พนักงานฝ่ายผลิต', 'ปกติ', 'โอนธนาคาร', 'กสิกรไทย', '1234567890', 'ปกติ', 'ไม่ใช่', 'ไม่ใช่', 'ใช่', ''],
       // Example 2: Foreigner (Myanmar), worker, skilled rate tier, cash, waiting for SSN
-      ['002', 'Mr.', 'Kyaw', '', 'เมียนมา', '', 'พนักงานทั่วไป', 'ช่างเชื่อม', 'ฝีมือ', 'เงินสด', '', '', 'ปกติ', 'ไม่ใช่', 'ไม่ใช่', 'ไม่ใช่', 'ไม่ใช่', 'รอเลข ปกส'],
-      // Example 3: Thai, clerk, normal, จป. + ค่าตำแหน่ง
-      ['1267', 'นางสาว', 'จุฑาทิพย์', 'มีสุข', 'ไทย', '3100500123456', 'เสมียน', 'เสมียนประสานงาน', 'ปกติ', 'โอนธนาคาร', 'ไทยพาณิชย์', '9876543210', 'ปกติ', 'ใช่', 'ใช่', 'ไม่ใช่', 'ใช่', ''],
+      ['002', 'Mr.', 'Kyaw', '', 'เมียนมา', '', 'พนักงานทั่วไป', 'ช่างเชื่อม', 'ฝีมือ', 'เงินสด', '', '', 'ปกติ', 'ไม่ใช่', 'ไม่ใช่', 'ไม่ใช่', 'รอเลข ปกส'],
+      // Example 3: Thai, clerk, normal, จป.
+      ['1267', 'นางสาว', 'จุฑาทิพย์', 'มีสุข', 'ไทย', '3100500123456', 'เสมียน', 'เสมียนประสานงาน', 'ปกติ', 'โอนธนาคาร', 'ไทยพาณิชย์', '9876543210', 'ปกติ', 'ใช่', 'ไม่ใช่', 'ใช่', ''],
     ]
   } else {
     exRows = [
@@ -357,6 +357,10 @@ export function parseEmployeeExcel(file: File, options?: { isTpi?: boolean }): P
 
         // Smart header mapping (supports both import template and exported employee Excel files)
         const colKeyMap: Record<number, string> = {}
+        const hasExplicitGroupCol = headerRow.some((h) => {
+          const raw = cleanHeaderKey(h)
+          return raw.includes('กลุ่มงาน') || raw === 'position'
+        })
 
         headerRow.forEach((h, idx) => {
           const raw = cleanHeaderKey(h)
@@ -366,18 +370,25 @@ export function parseEmployeeExcel(file: File, options?: { isTpi?: boolean }): P
             colKeyMap[idx] = 'employee_code'
           } else if (raw.includes('คำนำหน้า') || raw === 'prefix') {
             colKeyMap[idx] = 'prefix'
-          } else if (raw.includes('ชื่อ') && !raw.includes('สกุล') && !raw.includes('ชื่อจริง') && !raw.includes('บัญชี')) {
+          } else if (
+            (raw.includes('ชื่อ') && (raw.includes('สกุล') || raw.includes('นามสกุล'))) ||
+            raw === 'fullname' || raw === 'name' || raw === 'ชื่อนามสกุล' || raw === 'ชื่อสกุล'
+          ) {
+            colKeyMap[idx] = 'full_name'
+          } else if (raw.includes('ชื่อ') && !raw.includes('สกุล') && !raw.includes('บัญชี')) {
             colKeyMap[idx] = 'first_name'
-          } else if (raw.includes('นามสกุล') || raw === 'lastname') {
+          } else if ((raw.includes('นามสกุล') || raw.includes('สกุล') || raw === 'lastname' || raw === 'surname') && !raw.includes('ชื่อ')) {
             colKeyMap[idx] = 'last_name'
           } else if (raw.includes('สัญชาติ') || raw === 'nationality') {
             colKeyMap[idx] = 'nationality'
           } else if (raw.includes('เลขบัตร') || raw.includes('ประชาชน') || raw.includes('พาสปอร์ต') || raw.includes('ปกส') || raw.includes('passport') || raw === 'nationalid') {
             colKeyMap[idx] = 'national_id'
-          } else if (raw.includes('กลุ่มงาน') || raw === 'position' || (raw.includes('ตำแหน่ง') && !raw.includes('ตำแหน่งงาน') && !raw.includes('ค่าตำแหน่ง'))) {
+          } else if (raw.includes('กลุ่มงาน') || (hasExplicitGroupCol ? raw === 'position' : (raw === 'position' || (raw.includes('ตำแหน่ง') && !raw.includes('ตำแหน่งงาน') && !raw.includes('ค่าตำแหน่ง'))))) {
             colKeyMap[idx] = 'position'
-          } else if (raw.includes('ตำแหน่งงาน') || raw.includes('หน้าที่') || raw.includes('แผนก') || raw === 'jobtitle') {
+          } else if (raw.includes('ตำแหน่งงาน') || (hasExplicitGroupCol && raw.includes('ตำแหน่ง') && !raw.includes('ค่าตำแหน่ง')) || raw.includes('หน้าที่') || raw.includes('แผนก') || raw === 'jobtitle') {
             colKeyMap[idx] = 'job_title'
+          } else if (raw.includes('รหัสงาน') || raw.includes('รหัสงานฝีมือ') || raw === 'jobcode') {
+            colKeyMap[idx] = 'job_code'
           } else if (raw.includes('ประเภทค่าแรง') || raw.includes('ประเภทค่าจ้าง') || raw.includes('ระดับค่าแรง') || raw === 'ratetier') {
             colKeyMap[idx] = 'rate_tier'
           } else if (raw.includes('ค่าแรง') || raw.includes('ค่าจ้าง') || raw === 'rateper12h' || raw === 'rate') {
@@ -435,6 +446,19 @@ export function parseEmployeeExcel(file: File, options?: { isTpi?: boolean }): P
             data[key] = String(row[idx] ?? '').trim()
           })
 
+          // ── Clean & Separate Name ──
+          const cleanedName = cleanEmployeeNameData({
+            prefix: data.prefix,
+            first_name: data.first_name,
+            last_name: data.last_name,
+            full_name: data.full_name,
+            nationality: data.nationality,
+          }, isTpi)
+
+          data.prefix = cleanedName.prefix
+          data.first_name = cleanedName.first_name
+          data.last_name = cleanedName.last_name
+
           // ── Normalization ──
           // Nationality
           if (!data.nationality) {
@@ -463,6 +487,15 @@ export function parseEmployeeExcel(file: File, options?: { isTpi?: boolean }): P
             data.rate_tier = 'skilled'
           } else {
             data.rate_tier = 'normal'
+          }
+
+          // If TPI and job_title contains a skilled job code (e.g. 692010), separate it into job_code
+          if (isTpi && (/^\d{6}(?:\/[a-zA-Z0-9]+)?$/i.test(data.job_title || '') || /^[PQ]\d+(?:\/[a-zA-Z0-9]+)?$/i.test(data.job_title || ''))) {
+            if (!data.job_code) {
+              data.job_code = data.job_title
+            }
+            data.rate_tier = 'skilled'
+            data.job_title = ''
           }
 
           // Payment method: supports Thai (โอนธนาคาร / เงินสด / โอนบัญชี) & English (bank_transfer / cash)

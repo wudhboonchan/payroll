@@ -12,7 +12,7 @@ import {
   parseEmployeeExcel,
   type ParsedRow,
 } from '../lib/employeeExcel'
-import { normalizePrefix, formatEmployeeFullName } from '../lib/formatters'
+import { normalizePrefix, formatEmployeeFullName, cleanEmployeeNameData } from '../lib/formatters'
 import { isTpiCompany } from '../features/tpi/model'
 import '../styles/tokens.css'
 
@@ -83,28 +83,36 @@ export default function EmployeeImportModal({ isOpen, onClose }: Props) {
   const importMutation = useMutation({
     mutationFn: async () => {
       if (!user?.factory_id) throw new Error('ไม่พบ factory context')
-      const payload = validRows.map(r => ({
-        employee_code: r.data.employee_code,
-        prefix: normalizePrefix(r.data.prefix, r.data.nationality, r.data.first_name, isTpi) || null,
-        first_name: r.data.first_name,
-        last_name: r.data.last_name?.trim() || '',
-        nationality: r.data.nationality || 'ไทย',
-        national_id: r.data.national_id || null,
-        position: (r.data.position || 'worker') as 'worker' | 'clerk',
-        job_title: r.data.job_title || null,
-        wage_type: (isTpi ? 'daily' : (r.data.position === 'clerk' ? 'monthly' : 'daily')) as 'daily' | 'monthly',
-        rate_per_12h: isTpi ? 0 : (Number(r.data.rate_per_12h) || 0),
-        payment_method: (r.data.payment_method || 'bank_transfer') as 'cash' | 'bank_transfer',
-        bank_name: r.data.payment_method === 'bank_transfer' ? r.data.bank_name || null : null,
-        bank_account: r.data.payment_method === 'bank_transfer' ? r.data.bank_account || null : null,
-        status: (r.data.status || 'active') as 'active' | 'inactive',
-        is_safety_officer: r.data.is_safety_officer === 'true',
-        has_position_allowance: r.data.has_position_allowance === 'true',
-        exempt_social_security: r.data.exempt_social_security === 'true',
-        data_complete: r.data.data_complete === 'true',
-        notes: r.data.notes || null,
-        factory_id: user.factory_id,
-      }))
+      const payload = validRows.map(r => {
+        const cleaned = cleanEmployeeNameData({
+          prefix: r.data.prefix,
+          first_name: r.data.first_name,
+          last_name: r.data.last_name,
+          nationality: r.data.nationality,
+        }, isTpi)
+        return {
+          employee_code: r.data.employee_code,
+          prefix: normalizePrefix(cleaned.prefix, r.data.nationality, cleaned.first_name, isTpi) || null,
+          first_name: cleaned.first_name,
+          last_name: cleaned.last_name?.trim() || '',
+          nationality: r.data.nationality || 'ไทย',
+          national_id: r.data.national_id || null,
+          position: (r.data.position || 'worker') as 'worker' | 'clerk',
+          job_title: r.data.job_title || null,
+          wage_type: (isTpi ? 'daily' : (r.data.position === 'clerk' ? 'monthly' : 'daily')) as 'daily' | 'monthly',
+          rate_per_12h: isTpi ? 0 : (Number(r.data.rate_per_12h) || 0),
+          payment_method: (r.data.payment_method || 'bank_transfer') as 'cash' | 'bank_transfer',
+          bank_name: r.data.payment_method === 'bank_transfer' ? r.data.bank_name || null : null,
+          bank_account: r.data.payment_method === 'bank_transfer' ? r.data.bank_account || null : null,
+          status: (r.data.status || 'active') as 'active' | 'inactive',
+          is_safety_officer: r.data.is_safety_officer === 'true',
+          has_position_allowance: isTpi ? false : r.data.has_position_allowance === 'true',
+          exempt_social_security: r.data.exempt_social_security === 'true',
+          data_complete: r.data.data_complete === 'true',
+          notes: r.data.notes || null,
+          factory_id: user.factory_id,
+        }
+      })
       const { data: upsertedEmps, error } = await supabase
         .from('employees')
         .upsert(payload, { onConflict: 'employee_code,factory_id', ignoreDuplicates: false })
@@ -121,6 +129,7 @@ export default function EmployeeImportModal({ isOpen, onClose }: Props) {
             employee_id: empId,
             factory_id: user.factory_id,
             rate_tier: r.data.rate_tier === 'skilled' ? 'skilled' : 'normal',
+            job_code: r.data.rate_tier === 'skilled' ? (r.data.job_code || null) : null,
             updated_at: new Date().toISOString(),
           }
         }).filter(Boolean)
@@ -317,10 +326,8 @@ export default function EmployeeImportModal({ isOpen, onClose }: Props) {
                       </tr>
                     </thead>
                     <tbody>
-                      {parsedRows.map(r => {
-                        const isForeignWaitSS = r.data.nationality !== 'ไทย' && !r.data.national_id
-                        return (
-                          <tr key={r.rowNum} style={{ background: r.errors.length > 0 ? '#fef2f2' : 'var(--vk-paper)', borderBottom: '1px solid var(--vk-rule-soft)' }}>
+                      {parsedRows.map(r => (
+                        <tr key={r.rowNum} style={{ background: r.errors.length > 0 ? '#fef2f2' : 'var(--vk-paper)', borderBottom: '1px solid var(--vk-rule-soft)' }}>
                             <td style={{ padding: '7px 12px' }}>
                               {r.errors.length === 0
                                 ? <CheckCircle2 style={{ width: 14, height: 14, color: 'var(--vk-jade)' }} />
@@ -336,17 +343,17 @@ export default function EmployeeImportModal({ isOpen, onClose }: Props) {
                               {r.data.job_title || '—'}
                             </td>
                             <td style={{ padding: '7px 12px', whiteSpace: 'nowrap' }}>
-                              {isTpi ? (
-                                r.data.rate_tier === 'skilled' ? (
-                                  <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: '#dcfce7', color: '#15803d' }}>
-                                    ค่าแรงฝีมือ
-                                  </span>
+                                {isTpi ? (
+                                  r.data.rate_tier === 'skilled' ? (
+                                    <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: '#dcfce7', color: '#15803d' }}>
+                                      ค่าแรงฝีมือ{r.data.job_code ? ` (${r.data.job_code})` : ''}
+                                    </span>
+                                  ) : (
+                                    <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: '#fef3c7', color: '#92400e' }}>
+                                      ค่าแรงปกติ
+                                    </span>
+                                  )
                                 ) : (
-                                  <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: '#fef3c7', color: '#92400e' }}>
-                                    ค่าแรงปกติ
-                                  </span>
-                                )
-                              ) : (
                                 <span style={{ fontFamily: 'var(--vk-mono)' }}>{r.data.rate_per_12h || '—'}</span>
                               )}
                             </td>
@@ -355,16 +362,13 @@ export default function EmployeeImportModal({ isOpen, onClose }: Props) {
                                 {r.data.is_safety_officer === 'true' && (
                                   <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 5px', borderRadius: 4, background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0' }}>จป.</span>
                                 )}
-                                {r.data.has_position_allowance === 'true' && (
+                                {!isTpi && r.data.has_position_allowance === 'true' && (
                                   <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 5px', borderRadius: 4, background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe' }}>ค่าตำแหน่ง</span>
                                 )}
                                 {r.data.exempt_social_security === 'true' && (
                                   <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 5px', borderRadius: 4, background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1' }}>ยกเว้น ปกส</span>
                                 )}
-                                {isForeignWaitSS && (
-                                  <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 5px', borderRadius: 4, background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa' }}>รอ ปกส</span>
-                                )}
-                                {r.data.data_complete !== 'true' && !isForeignWaitSS && (
+                                {r.data.data_complete !== 'true' && (
                                   <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 5px', borderRadius: 4, background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca' }}>ข้อมูลไม่ครบ</span>
                                 )}
                               </div>
@@ -373,8 +377,7 @@ export default function EmployeeImportModal({ isOpen, onClose }: Props) {
                               {r.data.payment_method === 'bank_transfer' ? 'โอนบัญชี' : 'เงินสด'}
                             </td>
                           </tr>
-                        )
-                      })}
+                        ))}
                     </tbody>
                   </table>
                 </div>

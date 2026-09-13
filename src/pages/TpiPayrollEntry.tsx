@@ -1,4 +1,5 @@
 import { DeductionProductPicker } from '../components/payroll/DeductionProductPicker'
+import { formatSafetyEquipmentDetail, formatUniformDetail } from '../lib/deductionProducts'
 import React, { useState, useMemo, useEffect } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -9,12 +10,12 @@ import { toast } from 'sonner'
 import {
   Save, CheckCircle2, AlertCircle, Search, X,
   Clock, ChevronDown, ChevronUp,
-  AlertTriangle, Pencil, RotateCcw
+  AlertTriangle, Pencil, RotateCcw, Trash2
 } from 'lucide-react'
 import { calculateTpiPayroll, isEndOfMonthPeriod } from '../features/tpi/payrollCalc'
 import type { AttendanceLog } from '../features/tpi/attendanceApi'
 import { loadMonthlyAttendanceLogs, getAttendanceTypeLabel, formatAttendanceSummary } from '../features/tpi/attendanceApi'
-import { formatEmployeeFullName, formatThaiDateDDMMYYYY } from '../lib/formatters'
+import { formatEmployeeFullName, formatThaiDateDDMMYYYY, formatThaiDateShort, formatMonthlyCycleRange } from '../lib/formatters'
 import { employeeWageForm } from '../features/tpi/employeeWageForm'
 import { referenceJobs } from '../features/tpi/referenceJobs'
 import '../styles/tokens.css'
@@ -429,12 +430,12 @@ export default function TpiPayrollEntry() {
 
   const [overrideNormal, setOverrideNormal] = useState<number | null>(null)
   const [overrideShift, setOverrideShift] = useState<number | null>(null)
-  const [overridePosition, setOverridePosition] = useState<number | null>(null)
   const [overrideSafety, setOverrideSafety] = useState<number | null>(null)
   const [overrideDiligence, setOverrideDiligence] = useState<number | null>(null)
-  const [editingPosition, setEditingPosition] = useState(false)
   const [editingSafety, setEditingSafety] = useState(false)
   const [editingDiligence, setEditingDiligence] = useState(false)
+  const [editingUniform, setEditingUniform] = useState(false)
+  const [editingSafetyEquip, setEditingSafetyEquip] = useState(false)
   const [specialNote, setSpecialNote] = useState('')
   const [extraEntries, setExtraEntries] = useState({
     amount_diligence: 0,
@@ -447,14 +448,13 @@ export default function TpiPayrollEntry() {
 
   // Defaults based on database flags & period
   const isEndMonth = isEndOfMonthPeriod(currentPeriod?.period_end || '')
-  const defaultPosition = (isEndMonth && selectedEmp?.has_position_allowance) ? 1000 : 0
   const defaultSafety = (isEndMonth && selectedEmp?.is_safety_officer) ? 500 : 0
   const empAttendanceLogs = attendanceByEmp.get(selectedEmp?.id || '') || []
   const defaultDiligence = (isEndMonth && empAttendanceLogs.length === 0) ? 300 : 0
+  const monthCycle = formatMonthlyCycleRange(currentPeriod?.period_end)
 
   useEffect(() => {
     const isEndMonthLocal = isEndOfMonthPeriod(currentPeriod?.period_end || '')
-    const defaultPosLocal = (isEndMonthLocal && selectedEmp?.has_position_allowance) ? 1000 : 0
     const defaultSafeLocal = (isEndMonthLocal && selectedEmp?.is_safety_officer) ? 500 : 0
     const empLogsLocal = attendanceByEmp.get(selectedEmp?.id || '') || []
     const defaultDilLocal = (isEndMonthLocal && empLogsLocal.length === 0) ? 300 : 0
@@ -466,30 +466,7 @@ export default function TpiPayrollEntry() {
 
       const noteOrReason = ((existingEntry.override_reason || '') + ' ' + (existingEntry.special_note || '')).trim()
 
-      // 1. Position allowance autofill & override detection
-      let posAmt = defaultPosLocal
-      let hasPosOverride = false
-      if (existingEntry.override_reason?.includes('ค่าตำแหน่ง')) {
-        const m = existingEntry.override_reason.match(/ค่าตำแหน่ง:\s*฿?([\d,]+)/)
-        if (m) {
-          posAmt = Number(m[1].replace(/,/g, ''))
-          hasPosOverride = true
-        } else if (existingEntry.amount_position != null) {
-          posAmt = Number(existingEntry.amount_position)
-          hasPosOverride = true
-        }
-      } else if (
-        existingEntry.amount_position != null &&
-        Number(existingEntry.amount_position) > 0 &&
-        Number(existingEntry.amount_position) !== defaultPosLocal
-      ) {
-        posAmt = Number(existingEntry.amount_position)
-        hasPosOverride = true
-      }
-      setOverridePosition(hasPosOverride ? posAmt : null)
-      setEditingPosition(false)
-
-      // 2. Safety allowance autofill & override detection
+      // 1. Safety allowance autofill & override detection
       const totalSpec = Number(existingEntry.override_special ?? existingEntry.amount_special ?? 0)
       let safeAmt = defaultSafeLocal
       let otherAmt = 0
@@ -521,7 +498,7 @@ export default function TpiPayrollEntry() {
       setOverrideSafety(hasSafetyOverride ? safeAmt : null)
       setEditingSafety(false)
 
-      // 3. Diligence allowance autofill & override detection
+      // 2. Diligence allowance autofill & override detection
       let dilAmt = defaultDilLocal
       let hasDilOverride = false
       if (existingEntry.override_reason?.includes('เบี้ยขยัน')) {
@@ -542,10 +519,12 @@ export default function TpiPayrollEntry() {
       }
       setOverrideDiligence(hasDilOverride ? dilAmt : null)
       setEditingDiligence(false)
+      setEditingUniform(false)
+      setEditingSafetyEquip(false)
 
       setExtraEntries({
         amount_diligence: dilAmt,
-        amount_position: posAmt,
+        amount_position: 0,
         amount_safety: safeAmt,
         amount_other_special: otherAmt,
         deduct_safety_equipment: Number(existingEntry.deduct_safety_equipment || 0),
@@ -554,23 +533,23 @@ export default function TpiPayrollEntry() {
     } else {
       setOverrideNormal(null)
       setOverrideShift(null)
-      setOverridePosition(null)
       setOverrideSafety(null)
       setOverrideDiligence(null)
-      setEditingPosition(false)
       setEditingSafety(false)
       setEditingDiligence(false)
+      setEditingUniform(false)
+      setEditingSafetyEquip(false)
       setSpecialNote(defaultSafeLocal > 0 ? 'ค่า จป. 500 บาท' : '')
       setExtraEntries({
         amount_diligence: defaultDilLocal,
-        amount_position: defaultPosLocal,
+        amount_position: 0,
         amount_safety: defaultSafeLocal,
         amount_other_special: 0,
         deduct_safety_equipment: 0,
         deduct_uniform: 0,
       })
     }
-  }, [existingEntry, selectedEmpId, selectedEmp?.position, selectedEmp?.has_position_allowance, selectedEmp?.is_safety_officer, currentPeriod?.period_end, attendanceByEmp])
+  }, [existingEntry, selectedEmpId, selectedEmp?.position, selectedEmp?.is_safety_officer, currentPeriod?.period_end, attendanceByEmp])
 
   // ── Main Calculation for Selected Employee ──
   const calc = useMemo(() => {
@@ -667,7 +646,6 @@ export default function TpiPayrollEntry() {
       const overrideReasons: string[] = []
       if (overrideNormal !== null) overrideReasons.push(`ค่าจ้างปกติกะแรก: ฿${overrideNormal}`)
       if (overrideShift !== null) overrideReasons.push(`ค่ากะ: ฿${overrideShift}`)
-      if (overridePosition !== null) overrideReasons.push(`ค่าตำแหน่ง: ฿${overridePosition}`)
       if (overrideSafety !== null) overrideReasons.push(`ค่า จป.: ฿${overrideSafety}`)
       if (overrideDiligence !== null) overrideReasons.push(`เบี้ยขยัน: ฿${overrideDiligence}`)
       const reasonStr = overrideReasons.join(', ')
@@ -684,7 +662,7 @@ export default function TpiPayrollEntry() {
         override_special: specAmt || null,
         special_note: note,
         amount_diligence: extraEntries.amount_diligence,
-        amount_position: extraEntries.amount_position,
+        amount_position: 0,
         deduct_social_security: Math.round(calc.deductSocialSecurity * 100) / 100,
         deduct_safety_equipment: extraEntries.deduct_safety_equipment,
         deduct_uniform: extraEntries.deduct_uniform,
@@ -700,7 +678,12 @@ export default function TpiPayrollEntry() {
       if (error) throw error
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['all-payroll-entries', currentPeriod?.id] })
+      queryClient.invalidateQueries({ queryKey: ['all-payroll-entries'] })
+      queryClient.invalidateQueries({ queryKey: ['payslip-entry'] })
+      queryClient.invalidateQueries({ queryKey: ['payslip-all-entries'] })
+      queryClient.invalidateQueries({ queryKey: ['payslip-advances'] })
+      queryClient.invalidateQueries({ queryKey: ['payslip-all-tpi-shifts'] })
+      queryClient.invalidateQueries({ queryKey: ['payslip-all-shifts'] })
       queryClient.invalidateQueries({ queryKey: ['superuser-overrides'] })
       queryClient.invalidateQueries({ queryKey: ['v2-stats'] })
       queryClient.invalidateQueries({ queryKey: ['payment-channel-stats'] })
@@ -968,7 +951,7 @@ export default function TpiPayrollEntry() {
                                 color: '#b91c1c',
                                 border: '1px solid #fca5a5'
                               }}
-                              title={`ประวัติ ขาด/ลา/สาย ในเดือนนี้ (${empAttendanceLogs.length} ครั้ง):\n${empAttendanceLogs.map(l => `• ${l.work_date}: ${getAttendanceTypeLabel(l.type, l.leave_type)} ${l.reason ? `(${l.reason})` : ''}`).join('\n')}`}
+                              title={`ประวัติ ขาด/ลา/สาย ในเดือนนี้ (${empAttendanceLogs.length} ครั้ง):\n${empAttendanceLogs.map(l => `• ${formatThaiDateShort(l.work_date)}: ${getAttendanceTypeLabel(l.type, l.leave_type)} ${l.reason ? `(${l.reason})` : ''}`).join('\n')}`}
                             >
                               ⚠️ {empAttendanceLogs.length}
                             </span>
@@ -1035,13 +1018,6 @@ export default function TpiPayrollEntry() {
                   const shift = overrideShift !== null ? overrideShift : (existingEntry?.override_shift != null ? Number(existingEntry.override_shift) : null)
                   if (shift !== null) parts.push(`ค่ากะ: ฿${shift.toLocaleString()}`)
 
-                  const posVal = overridePosition !== null ? overridePosition : (
-                    existingEntry?.override_reason?.includes('ค่าตำแหน่ง') && existingEntry.amount_position != null
-                      ? Number(existingEntry.amount_position)
-                      : null
-                  )
-                  if (posVal !== null) parts.push(`ค่าตำแหน่ง: ฿${posVal.toLocaleString()}`)
-
                   const safeVal = overrideSafety !== null ? overrideSafety : (
                     existingEntry?.override_reason?.includes('ค่า จป.')
                       ? (extraEntries.amount_safety || 0)
@@ -1056,7 +1032,7 @@ export default function TpiPayrollEntry() {
                   )
                   if (dilVal !== null) parts.push(`เบี้ยขยัน: ฿${dilVal.toLocaleString()}`)
 
-                  const hasOvr = norm !== null || shift !== null || posVal !== null || safeVal !== null || dilVal !== null
+                  const hasOvr = norm !== null || shift !== null || safeVal !== null || dilVal !== null
                   const summaryText = parts.join(' · ')
 
                   return (
@@ -1214,12 +1190,14 @@ export default function TpiPayrollEntry() {
                       </div>
 
                       <div style={{ background: '#ffffff', padding: '8px 12px', borderRadius: 6, border: '1px solid #fed7aa' }}>
-                        <div style={{ fontSize: 11, color: '#7c2d12', fontWeight: 600 }}>ค่าแรงกะปกติ</div>
+                        <div style={{ fontSize: 11, color: '#7c2d12', fontWeight: 600 }}>ค่าแรงกะทำงาน</div>
                         <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--vk-ink)', marginTop: 2 }}>
-                          ฿{monoNum(calc.baseShiftWage)}
+                          ฿{monoNum(calc.effectiveNormal + calc.effectiveShift)}
                         </div>
                         <div style={{ fontSize: 10, color: '#9a3412', marginTop: 1 }}>
-                          ค่าแรงปกติ {calc.normalTierCount} / ค่าแรงฝีมือ {calc.skilledTierCount}
+                          {calc.effectiveShift > 0
+                            ? `กะแรก ฿${monoNum(calc.effectiveNormal)} + ค่ากะ ฿${monoNum(calc.effectiveShift)}`
+                            : `ค่าแรงปกติ ${calc.normalTierCount} / ค่าแรงฝีมือ ${calc.skilledTierCount}`}
                         </div>
                       </div>
 
@@ -1496,22 +1474,18 @@ export default function TpiPayrollEntry() {
                                   <button
                                     type="button"
                                     onClick={() => setEditingDiligence(true)}
-                                    title="แก้ไขยอดเบี้ยขยัน (Override)"
+                                    title="แก้ไขยอดเบี้ยขยัน"
                                     style={{
-                                      background: 'var(--vk-paper)',
-                                      border: '1px solid var(--vk-rule)',
-                                      borderRadius: 4,
-                                      padding: '3px 6px',
+                                      background: 'none',
+                                      border: 'none',
                                       cursor: 'pointer',
-                                      color: 'var(--vk-ink-2)',
-                                      display: 'inline-flex',
-                                      alignItems: 'center',
-                                      gap: 4,
-                                      fontSize: 11,
+                                      color: 'var(--vk-ink-3)',
+                                      padding: 2,
+                                      display: 'flex',
+                                      opacity: 0.5,
                                     }}
                                   >
-                                    <Pencil style={{ width: 12, height: 12, color: 'var(--vk-persimmon)' }} />
-                                    <span>แก้ไข</span>
+                                    <Pencil style={{ width: 12, height: 12 }} />
                                   </button>
                                 </div>
                               ) : (
@@ -1637,7 +1611,7 @@ export default function TpiPayrollEntry() {
                                   <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 2, paddingLeft: 19 }}>
                                     {selectedLogs.map(log => (
                                       <div key={log.id} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                        <span style={{ fontFamily: 'var(--vk-mono)', fontWeight: 600 }}>• {log.work_date}:</span>
+                                        <span style={{ fontFamily: 'var(--vk-mono)', fontWeight: 600 }}>• {formatThaiDateShort(log.work_date)}:</span>
                                         <span style={{ fontWeight: 600, color: log.type === 'absent' ? '#c53030' : log.type === 'leave' ? '#dd6b20' : '#4a5568' }}>
                                           {getAttendanceTypeLabel(log.type, log.leave_type)}
                                         </span>
@@ -1655,7 +1629,7 @@ export default function TpiPayrollEntry() {
                             return (
                               <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 6, padding: '4px 10px', fontSize: 11, color: '#166534', marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
                                 <CheckCircle2 style={{ width: 13, height: 13, color: '#16a34a', flexShrink: 0 }} />
-                                <span>ไม่มีประวัติ ขาด/ลา/มาสาย ตลอดทั้งเดือนนี้ (ได้รับเบี้ยขยัน 300 บาท)</span>
+                                <span>ไม่มีประวัติ ขาด/ลา/มาสาย ตลอดทั้งเดือนนี้ {monthCycle && `(${monthCycle}) `}(ได้รับเบี้ยขยัน 300 บาท)</span>
                               </div>
                             )
                           })()}
@@ -1669,156 +1643,24 @@ export default function TpiPayrollEntry() {
                                 <span>หมวดเงินพิเศษ</span>
                               </div>
                               <div style={{ fontSize: 10, color: 'var(--vk-ink-3)' }}>
-                                รวมรายการ: ค่าตำแหน่ง, ค่า จป., เงินพิเศษอื่นๆ
+                                รวมรายการ: ค่า จป., เงินพิเศษอื่นๆ
                               </div>
                             </div>
                             <div style={{ textAlign: 'right' }}>
                               <span style={{ fontSize: 10, color: '#9a3412', fontWeight: 600, marginRight: 4 }}>รวม:</span>
                               <span style={{ fontFamily: 'var(--vk-mono)', fontSize: 13, fontWeight: 700, color: '#c2410c' }}>
-                                ฿{monoNum((extraEntries.amount_position || 0) + (extraEntries.amount_safety || 0) + (extraEntries.amount_other_special || 0))}
+                                ฿{monoNum((extraEntries.amount_safety || 0) + (extraEntries.amount_other_special || 0))}
                               </span>
                             </div>
                           </div>
 
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                            {/* Sub-category 1: ค่าตำแหน่ง */}
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingLeft: 6, borderLeft: '2px solid #3b82f6', flexWrap: 'wrap' }}>
-                              <div>
-                                <div style={{ fontSize: 12, color: 'var(--vk-ink)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
-                                  <span>• ค่าตำแหน่ง (฿)</span>
-                                  {overridePosition !== null && (
-                                    <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 4, background: '#fffbeb', color: '#b45309', border: '1px solid #fde68a' }}>
-                                      OVERRIDE
-                                    </span>
-                                  )}
-                                </div>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
-                                  <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 4, background: selectedEmp?.has_position_allowance ? '#eff6ff' : '#f3f4f6', color: selectedEmp?.has_position_allowance ? '#1d4ed8' : '#7a6f60' }}>
-                                    {selectedEmp?.has_position_allowance
-                                      ? (calc.isEndOfMonth ? 'ดึงจากฐานข้อมูล (1,000 บ.)' : 'จ่ายงวดสิ้นเดือน')
-                                      : 'ไม่มีสิทธิ์ค่าตำแหน่ง'}
-                                  </span>
-                                </div>
-                              </div>
-
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                {!calc.isEndOfMonth ? (
-                                  <span style={{
-                                    fontFamily: 'var(--vk-mono)',
-                                    fontSize: 13,
-                                    fontWeight: 700,
-                                    color: 'var(--vk-ink-3)',
-                                    minWidth: 60,
-                                    textAlign: 'right',
-                                  }}>
-                                    ฿0.00
-                                  </span>
-                                ) : !editingPosition ? (
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                    <span style={{
-                                      fontFamily: 'var(--vk-mono)',
-                                      fontSize: 13,
-                                      fontWeight: 700,
-                                      color: overridePosition !== null ? 'var(--vk-marigold)' : 'var(--vk-ink)',
-                                      minWidth: 60,
-                                      textAlign: 'right',
-                                    }}>
-                                      ฿{monoNum(extraEntries.amount_position || 0)}
-                                    </span>
-                                    <button
-                                      type="button"
-                                      onClick={() => setEditingPosition(true)}
-                                      title="แก้ไขยอดค่าตำแหน่ง (Override)"
-                                      style={{
-                                        background: 'var(--vk-paper)',
-                                        border: '1px solid var(--vk-rule)',
-                                        borderRadius: 4,
-                                        padding: '3px 6px',
-                                        cursor: 'pointer',
-                                        color: 'var(--vk-ink-2)',
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        gap: 4,
-                                        fontSize: 11,
-                                      }}
-                                    >
-                                      <Pencil style={{ width: 12, height: 12, color: 'var(--vk-persimmon)' }} />
-                                      <span>แก้ไข</span>
-                                    </button>
-                                  </div>
-                                ) : (
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                    <input
-                                      type="number"
-                                      min="0"
-                                      autoFocus
-                                      value={extraEntries.amount_position || ''}
-                                      onChange={e => {
-                                        const val = Number(e.target.value) || 0
-                                        setExtraEntries(prev => ({ ...prev, amount_position: val }))
-                                        setOverridePosition(val !== defaultPosition ? val : null)
-                                      }}
-                                      style={{ width: 85, fontFamily: 'var(--vk-mono)', fontSize: 13, textAlign: 'right', border: '1px solid var(--vk-persimmon)', background: '#fff', padding: '4px 6px', outline: 'none' }}
-                                      placeholder="0"
-                                    />
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setEditingPosition(false)
-                                        if (extraEntries.amount_position === defaultPosition) {
-                                          setOverridePosition(null)
-                                        } else {
-                                          setOverridePosition(extraEntries.amount_position)
-                                        }
-                                      }}
-                                      title="เสร็จสิ้น"
-                                      style={{
-                                        background: 'var(--vk-jade)',
-                                        color: '#fff',
-                                        border: 'none',
-                                        borderRadius: 4,
-                                        padding: '4px 8px',
-                                        cursor: 'pointer',
-                                        fontSize: 11,
-                                        fontWeight: 600,
-                                      }}
-                                    >
-                                      ตกลง
-                                    </button>
-                                    {overridePosition !== null && (
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setExtraEntries(prev => ({ ...prev, amount_position: defaultPosition }))
-                                          setOverridePosition(null)
-                                          setEditingPosition(false)
-                                        }}
-                                        title={`คืนค่าอัตโนมัติตามฐานข้อมูล (฿${defaultPosition.toLocaleString()})`}
-                                        style={{
-                                          background: '#fef2f2',
-                                          color: 'var(--vk-crimson)',
-                                          border: '1px solid #fecaca',
-                                          borderRadius: 4,
-                                          padding: '4px 6px',
-                                          cursor: 'pointer',
-                                          display: 'inline-flex',
-                                          alignItems: 'center',
-                                          fontSize: 11,
-                                        }}
-                                      >
-                                        <RotateCcw style={{ width: 11, height: 11 }} />
-                                      </button>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                            </div>
 
                             {/* Sub-category 2: ค่า จป. */}
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingLeft: 6, borderLeft: '2px solid #10b981', flexWrap: 'wrap' }}>
                               <div>
                                 <div style={{ fontSize: 12, color: 'var(--vk-ink)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
-                                  <span>• ค่า จป. (฿)</span>
+                                  <span>• ค่า จป. {monthCycle && <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--vk-ink-3)' }}>({monthCycle})</span>} (฿)</span>
                                   {overrideSafety !== null && (
                                     <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 4, background: '#fffbeb', color: '#b45309', border: '1px solid #fde68a' }}>
                                       OVERRIDE
@@ -1828,7 +1670,7 @@ export default function TpiPayrollEntry() {
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
                                   <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 4, background: selectedEmp?.is_safety_officer ? '#ecfdf5' : '#f3f4f6', color: selectedEmp?.is_safety_officer ? '#047857' : '#7a6f60' }}>
                                     {selectedEmp?.is_safety_officer
-                                      ? (calc.isEndOfMonth ? 'ดึงจากฐานข้อมูล (500 บ.)' : 'จ่ายงวดสิ้นเดือน')
+                                      ? (calc.isEndOfMonth ? `ดึงจากฐานข้อมูล (500 บ.)${monthCycle ? ` · รอบ ${monthCycle}` : ''}` : 'จ่ายงวดสิ้นเดือน')
                                       : 'ไม่มีสิทธิ์ค่า จป.'}
                                   </span>
                                 </div>
@@ -1861,22 +1703,18 @@ export default function TpiPayrollEntry() {
                                     <button
                                       type="button"
                                       onClick={() => setEditingSafety(true)}
-                                      title="แก้ไขยอดค่า จป. (Override)"
+                                      title="แก้ไขยอดค่า จป."
                                       style={{
-                                        background: 'var(--vk-paper)',
-                                        border: '1px solid var(--vk-rule)',
-                                        borderRadius: 4,
-                                        padding: '3px 6px',
+                                        background: 'none',
+                                        border: 'none',
                                         cursor: 'pointer',
-                                        color: 'var(--vk-ink-2)',
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        gap: 4,
-                                        fontSize: 11,
+                                        color: 'var(--vk-ink-3)',
+                                        padding: 2,
+                                        display: 'flex',
+                                        opacity: 0.5,
                                       }}
                                     >
-                                      <Pencil style={{ width: 12, height: 12, color: 'var(--vk-persimmon)' }} />
-                                      <span>แก้ไข</span>
+                                      <Pencil style={{ width: 12, height: 12 }} />
                                     </button>
                                   </div>
                                 ) : (
@@ -2040,18 +1878,6 @@ export default function TpiPayrollEntry() {
                             showAlways: false,
                           }
                         }) : []),
-                        {
-                          label: 'หักอุปกรณ์ความปลอดภัย',
-                          sub: null,
-                          value: extraEntries.deduct_safety_equipment,
-                          showAlways: false,
-                        },
-                        {
-                          label: 'หักเครื่องแบบพนักงาน',
-                          sub: null,
-                          value: extraEntries.deduct_uniform,
-                          showAlways: false,
-                        },
                       ].filter(r => r.value !== 0 || r.showAlways).map((r, i) => (
                         <div key={i} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, padding: '7px 0', borderBottom: '1px dashed var(--vk-rule-soft)' }}>
                           <div style={{ flex: 1, minWidth: 0 }}>
@@ -2063,6 +1889,376 @@ export default function TpiPayrollEntry() {
                           </div>
                         </div>
                       ))}
+
+                      {/* หักเครื่องแบบพนักงาน (แก้ไข / ลบได้) */}
+                      {(extraEntries.deduct_uniform > 0 || editingUniform) && (
+                        <div style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 8,
+                          padding: '7px 0',
+                          borderBottom: '1px dashed var(--vk-rule-soft)',
+                          background: editingUniform ? 'rgba(217, 119, 6, 0.05)' : 'transparent',
+                          borderRadius: 4
+                        }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 13, fontWeight: 600 }}>หักเครื่องแบบพนักงาน</div>
+                            {extraEntries.deduct_uniform > 0 && (
+                              <div style={{
+                                fontFamily: 'var(--vk-mono)',
+                                fontSize: 10,
+                                color: 'var(--vk-persimmon)',
+                                marginTop: 1,
+                                wordBreak: 'break-word',
+                                whiteSpace: 'normal',
+                                fontWeight: 500,
+                              }}>
+                                {formatUniformDetail(extraEntries.deduct_uniform)}
+                              </div>
+                            )}
+                            {editingUniform && (
+                              <div style={{ fontSize: 11, color: 'var(--vk-ink-3)', marginTop: 2 }}>
+                                กำหนดจำนวนเงิน หรือกดไอคอนถังขยะเพื่อยกเลิกยอดหัก (อย่าลืมกด "บันทึกค่าจ้าง")
+                              </div>
+                            )}
+                          </div>
+
+                          {!editingUniform ? (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <span style={{
+                                fontFamily: 'var(--vk-mono)',
+                                fontSize: 13,
+                                fontVariantNumeric: 'tabular-nums',
+                                color: 'var(--vk-crimson)',
+                                fontWeight: 700,
+                                flexShrink: 0
+                              }}>
+                                {monoNum(extraEntries.deduct_uniform)}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setEditingUniform(true)}
+                                title="แก้ไขยอดหักเครื่องแบบ"
+                                style={{
+                                  background: 'none',
+                                  border: 'none',
+                                  cursor: 'pointer',
+                                  color: 'var(--vk-ink-3)',
+                                  padding: 3,
+                                  display: 'flex',
+                                  opacity: 0.7,
+                                  borderRadius: 4,
+                                }}
+                              >
+                                <Pencil style={{ width: 13, height: 13 }} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setExtraEntries(prev => ({ ...prev, deduct_uniform: 0 }))
+                                  toast.info('ยกเลิกรายการหักเครื่องแบบแล้ว กรุณากด "บันทึกค่าจ้าง"')
+                                }}
+                                title="ยกเลิก / ลบรายการหักเครื่องแบบ (เปลี่ยนเป็น 0 บาท)"
+                                style={{
+                                  background: 'none',
+                                  border: 'none',
+                                  cursor: 'pointer',
+                                  color: 'var(--vk-crimson)',
+                                  padding: 3,
+                                  display: 'flex',
+                                  opacity: 0.7,
+                                  borderRadius: 4,
+                                }}
+                              >
+                                <Trash2 style={{ width: 13, height: 13 }} />
+                              </button>
+                            </div>
+                          ) : (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                              <input
+                                type="number"
+                                min="0"
+                                autoFocus
+                                value={extraEntries.deduct_uniform || ''}
+                                onChange={e => {
+                                  const val = Math.max(0, Number(e.target.value) || 0)
+                                  setExtraEntries(prev => ({ ...prev, deduct_uniform: val }))
+                                }}
+                                style={{
+                                  width: 85,
+                                  fontFamily: 'var(--vk-mono)',
+                                  fontSize: 13,
+                                  textAlign: 'right',
+                                  border: '1px solid var(--vk-persimmon)',
+                                  background: '#fff',
+                                  padding: '4px 6px',
+                                  outline: 'none',
+                                  borderRadius: 4
+                                }}
+                                placeholder="0"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setEditingUniform(false)}
+                                title="ตกลง"
+                                style={{
+                                  background: 'var(--vk-jade)',
+                                  color: '#fff',
+                                  border: 'none',
+                                  borderRadius: 4,
+                                  padding: '4px 8px',
+                                  cursor: 'pointer',
+                                  fontSize: 11,
+                                  fontWeight: 600,
+                                }}
+                              >
+                                ตกลง
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setExtraEntries(prev => ({ ...prev, deduct_uniform: 0 }))
+                                  setEditingUniform(false)
+                                  toast.info('ลบรายการหักเครื่องแบบแล้ว กรุณากด "บันทึกค่าจ้าง"')
+                                }}
+                                title="ลบรายการ (ตั้งเป็น 0 บาท)"
+                                style={{
+                                  background: '#fef2f2',
+                                  color: 'var(--vk-crimson)',
+                                  border: '1px solid #fecaca',
+                                  borderRadius: 4,
+                                  padding: '4px 6px',
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  fontSize: 11,
+                                }}
+                              >
+                                <Trash2 style={{ width: 12, height: 12 }} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEditingUniform(false)}
+                                title="ปิด"
+                                style={{
+                                  background: 'none',
+                                  border: 'none',
+                                  cursor: 'pointer',
+                                  color: 'var(--vk-ink-3)',
+                                  padding: 3,
+                                }}
+                              >
+                                <X style={{ width: 14, height: 14 }} />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* ค่าอุปกรณ์ความปลอดภัย (แก้ไข / ลบได้) */}
+                      {(extraEntries.deduct_safety_equipment > 0 || editingSafetyEquip) && (
+                        <div style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 8,
+                          padding: '7px 0',
+                          borderBottom: '1px dashed var(--vk-rule-soft)',
+                          background: editingSafetyEquip ? 'rgba(217, 119, 6, 0.05)' : 'transparent',
+                          borderRadius: 4
+                        }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 13, fontWeight: 600 }}>ค่าอุปกรณ์ความปลอดภัย</div>
+                            {extraEntries.deduct_safety_equipment > 0 && (
+                              <div style={{
+                                fontFamily: 'var(--vk-mono)',
+                                fontSize: 10,
+                                color: 'var(--vk-persimmon)',
+                                marginTop: 1,
+                                wordBreak: 'break-word',
+                                whiteSpace: 'normal',
+                                fontWeight: 500,
+                              }}>
+                                {formatSafetyEquipmentDetail(extraEntries.deduct_safety_equipment)}
+                              </div>
+                            )}
+                            {editingSafetyEquip && (
+                              <div style={{ fontSize: 11, color: 'var(--vk-ink-3)', marginTop: 2 }}>
+                                กำหนดจำนวนเงิน หรือกดปุ่มลัด / ถังขยะเพื่อยกเลิกยอดหัก (อย่าลืมกด "บันทึกค่าจ้าง")
+                              </div>
+                            )}
+                          </div>
+
+                          {!editingSafetyEquip ? (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <span style={{
+                                fontFamily: 'var(--vk-mono)',
+                                fontSize: 13,
+                                fontVariantNumeric: 'tabular-nums',
+                                color: 'var(--vk-crimson)',
+                                fontWeight: 700,
+                                flexShrink: 0
+                              }}>
+                                {monoNum(extraEntries.deduct_safety_equipment)}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setEditingSafetyEquip(true)}
+                                title="แก้ไขยอดหักอุปกรณ์ความปลอดภัย"
+                                style={{
+                                  background: 'none',
+                                  border: 'none',
+                                  cursor: 'pointer',
+                                  color: 'var(--vk-ink-3)',
+                                  padding: 3,
+                                  display: 'flex',
+                                  opacity: 0.7,
+                                  borderRadius: 4,
+                                }}
+                              >
+                                <Pencil style={{ width: 13, height: 13 }} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setExtraEntries(prev => ({ ...prev, deduct_safety_equipment: 0 }))
+                                  toast.info('ยกเลิกรายการหักอุปกรณ์ความปลอดภัยแล้ว กรุณากด "บันทึกค่าจ้าง"')
+                                }}
+                                title="ยกเลิก / ลบรายการหักอุปกรณ์ความปลอดภัย (เปลี่ยนเป็น 0 บาท)"
+                                style={{
+                                  background: 'none',
+                                  border: 'none',
+                                  cursor: 'pointer',
+                                  color: 'var(--vk-crimson)',
+                                  padding: 3,
+                                  display: 'flex',
+                                  opacity: 0.7,
+                                  borderRadius: 4,
+                                }}
+                              >
+                                <Trash2 style={{ width: 13, height: 13 }} />
+                              </button>
+                            </div>
+                          ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  autoFocus
+                                  value={extraEntries.deduct_safety_equipment || ''}
+                                  onChange={e => {
+                                    const val = Math.max(0, Number(e.target.value) || 0)
+                                    setExtraEntries(prev => ({ ...prev, deduct_safety_equipment: val }))
+                                  }}
+                                  style={{
+                                    width: 85,
+                                    fontFamily: 'var(--vk-mono)',
+                                    fontSize: 13,
+                                    textAlign: 'right',
+                                    border: '1px solid var(--vk-persimmon)',
+                                    background: '#fff',
+                                    padding: '4px 6px',
+                                    outline: 'none',
+                                    borderRadius: 4
+                                  }}
+                                  placeholder="0"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingSafetyEquip(false)}
+                                  title="ตกลง"
+                                  style={{
+                                    background: 'var(--vk-jade)',
+                                    color: '#fff',
+                                    border: 'none',
+                                    borderRadius: 4,
+                                    padding: '4px 8px',
+                                    cursor: 'pointer',
+                                    fontSize: 11,
+                                    fontWeight: 600,
+                                  }}
+                                >
+                                  ตกลง
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setExtraEntries(prev => ({ ...prev, deduct_safety_equipment: 0 }))
+                                    setEditingSafetyEquip(false)
+                                    toast.info('ลบรายการหักอุปกรณ์ความปลอดภัยแล้ว กรุณากด "บันทึกค่าจ้าง"')
+                                  }}
+                                  title="ลบรายการ (ตั้งเป็น 0 บาท)"
+                                  style={{
+                                    background: '#fef2f2',
+                                    color: 'var(--vk-crimson)',
+                                    border: '1px solid #fecaca',
+                                    borderRadius: 4,
+                                    padding: '4px 6px',
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    fontSize: 11,
+                                  }}
+                                >
+                                  <Trash2 style={{ width: 12, height: 12 }} />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingSafetyEquip(false)}
+                                  title="ปิด"
+                                  style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    color: 'var(--vk-ink-3)',
+                                    padding: 3,
+                                  }}
+                                >
+                                  <X style={{ width: 14, height: 14 }} />
+                                </button>
+                              </div>
+                              <div style={{ display: 'flex', gap: 4, marginTop: 2 }}>
+                                <button
+                                  type="button"
+                                  onClick={() => setExtraEntries(prev => ({ ...prev, deduct_safety_equipment: 550 }))}
+                                  style={{
+                                    fontSize: 10,
+                                    padding: '2px 6px',
+                                    borderRadius: 3,
+                                    border: '1px solid #fed7aa',
+                                    background: '#fff7ed',
+                                    color: '#c2410c',
+                                    cursor: 'pointer',
+                                    whiteSpace: 'nowrap'
+                                  }}
+                                  title="ระบุ รองเท้าเซฟตี้ 1 คู่ (550 บาท)"
+                                >
+                                  รองเท้า 1 คู่ (550 บ.)
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setExtraEntries(prev => ({ ...prev, deduct_safety_equipment: 1100 }))}
+                                  style={{
+                                    fontSize: 10,
+                                    padding: '2px 6px',
+                                    borderRadius: 3,
+                                    border: '1px solid #fed7aa',
+                                    background: '#fff7ed',
+                                    color: '#c2410c',
+                                    cursor: 'pointer',
+                                    whiteSpace: 'nowrap'
+                                  }}
+                                  title="ระบุ รองเท้าเซฟตี้ 2 คู่ (1,100 บาท)"
+                                >
+                                  2 คู่ (1,100 บ.)
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
 
                       {/* Advance Breakdown Sub-items: Separated into 3 clear cards with multiline notes */}
                       {advRegular.length > 0 && (

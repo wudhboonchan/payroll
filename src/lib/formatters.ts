@@ -28,6 +28,114 @@ export const normalizePrefix = (
   }
 }
 
+export const PREFIX_PATTERNS = [
+  { prefix: 'นางสาว', regex: /^(นางสาว|น\.ส\.|น\.ส)\s*/i },
+  { prefix: 'นาย', regex: /^(นาย)\s*/i },
+  { prefix: 'นาง', regex: /^(นาง)\s*/i },
+  { prefix: 'ด.ช.', regex: /^(ด\.ช\.|เด็กชาย)\s*/i },
+  { prefix: 'ด.ญ.', regex: /^(ด\.ญ\.|เด็กหญิง)\s*/i },
+  { prefix: 'Mr.', regex: /^(mr\.|mr\b)\s*/i },
+  { prefix: 'Mrs.', regex: /^(mrs\.|mrs\b)\s*/i },
+  { prefix: 'Ms.', regex: /^(ms\.|ms\b|miss\b)\s*/i },
+]
+
+export interface CleanedEmployeeName {
+  prefix: string
+  first_name: string
+  last_name: string
+}
+
+export const cleanEmployeeNameData = (
+  emp: {
+    prefix?: string | null
+    first_name?: string | null
+    last_name?: string | null
+    full_name?: string | null
+    nationality?: string | null
+  },
+  isTpi: boolean = true
+): CleanedEmployeeName => {
+  let prefix = (emp.prefix || '').trim()
+  let first = (emp.first_name || '').trim()
+  let last = (emp.last_name || '').trim()
+  const full = (emp.full_name || '').trim()
+  const nat = emp.nationality || 'ไทย'
+  const isForeign = (nat && nat !== 'ไทย') || /^[a-zA-Z]/.test(first || full)
+
+  // 1. If first_name is empty but full_name is present, parse full_name
+  if (!first && full) {
+    let remainder = full
+    for (const p of PREFIX_PATTERNS) {
+      const match = remainder.match(p.regex)
+      if (match) {
+        if (!prefix) prefix = p.prefix
+        remainder = remainder.slice(match[0].length).trim()
+        break
+      }
+    }
+    if (isForeign) {
+      first = remainder
+      last = ''
+    } else {
+      const spaceIdx = remainder.search(/\s+/)
+      if (spaceIdx !== -1) {
+        first = remainder.slice(0, spaceIdx).trim()
+        last = remainder.slice(spaceIdx).trim()
+      } else {
+        first = remainder
+        last = ''
+      }
+    }
+  }
+
+  // 2. Extract prefix from first_name if embedded (e.g. 'นายเจนศักดิ์' -> prefix: 'นาย', first: 'เจนศักดิ์')
+  for (const p of PREFIX_PATTERNS) {
+    const match = first.match(p.regex)
+    if (match) {
+      if (!prefix) prefix = p.prefix
+      first = first.slice(match[0].length).trim()
+      break
+    }
+  }
+
+  prefix = normalizePrefix(prefix, nat, first, isTpi)
+
+  // 3. Clean up last_name if it duplicates first_name or full name
+  if (last) {
+    const candidatesToStrip = [
+      (prefix && first) ? `${prefix} ${first}` : '',
+      (prefix && first) ? `${prefix}${first}` : '',
+      emp.first_name ? emp.first_name.trim() : '',
+      first,
+    ].filter(Boolean)
+
+    let cleanedLast = last
+    for (const cand of candidatesToStrip) {
+      const cLow = cand.toLowerCase()
+      const lLow = cleanedLast.toLowerCase()
+      if (lLow === cLow) {
+        cleanedLast = ''
+        break
+      }
+      if (lLow.startsWith(cLow + ' ')) {
+        cleanedLast = cleanedLast.slice(cand.length).trim()
+        break
+      }
+      // Also handle case where there was no space in last_name e.g. 'นายเจนศักดิ์บุญมีมา'
+      if (lLow.startsWith(cLow) && prefix && cand.includes(first)) {
+        const after = cleanedLast.slice(cand.length).trim()
+        if (after.length > 0) {
+          cleanedLast = after
+          break
+        }
+      }
+    }
+    last = cleanedLast
+  }
+
+  return { prefix, first_name: first, last_name: last }
+}
+
 export const formatEmployeeFullName = (
   emp: {
     prefix?: string | null
@@ -37,9 +145,11 @@ export const formatEmployeeFullName = (
   },
   isTpi: boolean = true
 ): string => {
-  const normPrefix = normalizePrefix(emp.prefix, emp.nationality, emp.first_name, isTpi)
-  const first = (emp.first_name || '').trim()
-  const last = (emp.last_name || '').trim()
+  if (!emp) return ''
+  const cleaned = cleanEmployeeNameData(emp, isTpi)
+  const normPrefix = normalizePrefix(cleaned.prefix, emp.nationality, cleaned.first_name, isTpi)
+  const first = cleaned.first_name
+  const last = cleaned.last_name
 
   let fullName = first
   if (normPrefix) {
@@ -54,17 +164,22 @@ export const formatEmployeeFullName = (
     fullName = `${fullName} ${last}`
   }
 
-  return fullName.trim()
+  return fullName.replace(/\s+/g, ' ').trim()
 }
 
-export const formatEmployeeName = (emp: {
-  prefix?: string | null
-  first_name: string
-  last_name?: string | null
-  nationality?: string | null
-}) => {
-  const lastName = emp.last_name?.trim() ? ` ${emp.last_name.trim()}` : ''
-  const name = `${emp.first_name}${lastName}`
+export const formatEmployeeName = (
+  emp: {
+    prefix?: string | null
+    first_name: string
+    last_name?: string | null
+    nationality?: string | null
+  },
+  isTpi: boolean = true
+) => {
+  if (!emp) return ''
+  const cleaned = cleanEmployeeNameData(emp, isTpi)
+  const lastName = cleaned.last_name ? ` ${cleaned.last_name}` : ''
+  const name = `${cleaned.first_name}${lastName}`
   const nat = emp.nationality
   if (!nat || nat === 'ไทย') return name
   return `${name} (${nat})`
@@ -160,3 +275,51 @@ export const formatPeriodLabel = (start: string, end: string): string => {
 export const compareEmployeeCode = (a: string | null | undefined, b: string | null | undefined): number => {
   return (a || '').localeCompare(b || '', undefined, { numeric: true, sensitivity: 'base' })
 }
+
+/**
+ * Formats date string (YYYY-MM-DD) into standard Thai Buddhist format: D MMM YYYY (e.g. 18 ส.ค. 2569)
+ */
+export const formatThaiDateShort = (dateStr: string | null | undefined): string => {
+  if (!dateStr) return '-'
+  const trimmed = dateStr.trim()
+  const match = trimmed.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/)
+  if (match) {
+    const y = parseInt(match[1], 10)
+    const m = parseInt(match[2], 10)
+    const d = parseInt(match[3], 10)
+    const thaiYear = y < 2400 ? y + 543 : y
+    const monthNames = [
+      'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
+      'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'
+    ]
+    const mIdx = m - 1
+    if (mIdx >= 0 && mIdx < 12) {
+      return `${d} ${monthNames[mIdx]} ${thaiYear}`
+    }
+  }
+  return dateStr
+}
+
+/**
+ * Formats a monthly cycle range from a period date (e.g. '2026-08-31' or '2026-08-25')
+ * Returns format like: '1-31 ส.ค. 69'
+ */
+export const formatMonthlyCycleRange = (dateStr: string | null | undefined): string => {
+  if (!dateStr) return ''
+  const trimmed = dateStr.trim()
+  const match = trimmed.match(/^(\d{4})[-\/](\d{1,2})/)
+  if (!match) return ''
+  const y = parseInt(match[1], 10)
+  const m = parseInt(match[2], 10)
+  const lastDay = new Date(y, m, 0).getDate()
+  const thaiYear = y < 2400 ? y + 543 : y
+  const thaiYear2 = String(thaiYear).slice(-2)
+  const monthNames = [
+    'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
+    'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'
+  ]
+  const mName = monthNames[m - 1] || ''
+  return `1-${lastDay} ${mName} ${thaiYear2}`
+}
+
+

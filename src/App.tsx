@@ -10,6 +10,7 @@ import Employees from './pages/Employees'
 import CompanyShiftEntry from './pages/CompanyShiftEntry'
 import TpiShiftEntry from './pages/TpiShiftEntry'
 import TpiJobManagement from './pages/TpiJobManagement'
+import TpiAttendance from './pages/TpiAttendance'
 import CompanyPayrollEntry from './pages/CompanyPayrollEntry'
 import TpiPayrollEntry from './pages/TpiPayrollEntry'
 import PayrollEntry from './pages/PayrollEntry'
@@ -69,6 +70,8 @@ function App() {
                     <Route path="/employees"  element={<Employees />} />
                     <Route path="/shifts"     element={<CompanyShiftEntry />} />
                     <Route path="/tpi-shifts" element={<TpiShiftEntry />} />
+                    <Route path="/attendance" element={<TpiAttendance />} />
+                    <Route path="/tpi-attendance" element={<TpiAttendance />} />
                     <Route path="/tpi-jobs"   element={<TpiJobManagement />} />
                     <Route path="/jobs"       element={<TpiJobManagement />} />
                     <Route path="/payroll"    element={<CompanyPayrollEntry />} />

@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Users, CalendarClock, Calculator,
   CreditCard, FileText, Download, LogOut,
   Link2, UserCog, ChevronDown, X, Menu, KeyRound, Eye, EyeOff,
-  ClipboardList, Briefcase
+  ClipboardList, Briefcase, UserX
 } from 'lucide-react'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
@@ -88,6 +88,7 @@ export function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     { href: '/employees',        label: 'ฐานข้อมูลพนักงาน',     icon: Users,           roles: ['superUser','admin'] },
     ...(isTpi ? [{ href: '/tpi-jobs', label: 'จัดการรหัสงาน', icon: Briefcase, roles: ['superUser','admin'] }] : []),
     { href: '/shifts',           label: 'กรอกกะรายวัน',          icon: CalendarClock,   roles: ['superUser','admin'] },
+    ...(isTpi ? [{ href: '/attendance', label: 'ขาด / ลา / มาสาย', icon: UserX, roles: ['superUser','admin'] }] : []),
     { href: '/advances',         label: 'เบิกล่วงหน้า',          icon: CreditCard,      roles: ['superUser','admin'] },
     { href: '/payroll',          label: 'กรอกค่าจ้าง',           icon: Calculator,      roles: ['superUser','admin'] },
     { href: '/payslip',          label: 'ดูสลิปเงินเดือน',       icon: FileText,        roles: ['superUser','admin','normalUser'] },

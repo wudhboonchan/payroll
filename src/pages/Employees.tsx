@@ -1,14 +1,15 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import { useAppStore } from '../store/useAppStore'
 import { TopBar } from '../components/layout/TopBar'
+import { toast } from 'sonner'
 import EmployeeFormModal from './EmployeeFormModal'
 import EmployeeImportModal from './EmployeeImportModal'
-import { Plus, Upload, Search, AlertCircle, UserX, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
-import { isTpiCompany } from '../features/tpi/model'
-import { formatEmployeeFullName, compareEmployeeCode } from '../lib/formatters'
+import { Plus, Upload, Search, AlertCircle, UserX, ArrowUpDown, ArrowUp, ArrowDown, Award, ShieldCheck, Briefcase } from 'lucide-react'
+import { isTpiCompany, isTpiJobCode } from '../features/tpi/model'
+import { formatEmployeeFullName, compareEmployeeCode, cleanEmployeeNameData } from '../lib/formatters'
 import '../styles/tokens.css'
 
 function fmtNationality(nationality: string | null) {
@@ -34,7 +35,6 @@ type SortCol =
   | 'employee_code'
   | 'name'
   | 'position'
-  | 'job_title'
   | 'nationality'
   | 'payment_method'
   | 'rate'
@@ -69,9 +69,9 @@ export default function Employees() {
 
   const isTpi = isTpiCompany(currentFactoryName)
 
+  type QuickFilter = 'all' | 'pending' | 'skilled' | 'safety' | 'clerk' | 'inactive'
   const [searchTerm, setSearchTerm] = useState('')
-  const [showPendingOnly, setShowPendingOnly] = useState(false)
-  const [showInactiveOnly, setShowInactiveOnly] = useState(false)
+  const [quickFilter, setQuickFilter] = useState<QuickFilter>('all')
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [isImportOpen, setIsImportOpen] = useState(false)
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null)
@@ -91,6 +91,107 @@ export default function Employees() {
     staleTime: 0,
   })
 
+  // Auto-repair corrupted employee records in database (e.g. duplicate name in last_name from prior imports)
+  const isRepairingRef = useRef(false)
+  useEffect(() => {
+    if (!employees || employees.length === 0 || !user?.factory_id || isRepairingRef.current) return
+
+    const corrupted = employees.filter(emp => {
+      const cleaned = cleanEmployeeNameData(emp, isTpi)
+      const currentPrefix = (emp.prefix || '').trim()
+      const cleanedPrefix = (cleaned.prefix || '').trim()
+      const currentFirst = (emp.first_name || '').trim()
+      const cleanedFirst = (cleaned.first_name || '').trim()
+      const currentLast = (emp.last_name || '').trim()
+      const cleanedLast = (cleaned.last_name || '').trim()
+
+      const hasCorruptedName =
+        currentPrefix !== cleanedPrefix ||
+        currentFirst !== cleanedFirst ||
+        currentLast !== cleanedLast
+
+      const hasJobCodeInTitle = isTpi && isTpiJobCode(emp.job_title)
+
+      return hasCorruptedName || hasJobCodeInTitle
+    })
+
+    if (corrupted.length === 0) return
+
+    isRepairingRef.current = true
+    const repairCorrupted = async () => {
+      try {
+        let fixedNameCount = 0
+        let fixedJobTitleCount = 0
+        for (const emp of corrupted) {
+          const cleaned = cleanEmployeeNameData(emp, isTpi)
+          const currentPrefix = (emp.prefix || '').trim()
+          const cleanedPrefix = (cleaned.prefix || '').trim()
+          const currentFirst = (emp.first_name || '').trim()
+          const cleanedFirst = (cleaned.first_name || '').trim()
+          const currentLast = (emp.last_name || '').trim()
+          const cleanedLast = (cleaned.last_name || '').trim()
+
+          const hasCorruptedName =
+            currentPrefix !== cleanedPrefix ||
+            currentFirst !== cleanedFirst ||
+            currentLast !== cleanedLast
+
+          const isJobCode = isTpi && isTpiJobCode(emp.job_title)
+
+          if (isJobCode) {
+            // Migrate legacy job code in job_title to wage profile
+            const legacyCode = emp.job_title!.trim()
+            await supabase
+              .from('tpi_employee_wage_profiles')
+              .upsert({
+                employee_id: emp.id,
+                factory_id: user.factory_id,
+                rate_tier: 'skilled',
+                job_code: legacyCode,
+                updated_at: new Date().toISOString(),
+              }, { onConflict: 'employee_id' })
+            fixedJobTitleCount++
+          }
+
+          const updatePayload: Record<string, any> = {}
+          if (hasCorruptedName) {
+            updatePayload.prefix = cleaned.prefix || null
+            updatePayload.first_name = cleaned.first_name
+            updatePayload.last_name = cleaned.last_name || ''
+            fixedNameCount++
+          }
+          if (isJobCode) {
+            updatePayload.job_title = null
+          }
+
+          if (Object.keys(updatePayload).length > 0) {
+            await supabase
+              .from('employees')
+              .update(updatePayload)
+              .eq('id', emp.id)
+          }
+        }
+        if (fixedNameCount > 0) {
+          toast.success(`ซ่อมแซมข้อมูลชื่อพนักงานที่ซ้ำซ้อนเรียบร้อยแล้ว (${fixedNameCount} คน)`)
+        }
+        if (fixedJobTitleCount > 0) {
+          toast.success(`แยกข้อมูลรหัสงานฝีมือออกจากตำแหน่งเรียบร้อยแล้ว (${fixedJobTitleCount} คน)`)
+          queryClient.invalidateQueries({ queryKey: ['tpi-profiles', user.factory_id] })
+        }
+        if (fixedNameCount > 0 || fixedJobTitleCount > 0) {
+          queryClient.invalidateQueries({ queryKey: ['employees-all', user.factory_id] })
+          queryClient.invalidateQueries({ queryKey: ['employees', user.factory_id] })
+        }
+      } catch (err) {
+        console.error('Failed to auto-repair corrupted employee records:', err)
+      } finally {
+        isRepairingRef.current = false
+      }
+    }
+
+    repairCorrupted()
+  }, [employees, user?.factory_id, isTpi, queryClient])
+
   // Query TPI Wage Profiles if in TPI factory
   const { data: tpiProfiles = [] } = useQuery({
     queryKey: ['tpi-profiles', user?.factory_id],
@@ -107,24 +208,45 @@ export default function Employees() {
   })
 
   const tpiProfileMap = useMemo(() => {
-    const map = new Map<string, { rate_tier: string; skilled_from: string | null }>()
+    const map = new Map<string, { rate_tier: string; skilled_from: string | null; job_code: string | null; job_id: string | null }>()
     for (const p of (tpiProfiles || [])) {
-      map.set(p.employee_id, { rate_tier: p.rate_tier, skilled_from: p.skilled_from })
+      map.set(p.employee_id, {
+        rate_tier: p.rate_tier,
+        skilled_from: p.skilled_from,
+        job_code: p.job_code || null,
+        job_id: p.job_id || null,
+      })
     }
     return map
   }, [tpiProfiles])
 
-  const pendingCount  = employees.filter(e => e.data_complete === false).length
+  const pendingCount  = employees.filter(e => e.data_complete === false && e.status !== 'inactive').length
   const inactiveCount = employees.filter(e => e.status === 'inactive').length
+  const skilledCount  = employees.filter(e => {
+    const prof = tpiProfileMap.get(e.id)
+    return (prof?.rate_tier === 'skilled' || (isTpi && isTpiJobCode(e.job_title))) && e.status !== 'inactive'
+  }).length
+  const safetyCount   = isTpi ? employees.filter(e => !!e.is_safety_officer && e.status !== 'inactive').length : 0
+  const clerkCount    = employees.filter(e => e.position === 'clerk' && e.status !== 'inactive').length
 
   const filtered = employees.filter(emp => {
     const matchesSearch =
       (emp.employee_code || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       `${emp.first_name || ''} ${emp.last_name || ''}`.toLowerCase().includes(searchTerm.toLowerCase())
-    if (showPendingOnly)  return matchesSearch && emp.data_complete === false
-    if (showInactiveOnly) return matchesSearch && emp.status === 'inactive'
+
+    if (!matchesSearch) return false
+
+    if (quickFilter === 'pending')  return emp.data_complete === false && emp.status !== 'inactive'
+    if (quickFilter === 'skilled') {
+      const prof = tpiProfileMap.get(emp.id)
+      return isTpi && (prof?.rate_tier === 'skilled' || isTpiJobCode(emp.job_title)) && emp.status !== 'inactive'
+    }
+    if (quickFilter === 'safety')   return isTpi && !!emp.is_safety_officer && emp.status !== 'inactive'
+    if (quickFilter === 'clerk')    return emp.position === 'clerk' && emp.status !== 'inactive'
+    if (quickFilter === 'inactive') return emp.status === 'inactive'
+
     if (!searchTerm.trim() && emp.status === 'inactive') return false
-    return matchesSearch
+    return true
   })
 
   const sorted = [...filtered].sort((a, b) => {
@@ -139,10 +261,6 @@ export default function Employees() {
       const posA = POSITIONS[a.position ?? ''] || a.position || ''
       const posB = POSITIONS[b.position ?? ''] || b.position || ''
       cmp = posA.localeCompare(posB, 'th')
-    } else if (sortCol === 'job_title') {
-      const titleA = a.job_title || ''
-      const titleB = b.job_title || ''
-      cmp = titleA.localeCompare(titleB, 'th')
     } else if (sortCol === 'nationality') {
       const natA = fmtNationality(a.nationality)
       const natB = fmtNationality(b.nationality)
@@ -153,8 +271,10 @@ export default function Employees() {
       cmp = payA.localeCompare(payB, 'th')
     } else if (sortCol === 'rate') {
       if (isTpi) {
-        const tierA = tpiProfileMap.get(a.id)?.rate_tier === 'skilled' ? 1 : 0
-        const tierB = tpiProfileMap.get(b.id)?.rate_tier === 'skilled' ? 1 : 0
+        const profA = tpiProfileMap.get(a.id)
+        const profB = tpiProfileMap.get(b.id)
+        const tierA = profA?.rate_tier === 'skilled' || isTpiJobCode(a.job_title) ? 1 : 0
+        const tierB = profB?.rate_tier === 'skilled' || isTpiJobCode(b.job_title) ? 1 : 0
         cmp = tierA - tierB
       } else {
         cmp = (Number(a.rate_per_12h) || 0) - (Number(b.rate_per_12h) || 0)
@@ -185,7 +305,18 @@ export default function Employees() {
   const handleCreate = () => { setSelectedEmployeeId(null); setIsModalOpen(true) }
   const handleEdit   = (id: string) => { setSelectedEmployeeId(id); setIsModalOpen(true) }
 
-  const activeLabel = showPendingOnly ? `ข้อมูลไม่ครบ (${pendingCount})` : showInactiveOnly ? `พ้นสภาพ (${inactiveCount})` : `ปกติ (${filtered.length})`
+  const activeLabel =
+    quickFilter === 'pending'
+      ? `ข้อมูลไม่ครบ (${filtered.length})`
+      : quickFilter === 'skilled'
+      ? `ค่าแรงฝีมือ (${filtered.length})`
+      : quickFilter === 'safety'
+      ? `เจ้าหน้าที่ จป. (${filtered.length})`
+      : quickFilter === 'clerk'
+      ? `เสมียน (${filtered.length})`
+      : quickFilter === 'inactive'
+      ? `พ้นสภาพ (${filtered.length})`
+      : `ปกติ (${filtered.length})`
 
   return (
     // Fill the AppLayout inner-div as a flex column so we control our own scroll
@@ -226,17 +357,17 @@ export default function Employees() {
           </div>
         </div>
 
-        {/* Filters — row 2: filter buttons */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        {/* Filters — row 2: quick filter buttons */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <button
-            onClick={() => { setShowPendingOnly(p => !p); setShowInactiveOnly(false) }}
+            onClick={() => setQuickFilter(f => f === 'pending' ? 'all' : 'pending')}
             style={{
               display: 'inline-flex', alignItems: 'center', gap: 6, height: 36, padding: '0 14px',
               fontFamily: 'var(--vk-sans)', fontWeight: 600, fontSize: 13,
-              border: `1px solid ${showPendingOnly ? 'var(--vk-marigold)' : 'var(--vk-rule-soft)'}`,
+              border: `1px solid ${quickFilter === 'pending' ? 'var(--vk-marigold)' : 'var(--vk-rule-soft)'}`,
               borderRadius: 'var(--vk-r2)', cursor: 'pointer', whiteSpace: 'nowrap',
-              background: showPendingOnly ? 'var(--vk-marigold-tint)' : 'var(--vk-bone)',
-              color: showPendingOnly ? '#6F4A0E' : 'var(--vk-ink-2)',
+              background: quickFilter === 'pending' ? 'var(--vk-marigold-tint)' : 'var(--vk-bone)',
+              color: quickFilter === 'pending' ? '#6F4A0E' : 'var(--vk-ink-2)',
             }}>
             <AlertCircle style={{ width: 13, height: 13 }} />
             ข้อมูลไม่ครบ
@@ -244,22 +375,89 @@ export default function Employees() {
               <span style={{ background: 'var(--vk-marigold)', color: '#fff', borderRadius: 999, fontSize: 11, fontWeight: 700, padding: '0 6px', lineHeight: '18px' }}>{pendingCount}</span>
             )}
           </button>
+
+          {(isTpi || skilledCount > 0) && (
+            <button
+              onClick={() => setQuickFilter(f => f === 'skilled' ? 'all' : 'skilled')}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6, height: 36, padding: '0 14px',
+                fontFamily: 'var(--vk-sans)', fontWeight: 600, fontSize: 13,
+                border: `1px solid ${quickFilter === 'skilled' ? '#7c3aed' : 'var(--vk-rule-soft)'}`,
+                borderRadius: 'var(--vk-r2)', cursor: 'pointer', whiteSpace: 'nowrap',
+                background: quickFilter === 'skilled' ? '#f5f3ff' : 'var(--vk-bone)',
+                color: quickFilter === 'skilled' ? '#5b21b6' : 'var(--vk-ink-2)',
+              }}>
+              <Award style={{ width: 13, height: 13 }} />
+              ค่าแรงฝีมือ
+              {skilledCount > 0 && (
+                <span style={{ background: quickFilter === 'skilled' ? '#7c3aed' : 'var(--vk-ink-3)', color: '#fff', borderRadius: 999, fontSize: 11, fontWeight: 700, padding: '0 6px', lineHeight: '18px' }}>{skilledCount}</span>
+              )}
+            </button>
+          )}
+
+          {isTpi && (
+            <button
+              onClick={() => setQuickFilter(f => f === 'safety' ? 'all' : 'safety')}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6, height: 36, padding: '0 14px',
+                fontFamily: 'var(--vk-sans)', fontWeight: 600, fontSize: 13,
+                border: `1px solid ${quickFilter === 'safety' ? '#059669' : 'var(--vk-rule-soft)'}`,
+                borderRadius: 'var(--vk-r2)', cursor: 'pointer', whiteSpace: 'nowrap',
+                background: quickFilter === 'safety' ? '#ecfdf5' : 'var(--vk-bone)',
+                color: quickFilter === 'safety' ? '#065f46' : 'var(--vk-ink-2)',
+              }}>
+              <ShieldCheck style={{ width: 13, height: 13 }} />
+              เจ้าหน้าที่ จป.
+              {safetyCount > 0 && (
+                <span style={{ background: quickFilter === 'safety' ? '#059669' : 'var(--vk-ink-3)', color: '#fff', borderRadius: 999, fontSize: 11, fontWeight: 700, padding: '0 6px', lineHeight: '18px' }}>{safetyCount}</span>
+              )}
+            </button>
+          )}
+
           <button
-            onClick={() => { setShowInactiveOnly(p => !p); setShowPendingOnly(false) }}
+            onClick={() => setQuickFilter(f => f === 'clerk' ? 'all' : 'clerk')}
             style={{
               display: 'inline-flex', alignItems: 'center', gap: 6, height: 36, padding: '0 14px',
               fontFamily: 'var(--vk-sans)', fontWeight: 600, fontSize: 13,
-              border: `1px solid ${showInactiveOnly ? 'var(--vk-ink-2)' : 'var(--vk-rule-soft)'}`,
+              border: `1px solid ${quickFilter === 'clerk' ? '#0284c7' : 'var(--vk-rule-soft)'}`,
               borderRadius: 'var(--vk-r2)', cursor: 'pointer', whiteSpace: 'nowrap',
-              background: showInactiveOnly ? 'var(--vk-ink-2)' : 'var(--vk-bone)',
-              color: showInactiveOnly ? 'var(--vk-bone)' : 'var(--vk-ink-2)',
+              background: quickFilter === 'clerk' ? '#f0f9ff' : 'var(--vk-bone)',
+              color: quickFilter === 'clerk' ? '#0369a1' : 'var(--vk-ink-2)',
+            }}>
+            <Briefcase style={{ width: 13, height: 13 }} />
+            เสมียน
+            {clerkCount > 0 && (
+              <span style={{ background: quickFilter === 'clerk' ? '#0284c7' : 'var(--vk-ink-3)', color: '#fff', borderRadius: 999, fontSize: 11, fontWeight: 700, padding: '0 6px', lineHeight: '18px' }}>{clerkCount}</span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setQuickFilter(f => f === 'inactive' ? 'all' : 'inactive')}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6, height: 36, padding: '0 14px',
+              fontFamily: 'var(--vk-sans)', fontWeight: 600, fontSize: 13,
+              border: `1px solid ${quickFilter === 'inactive' ? 'var(--vk-ink-2)' : 'var(--vk-rule-soft)'}`,
+              borderRadius: 'var(--vk-r2)', cursor: 'pointer', whiteSpace: 'nowrap',
+              background: quickFilter === 'inactive' ? 'var(--vk-ink-2)' : 'var(--vk-bone)',
+              color: quickFilter === 'inactive' ? 'var(--vk-bone)' : 'var(--vk-ink-2)',
             }}>
             <UserX style={{ width: 13, height: 13 }} />
             พ้นสภาพ
             {inactiveCount > 0 && (
-              <span style={{ background: showInactiveOnly ? 'rgba(255,255,255,0.25)' : 'var(--vk-ink-3)', color: '#fff', borderRadius: 999, fontSize: 11, fontWeight: 700, padding: '0 6px', lineHeight: '18px' }}>{inactiveCount}</span>
+              <span style={{ background: quickFilter === 'inactive' ? 'rgba(255,255,255,0.25)' : 'var(--vk-ink-3)', color: '#fff', borderRadius: 999, fontSize: 11, fontWeight: 700, padding: '0 6px', lineHeight: '18px' }}>{inactiveCount}</span>
             )}
           </button>
+
+          {quickFilter !== 'all' && (
+            <button
+              onClick={() => setQuickFilter('all')}
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                color: 'var(--vk-ink-3)', fontSize: 13, textDecoration: 'underline', padding: '4px 8px',
+              }}>
+              แสดงทั้งหมด
+            </button>
+          )}
         </div>
       </div>
 
@@ -283,7 +481,6 @@ export default function Employees() {
                   { label: 'รหัส',           col: 'employee_code' as SortCol, align: 'left'   },
                   { label: 'ชื่อ–นามสกุล',   col: 'name'          as SortCol, align: 'left'   },
                   { label: 'กลุ่มงาน',        col: 'position'      as SortCol, align: 'left'   },
-                  { label: 'ตำแหน่ง',         col: 'job_title'     as SortCol, align: 'left'   },
                   { label: 'สัญชาติ',         col: 'nationality'   as SortCol, align: 'left'   },
                   { label: 'วิธีรับเงิน',     col: 'payment_method' as SortCol, align: 'left'  },
                   { label: isTpi ? 'ประเภทค่าแรง' : 'ค่าจ้าง/เงินเดือน', col: 'rate' as SortCol, align: isTpi ? 'center' : 'right' },
@@ -324,27 +521,17 @@ export default function Employees() {
                   <td style={{ padding: '13px 14px', opacity: emp.status === 'inactive' ? 0.5 : 1 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                       <span style={{ fontWeight: 600, fontSize: 14 }}>{formatEmployeeFullName(emp, isTpi)}</span>
-                      {emp.is_safety_officer && (
+                      {isTpi && emp.is_safety_officer && (
                         <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 4, background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0' }} title="เจ้าหน้าที่ความปลอดภัย (จป.) +500/เดือน">
                           จป.
                         </span>
                       )}
-                      {emp.has_position_allowance && (
-                        <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 4, background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe' }} title="มีค่าตำแหน่ง +1,000/เดือน">
-                          ค่าตำแหน่ง
-                        </span>
-                      )}
-                      {emp.nationality !== 'ไทย' && !emp.national_id && !emp.social_security_number ? (
-                        <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 4, background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa' }} title="ยังไม่มีเลข ปกส (ไม่หัก)">
-                          รอ ปกส
-                        </span>
-                      ) : null}
                       {emp.exempt_social_security && (
                         <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 4, background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1' }} title="ได้รับการยกเว้นไม่ต้องหักประกันสังคม">
                           ยกเว้น ปกส
                         </span>
                       )}
-                      {emp.data_complete === false && (emp.nationality === 'ไทย' || emp.national_id || emp.social_security_number) && (
+                      {emp.data_complete === false && (
                         <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 4, background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca' }} title="ข้อมูลพนักงานยังไม่สมบูรณ์">
                           ข้อมูลไม่ครบ
                         </span>
@@ -353,9 +540,6 @@ export default function Employees() {
                   </td>
                   <td style={{ padding: '13px 14px', fontSize: 13, color: 'var(--vk-ink-3)', opacity: emp.status === 'inactive' ? 0.5 : 1 }}>
                     {POSITIONS[emp.position ?? ''] || emp.position || '—'}
-                  </td>
-                  <td style={{ padding: '13px 14px', fontSize: 13, color: 'var(--vk-ink-3)', opacity: emp.status === 'inactive' ? 0.5 : 1 }}>
-                    {emp.job_title || '—'}
                   </td>
                   <td style={{ padding: '13px 14px', fontSize: 13, color: 'var(--vk-ink-3)', opacity: emp.status === 'inactive' ? 0.5 : 1 }}>
                     {fmtNationality(emp.nationality)}
@@ -367,15 +551,25 @@ export default function Employees() {
                   </td>
                   <td style={{ padding: '13px 14px', textAlign: isTpi ? 'center' : 'right', fontFamily: isTpi ? 'inherit' : 'var(--vk-mono)', fontSize: 13, fontVariantNumeric: 'tabular-nums', opacity: emp.status === 'inactive' ? 0.5 : 1 }}>
                     {isTpi ? (
-                      tpiProfileMap.get(emp.id)?.rate_tier === 'skilled' ? (
-                        <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: '#dcfce7', color: '#15803d' }}>
-                          ค่าแรงฝีมือ
-                        </span>
-                      ) : (
-                        <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: '#fef3c7', color: '#92400e' }}>
-                          ค่าแรงปกติ
-                        </span>
-                      )
+                      (() => {
+                        const prof = tpiProfileMap.get(emp.id)
+                        const isSkilled = prof?.rate_tier === 'skilled' || isTpiJobCode(emp.job_title)
+                        const jobCode = prof?.job_code || (isTpiJobCode(emp.job_title) ? emp.job_title : null)
+                        return isSkilled ? (
+                          <span
+                            style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: '#dcfce7', color: '#15803d', whiteSpace: 'nowrap' }}
+                            title={jobCode ? `รหัสงานฝีมือ: ${jobCode}` : undefined}
+                          >
+                            ค่าแรงฝีมือ
+                          </span>
+                        ) : (
+                          <span
+                            style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: '#fef3c7', color: '#92400e', whiteSpace: 'nowrap' }}
+                          >
+                            ค่าแรงปกติ
+                          </span>
+                        )
+                      })()
                     ) : (
                       Number(emp.rate_per_12h).toLocaleString('en-US', { minimumFractionDigits: 2 })
                     )}

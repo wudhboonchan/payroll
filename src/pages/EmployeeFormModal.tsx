@@ -8,11 +8,12 @@ import { useAppStore } from '@/store/useAppStore'
 import { toast } from 'sonner'
 import { UserPlus, X, AlertTriangle } from 'lucide-react'
 import { NATIONALITIES } from '@/lib/constants'
-import { normalizePrefix } from '@/lib/formatters'
+import { normalizePrefix, cleanEmployeeNameData } from '@/lib/formatters'
 import '../styles/tokens.css'
-import { isTpiCompany, type Job } from '../features/tpi/model'
+import { isTpiCompany, isTpiJobCode, type Job } from '../features/tpi/model'
 import { demoJobs } from '../features/tpi/demoData'
 import { employeeWageForm } from '../features/tpi/employeeWageForm'
+import { ThaiDatePicker } from '../components/common/ThaiDatePicker'
 import './TpiShiftEntry.css'
 
 const employeeSchema = z
@@ -171,7 +172,6 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
   const dataComplete = watch('data_complete')
   const exemptSS = watch('exempt_social_security')
   const isSafetyOfficer = watch('is_safety_officer')
-  const hasPositionAllowance = watch('has_position_allowance')
   const nationalIdWatch = watch('national_id')
   const wageType = watch('wage_type')
   const position = watch('position')
@@ -286,17 +286,18 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
     employeeInitialized.current = sessionKey
     if (employeeData && isOpen) {
       const empNat = employeeData.nationality || 'ไทย'
-      const normPref = normalizePrefix(employeeData.prefix, empNat, employeeData.first_name, isTpi)
+      const cleaned = cleanEmployeeNameData(employeeData, isTpi)
+      const normPref = normalizePrefix(cleaned.prefix, empNat, cleaned.first_name, isTpi)
       prevNationalityRef.current = empNat
       reset({
         employee_code: employeeData.employee_code,
         prefix: normPref || '',
-        first_name: employeeData.first_name,
-        last_name: employeeData.last_name || '',
+        first_name: cleaned.first_name,
+        last_name: cleaned.last_name || '',
         national_id: employeeData.national_id || '',
         nationality: empNat,
         position: employeeData.position || 'worker',
-        job_title: employeeData.job_title || '',
+        job_title: (isTpi && isTpiJobCode(employeeData.job_title)) ? '' : (employeeData.job_title || ''),
         wage_type: employeeData.wage_type || 'daily',
         payment_method: employeeData.payment_method || 'bank_transfer',
         bank_name: (() => {
@@ -313,7 +314,7 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
         data_complete: employeeData.data_complete || false,
         exempt_social_security: employeeData.exempt_social_security || false,
         is_safety_officer: employeeData.is_safety_officer || false,
-        has_position_allowance: employeeData.has_position_allowance || false,
+        has_position_allowance: isTpi ? false : (employeeData.has_position_allowance || false),
         social_security_number: employeeData.social_security_number || '',
       })
     } else if (!employeeId && isOpen) {
@@ -351,17 +352,21 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
         const { error: shiftErr } = await supabase.from('shift_assignments').delete().eq('employee_id', employeeId)
         if (shiftErr) throw shiftErr
       }
-      const normPrefix = normalizePrefix(values.prefix, values.nationality, values.first_name, isTpi)
+      const cleaned = cleanEmployeeNameData(values, isTpi)
+      const normPrefix = normalizePrefix(cleaned.prefix, values.nationality, cleaned.first_name, isTpi)
       const payload = {
         ...values,
         prefix: normPrefix || null,
-        last_name: values.last_name?.trim() || '',
+        first_name: cleaned.first_name,
+        last_name: cleaned.last_name?.trim() || '',
         factory_id: user.factory_id,
         bank_name: values.payment_method === 'cash' ? null : values.bank_name,
         bank_account: values.payment_method === 'cash' ? null : values.bank_account,
-        job_title: isTpi ? (tpiRateTier === 'skilled' ? (tpiJobCode || null) : null) : values.job_title,
+        job_title: values.job_title?.trim() || null,
         wage_type: isTpi ? 'daily' : values.wage_type,
         rate_per_12h: isTpi ? 0 : values.rate_per_12h,
+        has_position_allowance: isTpi ? false : values.has_position_allowance,
+        is_safety_officer: isTpi ? values.is_safety_officer : false,
       }
       let savedEmpId = employeeId
       if (employeeId) {
@@ -620,8 +625,6 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
                         setTpiJobCode('')
                         setTpiJobId('')
                         setTpiSkilledFrom('')
-                        // Clear the job_title form field so it doesn't carry over
-                        setValue('job_title', '')
                       }}
                       style={{ width: 18, height: 18, accentColor: 'var(--vk-persimmon)', marginTop: 2, cursor: 'pointer' }}
                     />
@@ -726,14 +729,14 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
                       <label style={{ fontSize: 12, fontWeight: 600, color: '#166534', whiteSpace: 'nowrap' }}>
                         วันที่เริ่มใช้เรทฝีมือ (ถ้ามี):
                       </label>
-                      <input
-                        type="date"
-                        aria-label="วันที่เริ่มใช้เรทฝีมือ (ถ้ามี)"
-                        value={tpiSkilledFrom}
-                        onChange={(e) => setTpiSkilledFrom(e.target.value)}
-                        className="vk-input tpi-skilled-date"
-                        style={{ height: 34, background: '#ffffff', borderColor: '#86efac', maxWidth: 200, fontSize: 12 }}
-                      />
+                      <div style={{ maxWidth: 220, width: '100%' }}>
+                        <ThaiDatePicker
+                          value={tpiSkilledFrom}
+                          onChange={(val) => setTpiSkilledFrom(val || '')}
+                          placeholder="วว/ดด/ปปปป (พ.ศ.)"
+                          aria-label="วันที่เริ่มใช้เรทฝีมือ (ถ้ามี)"
+                        />
+                      </div>
                     </div>
 
                     {/* Use-case explanation */}
@@ -834,50 +837,33 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
               </div>
             </div>
 
-            {/* สิทธิ์เงินพิเศษและค่าตำแหน่ง (TPI Special Allowances) */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--vk-ink-2)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                สิทธิ์เงินพิเศษและค่าตำแหน่ง (จ่ายในงวดที่จบที่สิ้นเดือน)
+            {/* สิทธิ์เงินพิเศษ จป. (TPI Special Allowances) */}
+            {isTpi && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--vk-ink-2)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  สิทธิ์เงินพิเศษ จป. (จ่ายในงวดที่จบที่สิ้นเดือน)
+                </div>
+
+                {/* Checkbox: เจ้าหน้าที่ความปลอดภัย (จป.) */}
+                <label style={{
+                  display: 'flex', alignItems: 'flex-start', gap: 12, padding: '12px 16px',
+                  border: `1px solid ${isSafetyOfficer ? '#059669' : 'var(--vk-rule-soft)'}`,
+                  background: isSafetyOfficer ? '#ecfdf5' : 'var(--vk-bone)',
+                  cursor: 'pointer',
+                }}>
+                  <input type="checkbox" {...register('is_safety_officer')}
+                    style={{ marginTop: 2, accentColor: '#059669', flexShrink: 0 }} />
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: isSafetyOfficer ? '#065f46' : 'var(--vk-ink)' }}>
+                      เจ้าหน้าที่ความปลอดภัย (จป.) (+500 บาท/เดือน)
+                    </div>
+                    <div style={{ fontSize: 11, color: isSafetyOfficer ? '#047857' : 'var(--vk-ink-3)', marginTop: 2, lineHeight: 1.5 }}>
+                      จ่ายเพิ่มให้คนละ 500 บาท/เดือน ในงวดที่จบที่สิ้นเดือน (งวดหลัง)
+                    </div>
+                  </div>
+                </label>
               </div>
-
-              {/* Checkbox 1: เจ้าหน้าที่ความปลอดภัย (จป.) */}
-              <label style={{
-                display: 'flex', alignItems: 'flex-start', gap: 12, padding: '12px 16px',
-                border: `1px solid ${isSafetyOfficer ? '#059669' : 'var(--vk-rule-soft)'}`,
-                background: isSafetyOfficer ? '#ecfdf5' : 'var(--vk-bone)',
-                cursor: 'pointer',
-              }}>
-                <input type="checkbox" {...register('is_safety_officer')}
-                  style={{ marginTop: 2, accentColor: '#059669', flexShrink: 0 }} />
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: isSafetyOfficer ? '#065f46' : 'var(--vk-ink)' }}>
-                    เจ้าหน้าที่ความปลอดภัย (จป.) (+500 บาท/เดือน)
-                  </div>
-                  <div style={{ fontSize: 11, color: isSafetyOfficer ? '#047857' : 'var(--vk-ink-3)', marginTop: 2, lineHeight: 1.5 }}>
-                    จ่ายเพิ่มให้คนละ 500 บาท/เดือน ในงวดที่จบที่สิ้นเดือน (งวดหลัง)
-                  </div>
-                </div>
-              </label>
-
-              {/* Checkbox 2: มีค่าตำแหน่ง */}
-              <label style={{
-                display: 'flex', alignItems: 'flex-start', gap: 12, padding: '12px 16px',
-                border: `1px solid ${hasPositionAllowance ? '#2563eb' : 'var(--vk-rule-soft)'}`,
-                background: hasPositionAllowance ? '#eff6ff' : 'var(--vk-bone)',
-                cursor: 'pointer',
-              }}>
-                <input type="checkbox" {...register('has_position_allowance')}
-                  style={{ marginTop: 2, accentColor: '#2563eb', flexShrink: 0 }} />
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: hasPositionAllowance ? '#1e40af' : 'var(--vk-ink)' }}>
-                    มีค่าตำแหน่ง (+1,000 บาท/เดือน)
-                  </div>
-                  <div style={{ fontSize: 11, color: hasPositionAllowance ? '#1d4ed8' : 'var(--vk-ink-3)', marginTop: 2, lineHeight: 1.5 }}>
-                    จ่ายเพิ่มให้คนละ 1,000 บาท/เดือน ในงวดที่จบที่สิ้นเดือน (งวดหลัง)
-                  </div>
-                </div>
-              </label>
-            </div>
+            )}
 
             {/* ยกเว้นประกันสังคม — เฉพาะพนักงานสัญชาติไทย */}
             {isThai && (

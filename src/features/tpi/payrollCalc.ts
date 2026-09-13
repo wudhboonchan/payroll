@@ -1,4 +1,4 @@
-import { SHIFTS } from './model'
+import { SHIFTS } from './model.ts'
 
 export interface TpiShiftRow {
   id: string
@@ -306,9 +306,9 @@ export function calculateTpiPayroll(input: TpiPayrollInput): TpiPayrollCalculati
   // End of Month Checks
   const isEndMonth = isEndOfMonthPeriod(period.period_end)
 
-  // Position allowance: 1,000 THB/month paid only in end-of-month period if employee has has_position_allowance
-  const autoPosition = isEndMonth && !!employee.has_position_allowance ? 1000 : 0
-  const amountPosition = extras?.amount_position !== undefined ? Number(extras.amount_position) : autoPosition
+  // Position allowance: permanently removed per user requirement
+  const autoPosition = 0
+  const amountPosition = 0
 
   // Safety Officer allowance (ค่า จป.): 500 THB/month paid only in end-of-month period if employee is is_safety_officer
   const amountSafetyOfficer = isEndMonth && !!employee.is_safety_officer ? 500 : 0

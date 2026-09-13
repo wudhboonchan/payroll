@@ -19,6 +19,7 @@ import {
   parseEmployeeExcel,
   type ParsedRow,
 } from '../../lib/employeeExcel'
+import { normalizePrefix, cleanEmployeeNameData } from '../../lib/formatters'
 
 interface Props {
   isOpen: boolean
@@ -78,23 +79,31 @@ export default function EmployeeImportModal({ isOpen, onClose }: Props) {
   const importMutation = useMutation({
     mutationFn: async () => {
       if (!user?.factory_id) throw new Error('ไม่พบ factory context')
-      const payload = validRows.map(r => ({
-        employee_code: r.data.employee_code,
-        prefix: r.data.prefix || null,
-        first_name: r.data.first_name,
-        last_name: r.data.last_name?.trim() || '',
-        nationality: r.data.nationality || 'ไทย',
-        national_id: r.data.national_id || null,
-        position: r.data.position || 'worker',
-        wage_type: r.data.position === 'clerk' ? 'monthly' : 'daily',
-        rate_per_12h: Number(r.data.rate_per_12h),
-        payment_method: r.data.payment_method as 'cash' | 'bank_transfer',
-        bank_name: r.data.payment_method === 'bank_transfer' ? r.data.bank_name || null : null,
-        bank_account: r.data.payment_method === 'bank_transfer' ? r.data.bank_account || null : null,
-        status: (r.data.status || 'active') as 'active' | 'inactive',
-        notes: r.data.notes || null,
-        factory_id: user.factory_id,
-      }))
+      const payload = validRows.map(r => {
+        const cleaned = cleanEmployeeNameData({
+          prefix: r.data.prefix,
+          first_name: r.data.first_name,
+          last_name: r.data.last_name,
+          nationality: r.data.nationality,
+        }, false)
+        return {
+          employee_code: r.data.employee_code,
+          prefix: normalizePrefix(cleaned.prefix, r.data.nationality, cleaned.first_name, false) || null,
+          first_name: cleaned.first_name,
+          last_name: cleaned.last_name?.trim() || '',
+          nationality: r.data.nationality || 'ไทย',
+          national_id: r.data.national_id || null,
+          position: r.data.position || 'worker',
+          wage_type: r.data.position === 'clerk' ? 'monthly' : 'daily',
+          rate_per_12h: Number(r.data.rate_per_12h),
+          payment_method: r.data.payment_method as 'cash' | 'bank_transfer',
+          bank_name: r.data.payment_method === 'bank_transfer' ? r.data.bank_name || null : null,
+          bank_account: r.data.payment_method === 'bank_transfer' ? r.data.bank_account || null : null,
+          status: (r.data.status || 'active') as 'active' | 'inactive',
+          notes: r.data.notes || null,
+          factory_id: user.factory_id,
+        }
+      })
 
       const { error } = await supabase
         .from('employees')

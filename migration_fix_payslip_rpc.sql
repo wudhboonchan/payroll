@@ -1,4 +1,10 @@
--- Deploy alongside EmployeeSlip.tsx, which reads shifts from this token-scoped RPC.
+-- Migration: Fix get_payslip_data and update_payslip_status RPCs
+-- 1. Removes strict status = 'approved' requirement so slip links work without blocking on status
+-- 2. Makes payroll_entries optional so employees without manual entries can still view their slip
+-- 3. Trims tokens to prevent whitespace mismatches
+-- 4. Ensures search_path is safe with public, pg_catalog
+-- 5. Grants execute to anon and authenticated roles
+
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 
@@ -11,25 +17,25 @@ DECLARE
   entry public.payroll_entries%ROWTYPE;
   shifts json;
 BEGIN
-  -- 1. Look up token
+  -- 1. Find token with trimmed comparison
   SELECT * INTO t FROM public.payslip_tokens
     WHERE token = btrim(p_token) AND expires_at > now();
   IF NOT FOUND THEN RETURN NULL; END IF;
 
-  -- 2. Look up employee
+  -- 2. Find employee
   SELECT * INTO e FROM public.employees WHERE id = t.employee_id;
   IF NOT FOUND THEN RETURN NULL; END IF;
 
-  -- 3. Look up period (matches factory)
+  -- 3. Find payroll period (matches factory)
   SELECT * INTO p FROM public.payroll_periods
     WHERE id = t.period_id AND factory_id = e.factory_id;
   IF NOT FOUND THEN RETURN NULL; END IF;
 
-  -- 4. Look up payroll_entries if exists (optional)
+  -- 4. Find payroll entry if exists (DO NOT abort if not found)
   SELECT * INTO entry FROM public.payroll_entries
     WHERE period_id = t.period_id AND employee_id = t.employee_id;
 
-  -- 5. Look up shifts
+  -- 5. Find shifts
   SELECT coalesce(json_agg(s), '[]'::json) INTO shifts FROM (
     SELECT is_holiday_ot, is_half_shift, ot_hours, work_date
     FROM public.shift_assignments
@@ -37,7 +43,7 @@ BEGIN
     ORDER BY work_date
   ) s;
 
-  -- 6. Return composite JSON
+  -- 6. Return payload
   RETURN json_build_object(
     'token_data', row_to_json(t),
     'employee', row_to_json(e),
