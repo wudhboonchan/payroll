@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {isJobAvailable,entryRate,validateEntries,usage,wageTier} from '../../src/features/tpi/model.ts'
+import {isJobAvailable,entryRate,validateEntries,usage,wageTier,calculateEntryOt,getShiftOtTimeRange,getJobBaseRate} from '../../src/features/tpi/model.ts'
 import {referenceJobs} from '../../src/features/tpi/referenceJobs.ts'
 const job={...referenceJobs[7],id:'job',quota:4,planned_morning:2,planned_afternoon:2,planned_night:0,skilled_rate:450}
 const row=(employee_id,shift_index,job_id='job')=>({employee_id,shift_index,job_id})
@@ -55,3 +55,79 @@ test('job active range includes expiration day and rejects inactive or future jo
  assert.equal(isJobAvailable(temporary,'2026-08-31'),false)
  assert.equal(isJobAvailable({...temporary,active:false},'2026-09-01'),false)
 })
+
+test('all employees calculate OT at 1.5x hourly rate ceil to baht; clerks no longer 2x',()=>{
+  // 357 / 8 * 1.5 = 66.9375 -> ceil(66.9375 * 1) = 67, ceil(66.9375 * 2) = 134
+  const otWorker1h = calculateEntryOt(1, 357, false)
+  assert.deepEqual(otWorker1h, { ot_hours: 1, ot_pay: 67 })
+  const otWorker2h = calculateEntryOt(2, 357, false)
+  assert.deepEqual(otWorker2h, { ot_hours: 2, ot_pay: 134 })
+
+  // Clerks also calculate 1.5x now
+  const otClerk1h = calculateEntryOt(1, 357, true)
+  assert.deepEqual(otClerk1h, { ot_hours: 1, ot_pay: 67 })
+  const otClerk2h = calculateEntryOt(2, 377, true)
+  // 377 / 8 * 1.5 = 70.6875 -> ceil(70.6875 * 2) = 142
+  assert.deepEqual(otClerk2h, { ot_hours: 2, ot_pay: 142 })
+})
+
+test('getShiftOtTimeRange computes exact pre-shift and post-shift time ranges',()=>{
+  // Shift 0 (เช้า): 07:40 - 16:00
+  assert.equal(getShiftOtTimeRange(0, 2, true), '05:40 — 07:40')
+  assert.equal(getShiftOtTimeRange(0, 2, false), '16:00 — 18:00')
+
+  // Shift 1 (บ่าย): 15:40 - 00:00
+  assert.equal(getShiftOtTimeRange(1, 2, true), '13:40 — 15:40')
+  assert.equal(getShiftOtTimeRange(1, 2, false), '00:00 — 02:00')
+
+  // Shift 2 (ดึก): 23:40 - 08:00
+  assert.equal(getShiftOtTimeRange(2, 2, true), '21:40 — 23:40')
+  assert.equal(getShiftOtTimeRange(2, 2, false), '08:00 — 10:00')
+})
+
+test('validateEntries rejects 2 shifts + OT while permitting 2 shifts without OT and 1 shift with OT',()=>{
+  // 1 shift + OT -> allowed
+  assert.equal(validateEntries([{ employee_id: 'w1', job_id: 'job', shift_index: 0, ot_hours: 2 }]), null)
+
+  // 2 shifts without OT -> allowed
+  assert.equal(validateEntries([
+    { employee_id: 'w1', job_id: 'job', shift_index: 0 },
+    { employee_id: 'w1', job_id: 'job', shift_index: 1 }
+  ]), null)
+
+  // 2 shifts + OT on shift 1 -> rejected
+  assert.match(validateEntries([
+    { employee_id: 'w1', job_id: 'job', shift_index: 0, ot_hours: 2 },
+    { employee_id: 'w1', job_id: 'job', shift_index: 1 }
+  ]) || '', /ไม่สามารถทำ OT ได้/)
+
+  // 2 shifts + OT on shift 2 -> rejected
+  assert.match(validateEntries([
+    { employee_id: 'w1', job_id: 'job', shift_index: 0 },
+    { employee_id: 'w1', job_id: 'job', shift_index: 1, ot_hours: 1 }
+  ]) || '', /ไม่สามารถทำ OT ได้/)
+})
+
+test('OT under a different job position calculates OT pay using that job position rate',()=>{
+  // Main shift is regular job with rate 357
+  const regularJob = { ...referenceJobs[0], id: 'job-main', normal_rate: 357, skilled_rate: null }
+  // OT performed on a higher-paying job or clerk job with rate 377
+  const otClerkJob = { ...referenceJobs[24], id: 'job-ot-clerk', normal_rate: 357, skilled_rate: 377, job_group: 'clerk' }
+  const skilledProfile = { employee_id: 'w1', rate_tier: 'skilled', skilled_from: '2026-09-01' }
+
+  const mainBaseRate = getJobBaseRate(regularJob, 'w1', [skilledProfile], '2026-09-13')
+  assert.equal(mainBaseRate, 357)
+
+  const otBaseRate = getJobBaseRate(otClerkJob, 'w1', [skilledProfile], '2026-09-13')
+  assert.equal(otBaseRate, 377)
+
+  // 4 hours OT on otClerkJob: (377 / 8 * 1.5) = 70.6875 -> ceil(70.6875 * 4) = ceil(282.75) = 283
+  const otCalc = calculateEntryOt(4, otBaseRate)
+  assert.deepEqual(otCalc, { ot_hours: 4, ot_pay: 283 })
+
+  // Compare if calculated with mainBaseRate 357: ceil(357 / 8 * 1.5 * 4) = ceil(267.75) = 268
+  const mainOtCalc = calculateEntryOt(4, mainBaseRate)
+  assert.deepEqual(mainOtCalc, { ot_hours: 4, ot_pay: 268 })
+  assert.notEqual(otCalc.ot_pay, mainOtCalc.ot_pay)
+})
+

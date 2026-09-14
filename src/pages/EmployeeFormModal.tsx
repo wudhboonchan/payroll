@@ -362,7 +362,7 @@ export default function EmployeeFormModal({ isOpen, onClose, employeeId, onSucce
         factory_id: user.factory_id,
         bank_name: values.payment_method === 'cash' ? null : values.bank_name,
         bank_account: values.payment_method === 'cash' ? null : values.bank_account,
-        job_title: values.job_title?.trim() || null,
+        job_title: isTpi ? (tpiRateTier === 'skilled' ? (tpiJobCode || values.job_title?.trim() || null) : null) : (values.job_title?.trim() || null),
         wage_type: isTpi ? 'daily' : values.wage_type,
         rate_per_12h: isTpi ? 0 : values.rate_per_12h,
         has_position_allowance: isTpi ? false : values.has_position_allowance,

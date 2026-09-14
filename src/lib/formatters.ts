@@ -270,6 +270,13 @@ export const formatPeriodLabel = (start: string, end: string): string => {
 }
 
 /**
+ * Returns active periods (preserves all real created periods).
+ */
+export function filterActivePeriods<T extends { period_start: string }>(periods: T[]): T[] {
+  return periods
+}
+
+/**
  * Natural numeric comparator for employee codes (e.g., "1267" comes before "12302")
  */
 export const compareEmployeeCode = (a: string | null | undefined, b: string | null | undefined): number => {

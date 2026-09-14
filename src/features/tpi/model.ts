@@ -5,7 +5,7 @@ export type Job = {
   job_type: 'regular' | 'temporary'; valid_from: string | null; expires_on: string | null
   job_group?: JobGroup
   quota: number; planned_morning: number | null; planned_afternoon: number | null; planned_night: number | null
-  normal_rate: number; skilled_rate: number | null; active: boolean; notes: string; updated_at: string
+  normal_rate: number; skilled_rate: number | null; billing_normal_rate?: number | null; billing_skilled_rate?: number | null; billing_rate?: number | null; active: boolean; notes: string; updated_at: string
 }
 export type WageProfile = {
   employee_id: string
@@ -38,6 +38,10 @@ export type Entry = {
   ot_hours?: number
   ot_pay?: number
   is_holiday_ot?: boolean
+  is_ot_before_shift?: boolean
+  ot_job_id?: string | null
+  ot_job_code_snapshot?: string | null
+  is_pending?: boolean
 }
 export type ShiftDay = { revision: number; is_holiday?: boolean; entries: Entry[] }
 export const SHIFTS = [
@@ -60,25 +64,65 @@ export function wageTier(profile: WageProfile | undefined, date: string): RateTi
 export function calculateEntryOt(
   otHours: number | undefined,
   baseRate: number,
-  isClerk: boolean
+  _isClerk?: boolean
 ): { ot_hours: number; ot_pay: number } {
   const hours = Number(otHours || 0)
   if (hours <= 0) return { ot_hours: 0, ot_pay: 0 }
 
-  if (isClerk) {
-    // Clerk OT: full 8h shift, paid 2x of daily rate
-    return {
-      ot_hours: 8,
-      ot_pay: Math.round(baseRate * 2 * 100) / 100,
+  // Overtime for all employees is calculated at 1.5x of hourly rate ((baseRate / 8) * 1.5 * otHours) — ceil to whole baht
+  const hourlyRate = (baseRate / 8) * 1.5
+  return {
+    ot_hours: hours,
+    ot_pay: Math.ceil(hourlyRate * hours),
+  }
+}
+
+export function formatMinutesToHHmm(totalMinutes: number): string {
+  const normalized = ((Math.round(totalMinutes) % 1440) + 1440) % 1440
+  const h = Math.floor(normalized / 60)
+  const m = normalized % 60
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+}
+
+export function getShiftOtTimeRange(shiftIndex: number, otHours: number, isBeforeShift: boolean): string {
+  if (!otHours || otHours <= 0) return ''
+  const otMinutes = Math.round(otHours * 60)
+
+  // Shift reference start / end minutes from 00:00
+  // Shift 0 (เช้า):  07:40 (460m) — 16:00 (960m)
+  // Shift 1 (บ่าย):  15:40 (940m) — 24:00/00:00 (1440m)
+  // Shift 2 (ดึก):  23:40 (1420m) — 08:00 (480m)
+  let startMin = 0
+  let endMin = 0
+
+  if (shiftIndex === 0) {
+    if (isBeforeShift) {
+      startMin = 460 - otMinutes
+      endMin = 460
+    } else {
+      startMin = 960
+      endMin = 960 + otMinutes
+    }
+  } else if (shiftIndex === 1) {
+    if (isBeforeShift) {
+      startMin = 940 - otMinutes
+      endMin = 940
+    } else {
+      startMin = 1440
+      endMin = 1440 + otMinutes
     }
   } else {
-    // Roof climbing OT: paid per hour at (baseRate / 8) * 1.5 per hour — ceil to whole baht
-    const hourlyRate = (baseRate / 8) * 1.5
-    return {
-      ot_hours: hours,
-      ot_pay: Math.ceil(hourlyRate * hours),
+    // Shift 2 (ดึก)
+    if (isBeforeShift) {
+      startMin = 1420 - otMinutes
+      endMin = 1420
+    } else {
+      startMin = 480
+      endMin = 480 + otMinutes
     }
   }
+
+  return `${formatMinutesToHHmm(startMin)} — ${formatMinutesToHHmm(endMin)}`
 }
 
 export function isClerkJob(job?: { job_group?: string; code?: string; description?: string } | null): boolean {
@@ -126,15 +170,60 @@ export function entryRate(entry: Entry, jobs: Job[], profiles: WageProfile[], da
   if (baseRate === null || baseRate === undefined) return null
   return entry.is_half_shift ? baseRate / 2 : baseRate
 }
+
+export function getJobBaseRate(
+  job: Job | undefined,
+  employeeId: string,
+  profiles: WageProfile[],
+  date: string,
+  employees?: Employee[]
+): number {
+  if (!job) return 357
+  const profile = profiles.find((p) => p.employee_id === employeeId)
+  const emp = employees?.find((e) => e.id === employeeId)
+  const isSkilledTier = wageTier(profile, date) === 'skilled'
+
+  if (isClerkJob(job)) {
+    return isSkilledTier ? (job.skilled_rate ?? 377) : (job.normal_rate ?? 357)
+  }
+
+  const isSkilledApplicable =
+    isSkilledTier &&
+    ((!profile?.job_id && !profile?.job_code && !emp?.job_title) ||
+      (profile?.job_id && profile.job_id === job.id) ||
+      (profile?.job_code && job.code.trim().toLowerCase() === profile.job_code.trim().toLowerCase()) ||
+      (emp?.job_title &&
+        (job.code.trim().toLowerCase() === emp.job_title.trim().toLowerCase() ||
+          emp.job_title === job.id)))
+
+  const rate = isSkilledApplicable ? (job.skilled_rate ?? job.normal_rate) : job.normal_rate
+  return rate ?? 357
+}
+
 export function validateEntries(entries: Entry[]) {
   const people = new Map<string, Set<number>>()
+  const empEntries = new Map<string, Entry[]>()
   for (const e of entries) {
     if (!e.employee_id || !e.job_id || !Number.isInteger(e.shift_index) || e.shift_index < 0 || e.shift_index > 2) return 'กรุณาระบุพนักงาน รหัสงาน และกะให้ครบ'
     const slots = people.get(e.employee_id) || new Set<number>()
     if (slots.has(e.shift_index)) return 'พนักงานหนึ่งคนทำได้เพียงงานเดียวต่อกะ'
     slots.add(e.shift_index); people.set(e.employee_id, slots)
     if (slots.size > 2) return 'พนักงานลงได้สูงสุด 2 กะต่อวัน รวมทุกรหัสงาน'
+
+    const list = empEntries.get(e.employee_id) || []
+    list.push(e)
+    empEntries.set(e.employee_id, list)
   }
+
+  // Validate mutual exclusivity: 2 shifts (16 hours) cannot have OT
+  for (const [, list] of empEntries) {
+    const shiftCount = new Set(list.map(e => e.shift_index)).size
+    const hasOt = list.some(e => Number(e.ot_hours || 0) > 0)
+    if (shiftCount >= 2 && hasOt) {
+      return 'พนักงานที่ทำงานควบ 2 กะ (16 ชม.) ไม่สามารถทำ OT ได้ (ต้องเลือกอย่างใดอย่างหนึ่ง)'
+    }
+  }
+
   return null
 }
 export function usage(entries: Entry[], jobId: string) {

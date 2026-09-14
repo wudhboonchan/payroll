@@ -6,12 +6,13 @@ import { useAppStore } from '../store/useAppStore'
 import { TopBar } from '../components/layout/TopBar'
 import { Search, X, CreditCard, FileSpreadsheet, Printer, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { formatPeriodLabel, formatEmployeeFullName, compareEmployeeCode } from '../lib/formatters'
+import { formatPeriodLabel, formatEmployeeFullName, compareEmployeeCode, filterActivePeriods } from '../lib/formatters'
 import { SHIFTS, isTpiJobCode } from '../features/tpi/model'
 import { employeeWageForm } from '../features/tpi/employeeWageForm'
 import { referenceJobs } from '../features/tpi/referenceJobs'
 import { calculateTpiPayroll, type TpiShiftRow } from '../features/tpi/payrollCalc'
 import { getStoredHolidaysForFactory } from './TpiPayrollEntry'
+import { buildTpiEmployeeSummaryFullHtml, buildTpiEmployeeSummaryExcelRows } from '../features/tpi/tpiSummaryExport'
 import '../styles/tokens.css'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -66,193 +67,7 @@ function thaiDateTimeNow() {
 }
 
 // ── PDF / Print HTML Builder for TPI ─────────────────────────────────────────
-function buildTpiEmployeeSummaryPdfHtml(
-  emp: any,
-  periodLabelStr: string,
-  stats: any,
-  dailyAudit: any[],
-  empAdvances: any[],
-  generatedAt: string,
-  isSkilled: boolean,
-  jobMap: Map<string, any>
-): string {
-  const payMethodLabel = emp.payment_method === 'bank_transfer' ? 'โอนผ่านธนาคาร' : 'เงินสด'
-  const bankDetails = emp.payment_method === 'bank_transfer' && emp.bank_name
-    ? `${emp.bank_name} ${maskBank(emp.bank_account)}`
-    : '—'
-  const posLabel = emp.position === 'clerk' ? 'เสมียน (Clerk)' : 'พนักงานทั่วไป (Worker)'
-  const jobTitleLabel = emp.job_title && !isTpiJobCode(emp.job_title) ? ` · ${emp.job_title}` : ''
-
-  const dailyRowsHtml = dailyAudit.map(day => {
-    const isWorked = day.shifts && day.shifts.length > 0
-    const dayLabel = day.isHoliday ? 'วันหยุดนักขัตฤกษ์' : 'วันทำงานปกติ'
-
-    let shiftDesc = 'หยุด'
-    const items: string[] = []
-
-    if (isWorked) {
-      shiftDesc = day.shifts.map((s: any) => {
-        const jInfo = jobMap.get(s.jobCode)
-        const jName = jInfo?.name ? ` - ${jInfo.name}` : ''
-        return `${s.shiftName} [${s.jobCode}${jName}]${s.isHalf ? ' (ครึ่งกะ)' : ''}${s.tier === 'skilled' ? ' ⭐' : ''}`
-      }).join('<br/>')
-
-      day.shifts.forEach((s: any) => {
-        const tierStar = s.tier === 'skilled' ? ' ⭐' : ''
-        if (s.isFirstShiftOfDay) {
-          items.push(`ค่าจ้างกะ 1: ฿${monoNum(s.totalShiftWage)}${tierStar}${s.isHoliday ? ' (วันหยุด x2)' : ''}`)
-        } else {
-          items.push(`ค่ากะ 2 (ควบกะ): ฿${monoNum(s.totalShiftWage)}${tierStar}${s.isHoliday ? ' (วันหยุด x2)' : ''}`)
-        }
-        if (s.otPay > 0) {
-          items.push(`OT (${s.otHours} ชม.): ฿${monoNum(s.otPay)}`)
-        }
-      })
-    }
-
-    const totalDayEarned = (day.dayTotalWage || 0) + (day.dayTotalOt || 0)
-
-    return `
-      <tr style="${!isWorked ? 'opacity:0.55;background:#fafafa' : ''}">
-        <td style="padding:6px 8px;border-bottom:1px solid #eee;font-size:11px;vertical-align:top">${fmtDisplayDate(day.date)}</td>
-        <td style="padding:6px 8px;border-bottom:1px solid #eee;font-size:11px;color:${day.isHoliday ? '#c0392b' : '#666'};vertical-align:top;font-weight:${day.isHoliday ? 700 : 400}">${dayLabel}</td>
-        <td style="padding:6px 8px;border-bottom:1px solid #eee;font-size:11px;vertical-align:top">${shiftDesc}</td>
-        <td style="padding:6px 8px;border-bottom:1px solid #eee;font-size:11px;vertical-align:top">${items.join('<br/>') || '—'}</td>
-        <td style="padding:6px 8px;border-bottom:1px solid #eee;font-size:11px;text-align:right;font-family:monospace;font-weight:600;vertical-align:top">
-          ${totalDayEarned > 0 ? '฿' + monoNum(totalDayEarned) : '—'}
-        </td>
-      </tr>
-    `
-  }).join('')
-
-  const periodIncomeRowsHtml = [
-    stats.amountDiligence > 0 ? `<tr><td style="padding:5px 8px;border-bottom:1px solid #eee">เบี้ยขยัน</td><td style="padding:5px 8px;border-bottom:1px solid #eee">เบี้ยขยันประจำงวด (สิ้นเดือน)</td><td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:right;font-family:monospace">฿${monoNum(stats.amountDiligence)}</td></tr>` : '',
-    stats.amountSpecial > 0 ? `<tr><td style="padding:5px 8px;border-bottom:1px solid #eee">เงินพิเศษ / ปรับปรุง</td><td style="padding:5px 8px;border-bottom:1px solid #eee">${stats.specialNote || 'บันทึกในงวดนี้'}</td><td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:right;font-family:monospace">฿${monoNum(stats.amountSpecial)}</td></tr>` : '',
-  ].join('')
-
-  const deductionRowsHtml = [
-    stats.deductSocialSecurity > 0 ? `<tr><td style="padding:5px 8px;border-bottom:1px solid #eee;color:#c0392b">ประกันสังคม (5%)</td><td style="padding:5px 8px;border-bottom:1px solid #eee;color:#666">คำนวณจากค่าจ้างกะแรก</td><td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:right;font-family:monospace;color:#c0392b">−฿${monoNum(stats.deductSocialSecurity)}</td></tr>` : '',
-    ...empAdvances.map((adv: any, i: number) => `<tr><td style="padding:5px 8px;border-bottom:1px solid #eee;color:#c0392b">เบิกล่วงหน้า (#${i+1})</td><td style="padding:5px 8px;border-bottom:1px solid #eee;color:#666">${adv.request_date || adv.created_at ? fmtDisplayDate(adv.request_date || adv.created_at.substring(0,10)) + ' ' : ''}${adv.notes || ''}</td><td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:right;font-family:monospace;color:#c0392b">−฿${monoNum(Number(adv.amount))}</td></tr>`),
-    stats.deductSafetyEquipment > 0 ? `<tr><td style="padding:5px 8px;border-bottom:1px solid #eee;color:#c0392b">อุปกรณ์ความปลอดภัย</td><td style="padding:5px 8px;border-bottom:1px solid #eee;color:#666">หักค่าอุปกรณ์</td><td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:right;font-family:monospace;color:#c0392b">−฿${monoNum(stats.deductSafetyEquipment)}</td></tr>` : '',
-    stats.deductUniform > 0 ? `<tr><td style="padding:5px 8px;border-bottom:1px solid #eee;color:#c0392b">ค่าเสื้อพนักงาน</td><td style="padding:5px 8px;border-bottom:1px solid #eee;color:#666">หักค่าชุดทำงาน</td><td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:right;font-family:monospace;color:#c0392b">−฿${monoNum(stats.deductUniform)}</td></tr>` : '',
-  ].join('')
-
-  return `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<title>Summary_${emp.employee_code}_${emp.first_name}</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<style>
-  *{box-sizing:border-box}
-  body{margin:0;padding:20px;background:#fff;font-family:'Sarabun',sans-serif;color:#1a1a1a;font-size:12px}
-  .header{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:12px;border-bottom:2px solid #1a1a1a;margin-bottom:16px}
-  .emp-box{background:#f8f9fa;border:1px solid #e9ecef;padding:12px 16px;margin-bottom:16px;display:grid;grid-template-columns:1fr 1fr;gap:8px}
-  .kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px}
-  .kpi-card{background:#1a1a1a;color:#fff;padding:10px 12px;border-radius:4px}
-  .kpi-title{font-size:10px;text-transform:uppercase;color:#aaa;margin-bottom:2px}
-  .kpi-val{font-size:16px;font-weight:700;font-family:monospace}
-  table{width:100%;border-collapse:collapse;margin-bottom:16px}
-  th{background:#f1f3f5;text-align:left;padding:7px 8px;font-size:11px;font-weight:700;border-bottom:1px solid #dee2e6}
-  .net-box{background:#1a1a1a;color:#fff;padding:14px 16px;display:flex;justify-content:space-between;align-items:center;margin-top:16px}
-  @page{size:A4 portrait;margin:10mm}
-  @media print{html,body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
-</style>
-</head>
-<body>
-  <div class="header">
-    <div>
-      <div style="font-weight:800;font-size:18px">ห้างหุ้นส่วนจำกัด วิราญกร (สาขา โรงงานทีพีไอ โพลีน)</div>
-      <div style="font-size:14px;font-weight:700;color:#555;margin-top:2px">รายงานสรุปภาพรวมพนักงาน (TPI Employee Ledger Summary)</div>
-    </div>
-    <div style="text-align:right;font-size:11px;color:#666">
-      <div>งวดเงินเดือน: <strong>${periodLabelStr}</strong></div>
-      <div>พิมพ์เมื่อ: ${generatedAt}</div>
-    </div>
-  </div>
-
-  <div class="emp-box">
-    <div>
-      <div><strong>ชื่อ-นามสกุล:</strong> ${formatEmployeeFullName(emp, true)} ${isSkilled ? '⭐ (เรทฝีมือ)' : ''} ${fmtNationality(emp.nationality) ? `(${fmtNationality(emp.nationality)})` : ''}</div>
-      <div><strong>รหัสพนักงาน:</strong> <span style="font-family:monospace">${emp.employee_code}</span></div>
-      <div><strong>ตำแหน่ง:</strong> ${posLabel}${jobTitleLabel}</div>
-    </div>
-    <div>
-      <div><strong>อัตราค่าจ้าง:</strong> ${isSkilled ? '฿377/กะ (เรทฝีมือ)' : '฿357/กะ (เรทปกติ)'}</div>
-      <div><strong>วิธีรับเงิน:</strong> ${payMethodLabel}</div>
-      <div><strong>ธนาคาร/เลขบัญชี:</strong> ${bankDetails}</div>
-    </div>
-  </div>
-
-  <div class="kpi-grid">
-    <div class="kpi-card">
-      <div class="kpi-title">กะทำงาน (วันทำงาน)</div>
-      <div class="kpi-val">${stats.totalShiftsCount} กะ (${stats.workDaysCount} วัน)</div>
-      <div style="font-size:9px;color:#aaa">กะ 1: ${stats.workDaysCount} · ควบกะ: ${Math.max(0, stats.totalShiftsCount - stats.workDaysCount)} · ครึ่งกะ: ${stats.halfShiftsCount}</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-title">รายได้รวม</div>
-      <div class="kpi-val" style="color:#6ee7b7">฿${monoNum(stats.totalIncome)}</div>
-      <div style="font-size:9px;color:#aaa">ก่อนหัก (ค่าจ้าง+ค่ากะ+OT+เงินเพิ่ม)</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-title">หักรวม</div>
-      <div class="kpi-val" style="color:#fca5a5">฿${monoNum(stats.totalDeductions)}</div>
-      <div style="font-size:9px;color:#aaa">ปกส. + เบิก + อุปกรณ์ + เสื้อ</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-title">สุทธิรับจริง</div>
-      <div class="kpi-val" style="color:#fde047">฿${monoNum(stats.netPay)}</div>
-      <div style="font-size:9px;color:#aaa">NET PAY</div>
-    </div>
-  </div>
-
-  <div style="font-weight:700;font-size:13px;margin-bottom:6px">1. บันทึกรายวัน (Daily Log)</div>
-  <table>
-    <thead>
-      <tr>
-        <th style="width:110px">วันที่</th>
-        <th style="width:100px">ประเภทวัน</th>
-        <th style="width:180px">กะที่ปฏิบัติงาน / รหัสงาน</th>
-        <th>รายละเอียดรายได้</th>
-        <th style="text-align:right;width:100px">รวมรายวัน</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${dailyRowsHtml}
-    </tbody>
-  </table>
-
-  ${(periodIncomeRowsHtml || deductionRowsHtml) ? `
-    <div style="font-weight:700;font-size:13px;margin-bottom:6px">2. รายการประจำงวด & รายการหักเงิน</div>
-    <table>
-      <thead>
-        <tr>
-          <th>รายการ</th>
-          <th>รายละเอียด / หมายเหตุ</th>
-          <th style="text-align:right;width:120px">จำนวนเงิน</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${periodIncomeRowsHtml}
-        ${deductionRowsHtml}
-      </tbody>
-    </table>
-  ` : ''}
-
-  <div class="net-box">
-    <div>
-      <div style="font-size:11px;color:#aaa;text-transform:uppercase">NET PAY · สุทธิรับจริง</div>
-      <div style="font-size:11px;color:#ccc;margin-top:2px">${stats.totalShiftsCount} กะทำงาน (${stats.workDaysCount} วัน) · รายได้ ฿${monoNum(stats.totalIncome)} · หัก ฿${monoNum(stats.totalDeductions)}</div>
-    </div>
-    <div style="font-family:monospace;font-size:24px;font-weight:800;color:#fde047">
-      ฿${monoNum(stats.netPay)}
-    </div>
-  </div>
-</body>
-</html>`
-}
+const buildTpiEmployeeSummaryPdfHtml = buildTpiEmployeeSummaryFullHtml
 
 export default function TpiEmployeeSummary() {
   const { onMenuClick } = useOutletContext<{ onMenuClick: () => void }>()
@@ -266,7 +81,7 @@ export default function TpiEmployeeSummary() {
   const [isExportingPdf, setIsExportingPdf] = useState(false)
 
   // ── 1. Fetch Payroll Periods ──
-  const { data: periods = [] } = useQuery<any[]>({
+  const { data: rawPeriods = [] } = useQuery<any[]>({
     queryKey: ['periods', user?.factory_id],
     queryFn: async () => {
       const { data, error } = await supabase.from('payroll_periods').select('*')
@@ -277,9 +92,11 @@ export default function TpiEmployeeSummary() {
     enabled: !!user?.factory_id,
   })
 
+  const periods = useMemo(() => filterActivePeriods(rawPeriods), [rawPeriods])
+
   // Set default period once loaded
   useEffect(() => {
-    if (periods.length > 0 && !selectedPeriodId) {
+    if (periods.length > 0 && (!selectedPeriodId || !periods.some(p => p.id === selectedPeriodId))) {
       setSelectedPeriodId(periods[0].id)
     }
   }, [periods, selectedPeriodId])
@@ -550,79 +367,16 @@ export default function TpiEmployeeSummary() {
     try {
       const XLSX = await import('xlsx')
       const periodLabelStr = currentPeriod ? formatPeriodLabel(currentPeriod.period_start, currentPeriod.period_end) : '—'
-      const payMethodLabel = selectedEmp.payment_method === 'bank_transfer' ? 'โอนผ่านธนาคาร' : 'เงินสด'
-      const bankName = selectedEmp.payment_method === 'bank_transfer' ? (selectedEmp.bank_name || '-') : '-'
-      const bankAccount = selectedEmp.payment_method === 'bank_transfer' ? (selectedEmp.bank_account || '-') : '-'
       const isSkilled = isSkilledEmp(selectedEmp)
-      const posLabel = selectedEmp.position === 'clerk' ? 'เสมียน' : 'พนักงานทั่วไป'
-
-      const rows: any[] = []
-
-      // Header section
-      rows.push(['ห้างหุ้นส่วนจำกัด วิราญกร (สาขา โรงงานทีพีไอ โพลีน)'])
-      rows.push(['รายงานสรุปภาพรวมพนักงาน (TPI Employee Ledger Summary)'])
-      rows.push(['งวดการจ่ายเงิน:', periodLabelStr])
-      rows.push([])
-
-      // Employee Profile
-      rows.push(['รหัสพนักงาน', selectedEmp.employee_code, 'ชื่อ-นามสกุล', `${formatEmployeeFullName(selectedEmp, true)}${isSkilled ? ' ⭐' : ''}`])
-      rows.push(['ตำแหน่ง', posLabel, 'ระดับอัตราค่าจ้าง', isSkilled ? '฿377/กะ (เรทฝีมือ ⭐)' : '฿357/กะ (เรทปกติ)'])
-      rows.push(['วิธีการรับเงิน', payMethodLabel, 'ธนาคาร', bankName, 'เลขที่บัญชี', bankAccount])
-      rows.push([])
-
-      // Summary KPIs
-      rows.push(['สรุปยอดประจำงวด'])
-      rows.push(['จำนวนกะทำงานทั้งหมด (กะ)', payrollResult.totalShiftsCount, 'วันทำงานจริง (วัน)', payrollResult.workDaysCount, 'ครึ่งกะ (กะ)', payrollResult.halfShiftsCount])
-      rows.push(['รายได้รวม (บาท)', payrollResult.totalIncome, 'รายการหักรวม (บาท)', payrollResult.totalDeductions, 'สุทธิรับจริง NET PAY (บาท)', payrollResult.netPay])
-      rows.push([])
-
-      // Daily Log Table
-      rows.push(['1. บันทึกรายวัน (Daily Log)'])
-      rows.push(['วันที่', 'ประเภทวัน', 'กะ / ลำดับ', 'รหัสงาน (Job Code)', 'ระดับเรท', 'ค่าจ้างกะ (บาท)', 'OT (ชม.)', 'ค่า OT (บาท)', 'รวมรายได้วัน (บาท)'])
-
-      fullDailyAudit.forEach(day => {
-        const isWorked = day.shifts && day.shifts.length > 0
-        const dayTypeLabel = day.isHoliday ? 'วันหยุดนักขัตฤกษ์' : 'วันทำงานปกติ'
-
-        if (!isWorked) {
-          rows.push([day.date, dayTypeLabel, 'หยุด', '-', '-', 0, 0, 0, 0])
-        } else {
-          day.shifts.forEach((s: any) => {
-            const jInfo = jobMap.get(s.jobCode)
-            const jName = jInfo?.name ? ` (${jInfo.name})` : ''
-            rows.push([
-              day.date,
-              dayTypeLabel,
-              s.shiftName + (s.isHalf ? ' (ครึ่งกะ)' : ''),
-              s.jobCode + jName,
-              s.tier === 'skilled' ? 'ฝีมือ (฿377) ⭐' : 'ปกติ (฿357)',
-              s.totalShiftWage,
-              s.otHours || 0,
-              s.otPay || 0,
-              s.totalShiftWage + (s.otPay || 0)
-            ])
-          })
-        }
-      })
-
-      rows.push([])
-
-      // Period Adjustments & Deductions
-      rows.push(['2. รายการประจำงวด & รายการหักเงิน'])
-      rows.push(['ประเภทรายการ', 'รายละเอียด / หมายเหตุ', 'จำนวนเงิน (บาท)'])
-
-      if (payrollResult.amountDiligence > 0) rows.push(['รายได้', 'เบี้ยขยันประจำงวด (สิ้นเดือน)', payrollResult.amountDiligence])
-      if (payrollResult.amountSpecial > 0) rows.push(['รายได้', `เงินพิเศษ / ปรับปรุง (${payrollResult.specialNote || ''})`, payrollResult.amountSpecial])
-
-      if (payrollResult.deductSocialSecurity > 0) rows.push(['รายการหัก', 'ประกันสังคม (5% กะแรก)', -payrollResult.deductSocialSecurity])
-      empAdvances.forEach((adv, i) => {
-        rows.push(['รายการหัก', `เบิกล่วงหน้า (#${i+1}) ${adv.notes || ''}`, -Number(adv.amount || 0)])
-      })
-      if (payrollResult.deductSafetyEquipment > 0) rows.push(['รายการหัก', 'อุปกรณ์ความปลอดภัย', -payrollResult.deductSafetyEquipment])
-      if (payrollResult.deductUniform > 0) rows.push(['รายการหัก', 'ค่าเสื้อพนักงาน', -payrollResult.deductUniform])
-
-      rows.push([])
-      rows.push(['ยอดเงินสุทธิรับจริง (NET PAY)', '', payrollResult.netPay])
+      const rows = buildTpiEmployeeSummaryExcelRows(
+        selectedEmp,
+        periodLabelStr,
+        payrollResult,
+        fullDailyAudit,
+        empAdvances,
+        isSkilled,
+        jobMap
+      )
 
       const wb = XLSX.utils.book_new()
       const ws = XLSX.utils.aoa_to_sheet(rows)

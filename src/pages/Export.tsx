@@ -1,17 +1,26 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import { useAppStore } from '../store/useAppStore'
 import { TopBar } from '../components/layout/TopBar'
 import { toast } from 'sonner'
-import { Download, FileText, Grid3x3, ShieldCheck, Loader2, Search, Check, X, Users, FileSpreadsheet, Printer, Archive, FolderArchive } from 'lucide-react'
+import { Download, FileText, Grid3x3, ShieldCheck, Loader2, Search, Check, X, Users, FileSpreadsheet, Printer, Archive, FolderArchive, Receipt } from 'lucide-react'
 import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
-import { formatPeriodLabel, compareEmployeeCode, formatEmployeeFullName } from '../lib/formatters'
+import { formatPeriodLabel, compareEmployeeCode, formatEmployeeFullName, filterActivePeriods } from '../lib/formatters'
 import { isTpiCompany, isTpiJobCode } from '../features/tpi/model'
 import { calculatePayroll } from '../lib/payrollCalc'
 import { calculateTpiPayroll } from '../features/tpi/payrollCalc'
+import { referenceJobs } from '../features/tpi/referenceJobs'
+import { employeeWageForm } from '../features/tpi/employeeWageForm'
+import { getStoredHolidaysForFactory } from './TpiPayrollEntry'
+import {
+  buildTpiEmployeeSummaryPageHtml,
+  buildTpiEmployeeSummaryExcelRows,
+  getDatesInRange
+} from '../features/tpi/tpiSummaryExport'
+import { FactoryBillingModal } from '../features/tpi/FactoryBillingModal'
 import '../styles/tokens.css'
 
 interface PayrollPeriod { id: string; period_start: string; period_end: string; status: string | null }
@@ -206,23 +215,35 @@ function buildSlipHtml(entry: any, period: any, shifts: any[], branchName: strin
     ? `<div style="font-size:11px;color:#888;font-family:monospace;margin-top:2px">${emp.bank_name}${emp.bank_account ? ' · ' + maskBank(emp.bank_account) : ''}</div>`
     : ''
 
-  const incomeHtml = incomeRows.map(r => `
-    <div style="border-bottom:1px solid #f0f0f0">
-      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:9px 0 2px">
-        <span style="font-size:13px;color:#1a1a1a;font-weight:500">${r.label}</span>
-        <span style="font-family:monospace;font-size:13px;font-weight:600;color:#1a1a1a;white-space:nowrap">${mono(r.val)}</span>
+  const incomeHtml = incomeRows.map((r, i) => {
+    const hasExtra = !!(r.detail || (r.subs && r.subs.length > 0))
+    const isLast = i === incomeRows.length - 1
+    const borderStyle = isLast ? '' : 'border-bottom:1px solid #f0f0f0;'
+    const pb = hasExtra ? '4px' : '10px'
+    return `
+    <div style="${borderStyle}">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding-top:10px;padding-bottom:${pb}">
+        <span style="font-size:13px;color:#1a1a1a;font-weight:500;line-height:1.5">${r.label}</span>
+        <span style="font-family:monospace;font-size:13px;font-weight:600;color:#1a1a1a;line-height:1.5;white-space:nowrap">${mono(r.val)}</span>
       </div>
-      ${r.detail ? `<div style="font-family:monospace;font-size:10px;color:#b44a2a;padding-bottom:5px">${r.detail}</div>` : ''}
-      ${r.subs.map(sub => `<div style="display:flex;gap:6px;padding:3px 0 3px 8px;align-items:center"><span style="font-size:10px;color:#bbb;flex-shrink:0">·</span><span style="font-size:11px;color:#999">${sub}</span></div>`).join('')}
+      ${r.detail ? `<div style="font-family:monospace;font-size:10px;color:#b44a2a;padding-bottom:6px;line-height:1.4">${r.detail}</div>` : ''}
+      ${r.subs.map(sub => `<div style="display:flex;gap:6px;padding:2px 0 3px 8px;align-items:center"><span style="font-size:10px;color:#bbb;flex-shrink:0">·</span><span style="font-size:11px;color:#888;line-height:1.4">${sub}</span></div>`).join('')}
       ${r.subs.length > 0 ? '<div style="padding-bottom:6px"></div>' : ''}
-    </div>`).join('')
+    </div>`
+  }).join('')
 
-  const deductHtml = deductRows.length ? deductRows.map(r => `
-    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:9px 0;border-bottom:1px solid #f0f0f0">
-      <span style="font-size:13px;color:#1a1a1a;font-weight:500">${r.label}</span>
-      <span style="font-family:monospace;font-size:13px;font-weight:600;color:#c0392b;white-space:nowrap">${mono(r.val)}</span>
-    </div>`).join('')
-  : '<div style="padding:9px 0;font-size:12px;color:#bbb">ไม่มีรายการหัก</div>'
+  const deductHtml = deductRows.length ? deductRows.map((r, i) => {
+    const isLast = i === deductRows.length - 1
+    const borderStyle = isLast ? '' : 'border-bottom:1px solid #f0f0f0;'
+    return `
+    <div style="${borderStyle}">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding-top:10px;padding-bottom:10px">
+        <span style="font-size:13px;color:#1a1a1a;font-weight:500;line-height:1.5">${r.label}</span>
+        <span style="font-family:monospace;font-size:13px;font-weight:600;color:#c0392b;line-height:1.5;white-space:nowrap">${mono(r.val)}</span>
+      </div>
+    </div>`
+  }).join('')
+  : '<div style="padding:16px 0;font-size:12px;color:#bbb">ไม่มีรายการหัก</div>'
 
   const workingDaysHtml = workingDays > 0
     ? `<div style="font-size:11px;color:#aaa;margin-top:3px">${workingDays} วันทำงาน</div>` : ''
@@ -236,8 +257,7 @@ function buildSlipHtml(entry: any, period: any, shifts: any[], branchName: strin
       <div>
         <div style="font-weight:800;font-size:16px;color:#1a1a1a;letter-spacing:-0.02em">ห้างหุ้นส่วนจำกัด วิราญกร</div>
         <div style="font-size:11px;color:#888;margin-top:4px;line-height:1.7">
-          เลขที่ 64 หมู่ 1 ตำบลบ้านธาตุ อำเภอแก่งคอย จังหวัดสระบุรี 18110<br>
-          เลขประจำตัวผู้เสียภาษี: <span style="color:#555;font-weight:600">0193554000514</span>
+          เลขที่ 64 หมู่ 1 ตำบลบ้านธาตุ อำเภอแก่งคอย จังหวัดสระบุรี 18110
         </div>
       </div>
     </div>
@@ -270,16 +290,16 @@ function buildSlipHtml(entry: any, period: any, shifts: any[], branchName: strin
   <div style="display:grid;grid-template-columns:1fr 1fr">
     <div style="border-right:1px solid #e8e8e8;display:flex;flex-direction:column">
       <div style="padding:10px 24px;background:#fafafa;border-bottom:1px solid #e8e8e8"><span style="font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#777">รายได้</span></div>
-      <div style="flex:1;padding:0 24px">${incomeHtml}</div>
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:11px 24px;background:#f7f7f7;border-top:1px solid #e8e8e8;margin-top:auto">
+      <div style="flex:1;padding:6px 24px 14px;min-height:180px;display:flex;flex-direction:column">${incomeHtml}</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 24px;background:#f7f7f7;border-top:1px solid #e8e8e8;margin-top:auto">
         <span style="font-size:11px;font-weight:700;color:#555;letter-spacing:0.04em">รวมรายได้</span>
         <span style="font-family:monospace;font-weight:800;font-size:14px;color:#1a7a3c">${mono(totalIncome)}</span>
       </div>
     </div>
     <div style="display:flex;flex-direction:column">
       <div style="padding:10px 24px;background:#fafafa;border-bottom:1px solid #e8e8e8"><span style="font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#777">รายการหัก</span></div>
-      <div style="flex:1;padding:0 24px">${deductHtml}</div>
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:11px 24px;background:#f7f7f7;border-top:1px solid #e8e8e8;margin-top:auto">
+      <div style="flex:1;padding:6px 24px 14px;min-height:180px;display:flex;flex-direction:column">${deductHtml}</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 24px;background:#f7f7f7;border-top:1px solid #e8e8e8;margin-top:auto">
         <span style="font-size:11px;font-weight:700;color:#555;letter-spacing:0.04em">รวมรายการหัก</span>
         <span style="font-family:monospace;font-weight:800;font-size:14px;color:#c0392b">${mono(totalDeduct)}</span>
       </div>
@@ -464,11 +484,11 @@ function buildSummarySinglePdfHtml(emp: any, period: any, stats: any, advances: 
 
     return `
       <tr style="${!day.isWorked ? 'opacity:0.55;background:#fafafa' : ''}">
-        <td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px">${fmtDisplayDateStr(day.workDate)}</td>
-        <td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px;color:#666">${dayLabel}</td>
-        <td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px">${shiftLabel}${day.isWorked && emp.position !== 'clerk' ? ` (${day.hours} ชม.)` : ''}</td>
-        <td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px">${items.join(' · ') || '—'}</td>
-        <td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px;text-align:right;font-family:monospace;font-weight:600">
+        <td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px;line-height:1.3;white-space:nowrap">${fmtDisplayDateStr(day.workDate)}</td>
+        <td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px;line-height:1.3;color:#666;white-space:nowrap">${dayLabel}</td>
+        <td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px;line-height:1.3">${shiftLabel}${day.isWorked && emp.position !== 'clerk' ? ` (${day.hours} ชม.)` : ''}</td>
+        <td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px;line-height:1.3">${items.join(' · ') || '—'}</td>
+        <td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px;line-height:1.3;text-align:right;font-family:monospace;font-weight:600;white-space:nowrap">
           ${day.totalEarned > 0 ? '฿' + mono(day.totalEarned) : '—'}
         </td>
       </tr>
@@ -476,112 +496,122 @@ function buildSummarySinglePdfHtml(emp: any, period: any, stats: any, advances: 
   }).join('')
 
   const periodIncomeRowsHtml = [
-    stats.clerkPeriodBase > 0 ? `<tr><td style="padding:5px 8px;border-bottom:1px solid #eee">ค่าจ้างพื้นฐาน (ครึ่งเดือน)</td><td style="padding:5px 8px;border-bottom:1px solid #eee">เงินเดือน ÷ 2</td><td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:right;font-family:monospace">฿${mono(stats.clerkPeriodBase)}</td></tr>` : '',
-    stats.entryDiligence > 0 ? `<tr><td style="padding:5px 8px;border-bottom:1px solid #eee">เบี้ยขยัน</td><td style="padding:5px 8px;border-bottom:1px solid #eee">เบี้ยขยันประจำงวด</td><td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:right;font-family:monospace">฿${mono(stats.entryDiligence)}</td></tr>` : '',
-    stats.entryPosition > 0 ? `<tr><td style="padding:5px 8px;border-bottom:1px solid #eee">ค่าตำแหน่ง</td><td style="padding:5px 8px;border-bottom:1px solid #eee">ค่าตำแหน่งประจำงวด</td><td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:right;font-family:monospace">฿${mono(stats.entryPosition)}</td></tr>` : '',
-    stats.entrySpecial > 0 ? `<tr><td style="padding:5px 8px;border-bottom:1px solid #eee">เงินพิเศษ / ปรับปรุง</td><td style="padding:5px 8px;border-bottom:1px solid #eee">บันทึกในงวดนี้</td><td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:right;font-family:monospace">฿${mono(stats.entrySpecial)}</td></tr>` : '',
+    stats.clerkPeriodBase > 0 ? `<tr><td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px">ค่าจ้างพื้นฐาน</td><td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px">เงินเดือน ÷ 2</td><td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px;text-align:right;font-family:monospace">฿${mono(stats.clerkPeriodBase)}</td></tr>` : '',
+    stats.entryDiligence > 0 ? `<tr><td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px">เบี้ยขยัน</td><td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px">ประจำงวด</td><td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px;text-align:right;font-family:monospace">฿${mono(stats.entryDiligence)}</td></tr>` : '',
+    stats.entryPosition > 0 ? `<tr><td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px">ค่าตำแหน่ง</td><td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px">ประจำงวด</td><td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px;text-align:right;font-family:monospace">฿${mono(stats.entryPosition)}</td></tr>` : '',
+    stats.entrySpecial > 0 ? `<tr><td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px">เงินพิเศษ</td><td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px">ในงวดนี้</td><td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px;text-align:right;font-family:monospace">฿${mono(stats.entrySpecial)}</td></tr>` : '',
   ].join('')
 
   const deductionRowsHtml = [
-    stats.entrySS > 0 ? `<tr><td style="padding:5px 8px;border-bottom:1px solid #eee;color:#c0392b">ประกันสังคม</td><td style="padding:5px 8px;border-bottom:1px solid #eee;color:#666">หัก ณ ที่จ่าย</td><td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:right;font-family:monospace;color:#c0392b">−฿${mono(stats.entrySS)}</td></tr>` : '',
-    ...advances.map((adv: any, i: number) => `<tr><td style="padding:5px 8px;border-bottom:1px solid #eee;color:#c0392b">เบิกล่วงหน้า (#${i+1})</td><td style="padding:5px 8px;border-bottom:1px solid #eee;color:#666">${adv.request_date ? fmtDisplayDateStr(adv.request_date) + ' ' : ''}${adv.notes || ''}</td><td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:right;font-family:monospace;color:#c0392b">−฿${mono(Number(adv.amount))}</td></tr>`),
-    stats.entrySafety > 0 ? `<tr><td style="padding:5px 8px;border-bottom:1px solid #eee;color:#c0392b">อุปกรณ์ความปลอดภัย</td><td style="padding:5px 8px;border-bottom:1px solid #eee;color:#666">หักค่าอุปกรณ์</td><td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:right;font-family:monospace;color:#c0392b">−฿${mono(stats.entrySafety)}</td></tr>` : '',
-    stats.entryUniform > 0 ? `<tr><td style="padding:5px 8px;border-bottom:1px solid #eee;color:#c0392b">ค่าเสื้อพนักงาน</td><td style="padding:5px 8px;border-bottom:1px solid #eee;color:#666">หักค่าชุดทำงาน</td><td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:right;font-family:monospace;color:#c0392b">−฿${mono(stats.entryUniform)}</td></tr>` : '',
+    stats.entrySS > 0 ? `<tr><td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px;color:#c0392b">ประกันสังคม</td><td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px;color:#666">หัก ณ ที่จ่าย</td><td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px;text-align:right;font-family:monospace;color:#c0392b">−฿${mono(stats.entrySS)}</td></tr>` : '',
+    ...advances.map((adv: any, i: number) => `<tr><td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px;color:#c0392b">เบิกล่วงหน้า (#${i+1})</td><td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px;color:#666">${adv.notes || ''}</td><td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px;text-align:right;font-family:monospace;color:#c0392b">−฿${mono(Number(adv.amount))}</td></tr>`),
+    stats.entrySafety > 0 ? `<tr><td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px;color:#c0392b">อุปกรณ์ความปลอดภัย</td><td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px;color:#666">หักค่าอุปกรณ์</td><td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px;text-align:right;font-family:monospace;color:#c0392b">−฿${mono(stats.entrySafety)}</td></tr>` : '',
+    stats.entryUniform > 0 ? `<tr><td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px;color:#c0392b">ค่าเสื้อพนักงาน</td><td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px;color:#666">หักค่าชุดทำงาน</td><td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px;text-align:right;font-family:monospace;color:#c0392b">−฿${mono(stats.entryUniform)}</td></tr>` : '',
   ].join('')
 
+  const hasAdjustments = !!(periodIncomeRowsHtml || deductionRowsHtml)
+
   return `
-<div style="background:#fff;font-family:'Sarabun',sans-serif;color:#1a1a1a;font-size:12px;padding:12px">
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:10px;border-bottom:2px solid #1a1a1a;margin-bottom:14px">
+<div class="page-container" style="box-sizing:border-box;font-family:'Sarabun',sans-serif;color:#1a1a1a;font-size:11px;padding:0;page-break-inside:avoid;break-inside:avoid">
+  <!-- Header -->
+  <div style="display:flex;justify-content:space-between;align-items:flex-end;padding-bottom:9px;border-bottom:2px solid #1a1a1a;margin-bottom:12px">
     <div>
-      <div style="font-weight:800;font-size:17px">ห้างหุ้นส่วนจำกัด วิราญกร</div>
+      <div style="font-weight:800;font-size:17px;line-height:1.25">ห้างหุ้นส่วนจำกัด วิราญกร</div>
       <div style="font-size:13px;font-weight:700;color:#555;margin-top:2px">รายงานสรุปภาพรวมพนักงาน (Employee Ledger Summary)</div>
     </div>
-    <div style="text-align:right;font-size:10px;color:#666">
+    <div style="text-align:right;font-size:11px;color:#666;line-height:1.35">
       <div>งวดเงินเดือน: <strong>${periodLabelStr}</strong></div>
       <div>พิมพ์เมื่อ: ${generatedAt}</div>
     </div>
   </div>
 
-  <div style="background:#f8f9fa;border:1px solid #e9ecef;padding:10px 14px;margin-bottom:14px;display:grid;grid-template-columns:1fr 1fr;gap:6px">
+  <!-- Employee Box -->
+  <div style="background:#f8f9fa;border:1px solid #e9ecef;border-radius:4px;padding:10px 14px;margin-bottom:12px;display:grid;grid-template-columns:1.2fr 1fr;gap:4px 16px;font-size:11.5px;line-height:1.5">
     <div>
       <div><strong>ชื่อ-นามสกุล:</strong> ${emp.first_name} ${emp.last_name}</div>
-      <div><strong>รหัสพนักงาน:</strong> <span style="font-family:monospace">${emp.employee_code}</span></div>
-      <div><strong>ตำแหน่ง:</strong> ${posLabel}${emp.job_title ? ' - ' + emp.job_title : ''}</div>
+      <div><strong>รหัสพนักงาน:</strong> <span style="font-family:monospace">${emp.employee_code}</span> &nbsp; <strong>ตำแหน่ง:</strong> ${posLabel}${emp.job_title ? ' - ' + emp.job_title : ''}</div>
     </div>
     <div>
-      <div><strong>อัตราค่าจ้าง:</strong> ฿${(Number(emp.rate_per_12h)||0).toLocaleString()}/${emp.wage_type==='monthly'?'เดือน':'12ชม.'}</div>
-      <div><strong>วิธีรับเงิน:</strong> ${payMethodLabel}</div>
+      <div><strong>อัตราค่าจ้าง:</strong> ฿${(Number(emp.rate_per_12h)||0).toLocaleString()}/${emp.wage_type==='monthly'?'เดือน':'12ชม.'} &nbsp; <strong>วิธีรับเงิน:</strong> ${payMethodLabel}</div>
       <div><strong>ธนาคาร/เลขบัญชี:</strong> ${bankDetails}</div>
     </div>
   </div>
 
-  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:14px">
-    <div style="background:#1a1a1a;color:#fff;padding:8px 10px;border-radius:4px">
-      <div style="font-size:9px;text-transform:uppercase;color:#aaa">วันทำงาน</div>
-      <div style="font-size:15px;font-weight:700;font-family:monospace">${stats.totalDaysWorked} วัน</div>
-      <div style="font-size:8px;color:#aaa">เช้า ${stats.morningShifts} · บ่าย ${stats.afternoonShifts}</div>
+  <!-- 4 KPI cards -->
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px">
+    <div style="background:#1a1a1a;color:#fff;padding:10px 12px;border-radius:4px">
+      <div style="font-size:10px;text-transform:uppercase;color:#aaa;margin-bottom:2px">วันทำงาน</div>
+      <div style="font-size:16px;font-weight:800;font-family:monospace;margin:2px 0">${stats.totalDaysWorked} วัน</div>
+      <div style="font-size:9px;color:#aaa">เช้า ${stats.morningShifts} · บ่าย ${stats.afternoonShifts}</div>
     </div>
-    <div style="background:#1a1a1a;color:#fff;padding:8px 10px;border-radius:4px">
-      <div style="font-size:9px;text-transform:uppercase;color:#aaa">รายได้รวม</div>
-      <div style="font-size:15px;font-weight:700;font-family:monospace;color:#6ee7b7">฿${mono(stats.grossEarnings)}</div>
-      <div style="font-size:8px;color:#aaa">ก่อนหักรายการ</div>
+    <div style="background:#1a1a1a;color:#fff;padding:10px 12px;border-radius:4px">
+      <div style="font-size:10px;text-transform:uppercase;color:#aaa;margin-bottom:2px">รายได้รวม</div>
+      <div style="font-size:16px;font-weight:800;font-family:monospace;color:#6ee7b7;margin:2px 0">฿${mono(stats.grossEarnings)}</div>
+      <div style="font-size:9px;color:#aaa">ก่อนหักรายการ</div>
     </div>
-    <div style="background:#1a1a1a;color:#fff;padding:8px 10px;border-radius:4px">
-      <div style="font-size:9px;text-transform:uppercase;color:#aaa">หักรวม</div>
-      <div style="font-size:15px;font-weight:700;font-family:monospace;color:#fca5a5">฿${mono(stats.totalDeductions)}</div>
-      <div style="font-size:8px;color:#aaa">ประกัน + เบิก + อื่นๆ</div>
+    <div style="background:#1a1a1a;color:#fff;padding:10px 12px;border-radius:4px">
+      <div style="font-size:10px;text-transform:uppercase;color:#aaa;margin-bottom:2px">หักรวม</div>
+      <div style="font-size:16px;font-weight:800;font-family:monospace;color:#fca5a5;margin:2px 0">฿${mono(stats.totalDeductions)}</div>
+      <div style="font-size:9px;color:#aaa">ประกัน + เบิก + อื่นๆ</div>
     </div>
-    <div style="background:#1a1a1a;color:#fff;padding:8px 10px;border-radius:4px">
-      <div style="font-size:9px;text-transform:uppercase;color:#aaa">สุทธิรับจริง</div>
-      <div style="font-size:15px;font-weight:700;font-family:monospace;color:#fde047">฿${mono(stats.netEarnings)}</div>
-      <div style="font-size:8px;color:#aaa">NET PAY</div>
+    <div style="background:#1a1a1a;color:#fff;padding:10px 12px;border-radius:4px">
+      <div style="font-size:10px;text-transform:uppercase;color:#aaa;margin-bottom:2px">สุทธิรับจริง</div>
+      <div style="font-size:16px;font-weight:800;font-family:monospace;color:#fde047;margin:2px 0">฿${mono(stats.netEarnings)}</div>
+      <div style="font-size:9px;color:#aaa">NET PAY</div>
     </div>
   </div>
 
-  <div style="font-weight:700;font-size:12px;margin-bottom:5px">1. บันทึกรายวัน (Daily Log)</div>
-  <table style="width:100%;border-collapse:collapse;margin-bottom:14px">
-    <thead>
-      <tr>
-        <th style="background:#f1f3f5;text-align:left;padding:6px;font-size:10px;font-weight:700;border-bottom:1px solid #dee2e6">วันที่</th>
-        <th style="background:#f1f3f5;text-align:left;padding:6px;font-size:10px;font-weight:700;border-bottom:1px solid #dee2e6">ประเภทวัน</th>
-        <th style="background:#f1f3f5;text-align:left;padding:6px;font-size:10px;font-weight:700;border-bottom:1px solid #dee2e6">กะ / ชั่วโมง</th>
-        <th style="background:#f1f3f5;text-align:left;padding:6px;font-size:10px;font-weight:700;border-bottom:1px solid #dee2e6">รายการรายได้</th>
-        <th style="background:#f1f3f5;text-align:right;padding:6px;font-size:10px;font-weight:700;border-bottom:1px solid #dee2e6">รวมรายวัน</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${dailyRowsHtml}
-    </tbody>
-  </table>
-
-  ${(periodIncomeRowsHtml || deductionRowsHtml) ? `
-    <div style="font-weight:700;font-size:12px;margin-bottom:5px">2. รายการประจำงวด & รายการหักเงิน</div>
-    <table style="width:100%;border-collapse:collapse;margin-bottom:14px">
+  <!-- 1. Daily Log Table -->
+  <div style="margin-bottom:12px">
+    <div style="font-weight:700;font-size:12.5px;margin-bottom:5px">1. บันทึกรายวัน (Daily Log)</div>
+    <table style="width:100%;border-collapse:collapse">
       <thead>
         <tr>
-          <th style="background:#f1f3f5;text-align:left;padding:6px;font-size:10px;font-weight:700;border-bottom:1px solid #dee2e6">รายการ</th>
-          <th style="background:#f1f3f5;text-align:left;padding:6px;font-size:10px;font-weight:700;border-bottom:1px solid #dee2e6">รายละเอียด / หมายเหตุ</th>
-          <th style="background:#f1f3f5;text-align:right;padding:6px;font-size:10px;font-weight:700;border-bottom:1px solid #dee2e6">จำนวนเงิน</th>
+          <th style="background:#f1f3f5;text-align:left;padding:6px 8px;font-size:11px;font-weight:700;border-bottom:1.5px solid #dee2e6;white-space:nowrap;width:110px">วันที่</th>
+          <th style="background:#f1f3f5;text-align:left;padding:6px 8px;font-size:11px;font-weight:700;border-bottom:1.5px solid #dee2e6;white-space:nowrap;width:95px">ประเภทวัน</th>
+          <th style="background:#f1f3f5;text-align:left;padding:6px 8px;font-size:11px;font-weight:700;border-bottom:1.5px solid #dee2e6;width:130px">กะ / ชั่วโมง</th>
+          <th style="background:#f1f3f5;text-align:left;padding:6px 8px;font-size:11px;font-weight:700;border-bottom:1.5px solid #dee2e6">รายการรายได้</th>
+          <th style="background:#f1f3f5;text-align:right;padding:6px 8px;font-size:11px;font-weight:700;border-bottom:1.5px solid #dee2e6;white-space:nowrap;width:85px">รวมวัน</th>
         </tr>
       </thead>
       <tbody>
-        ${periodIncomeRowsHtml}
-        ${deductionRowsHtml}
+        ${dailyRowsHtml}
       </tbody>
     </table>
+  </div>
+
+  <!-- Table 2: Adjustments & Deductions (Vertical full-width) -->
+  ${hasAdjustments ? `
+    <div style="margin-bottom:12px">
+      <div style="font-weight:700;font-size:12.5px;margin-bottom:5px">2. รายการประจำงวด & รายการหักเงิน</div>
+      <table style="width:100%;border-collapse:collapse">
+        <thead>
+          <tr>
+            <th style="background:#f1f3f5;text-align:left;padding:6px 8px;font-size:11px;font-weight:700;border-bottom:1.5px solid #dee2e6;width:140px">รายการ</th>
+            <th style="background:#f1f3f5;text-align:left;padding:6px 8px;font-size:11px;font-weight:700;border-bottom:1.5px solid #dee2e6">รายละเอียด</th>
+            <th style="background:#f1f3f5;text-align:right;padding:6px 8px;font-size:11px;font-weight:700;border-bottom:1.5px solid #dee2e6;width:100px">จำนวนเงิน</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${periodIncomeRowsHtml}
+          ${deductionRowsHtml}
+        </tbody>
+      </table>
+    </div>
   ` : ''}
 
-  <div style="background:#1a1a1a;color:#fff;padding:12px 14px;display:flex;justify-content:space-between;align-items:center;margin-top:14px">
+  <!-- Net Pay Banner (Vertical full-width) -->
+  <div style="background:#1a1a1a;color:#fff;padding:12px 18px;display:flex;justify-content:space-between;align-items:center;border-radius:4px;margin-top:12px">
     <div>
-      <div style="font-size:10px;color:#aaa;text-transform:uppercase">NET PAY · สุทธิรับจริง</div>
-      <div style="font-size:10px;color:#ccc;margin-top:2px">${stats.totalDaysWorked} วันทำงาน · รายได้ ฿${mono(stats.grossEarnings)} · หัก ฿${mono(stats.totalDeductions)}</div>
+      <div style="font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:0.5px">NET PAY · สุทธิรับจริง</div>
+      <div style="font-size:10.5px;color:#ccc;margin-top:3px">${stats.totalDaysWorked} วันทำงาน · ได้ ฿${mono(stats.grossEarnings)} · หัก ฿${mono(stats.totalDeductions)}</div>
     </div>
-    <div style="font-family:monospace;font-size:22px;font-weight:800;color:#fde047">
+    <div style="font-family:monospace;font-size:24px;font-weight:800;color:#fde047">
       ฿${mono(stats.netEarnings)}
     </div>
   </div>
 </div>
-  `
+`
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
@@ -646,6 +676,9 @@ export default function Export() {
   const [empNatFilter, setEmpNatFilter]                       = useState<string>('all')
   const [isExportingEmployees, setIsExportingEmployees]       = useState(false)
 
+  // Factory Billing Statement modal state
+  const [showBillingModal, setShowBillingModal]               = useState(false)
+
   // Full employees query for employee database export
   const { data: allFactoryEmployees = [], isLoading: isLoadingAllEmployees } = useQuery<any[]>({
     queryKey: ['employees-export-full', user?.factory_id],
@@ -692,7 +725,7 @@ export default function Export() {
     return a.localeCompare(b, 'th')
   })
 
-  const { data: periods = [] } = useQuery<PayrollPeriod[]>({
+  const { data: rawPeriods = [] } = useQuery<PayrollPeriod[]>({
     queryKey: ['periods', user?.factory_id],
     queryFn: async () => {
       const { data, error } = await supabase.from('payroll_periods').select('*')
@@ -700,6 +733,8 @@ export default function Export() {
       if (error) throw error; return data
     }, enabled: !!user?.factory_id, staleTime: 0,
   })
+
+  const periods = useMemo(() => filterActivePeriods(rawPeriods), [rawPeriods])
 
   const { data: employees = [] } = useQuery<any[]>({
     queryKey: ['employees-export-pdf', user?.factory_id],
@@ -1011,6 +1046,8 @@ export default function Export() {
           row,
           channel,
           empCode: x.emp.employee_code,
+          nationality: cleanNationality(x.emp?.nationality),
+          emp: x.emp,
         }
       }).sort((a, b) => compareEmployeeCode(a.empCode, b.empCode))
 
@@ -1088,7 +1125,7 @@ export default function Export() {
         return unique
       }
 
-      // Tab 1: Master sheet (all employees)
+      // Tab 1: Master sheet (Overall / all employees)
       const masterRows = items.map(it => it.row)
       const masterDataWithSummary = [...masterRows, createSummaryRow(masterRows)]
       const masterWs = XLSX.utils.aoa_to_sheet([[`ค่าแรง ${label} (รวมทุกช่องทาง)`]])
@@ -1096,7 +1133,46 @@ export default function Export() {
       masterWs['!cols'] = cols
       XLSX.utils.book_append_sheet(wb, masterWs, getSafeSheetName('Payroll Summary'))
 
-      // Tabs 2..N: Split by payment channel (e.g. เงินสด, ธนาคาร A, ธนาคาร B)
+      // Tab 2: Thai employees (คนไทย)
+      const thaiItems = items.filter(it => it.nationality === 'ไทย')
+      if (thaiItems.length > 0) {
+        const thaiRows = thaiItems.map(it => it.row)
+        const thaiDataWithSummary = [...thaiRows, createSummaryRow(thaiRows)]
+        const thaiWs = XLSX.utils.aoa_to_sheet([[`ค่าแรง ${label} (คนไทย)`]])
+        XLSX.utils.sheet_add_json(thaiWs, thaiDataWithSummary, { origin: 'A2' })
+        thaiWs['!cols'] = cols
+        XLSX.utils.book_append_sheet(wb, thaiWs, getSafeSheetName('คนไทย'))
+      }
+
+      // Tab 3: Foreign employees (ชาวต่างชาติ / เมียนมา)
+      const foreignItems = items.filter(it => it.nationality !== 'ไทย')
+      if (foreignItems.length > 0) {
+        const foreignNats = Array.from(new Set(foreignItems.map(it => it.nationality)))
+        if (foreignNats.length <= 1) {
+          const sheetLabel = (foreignNats[0] === 'พม่า' || foreignNats[0] === 'เมียนมา' || !foreignNats[0]) ? 'เมียนมา' : foreignNats[0]
+          const fRows = foreignItems.map(it => it.row)
+          const fDataWithSummary = [...fRows, createSummaryRow(fRows)]
+          const fWs = XLSX.utils.aoa_to_sheet([[`ค่าแรง ${label} (${sheetLabel})`]])
+          XLSX.utils.sheet_add_json(fWs, fDataWithSummary, { origin: 'A2' })
+          fWs['!cols'] = cols
+          XLSX.utils.book_append_sheet(wb, fWs, getSafeSheetName(sheetLabel))
+        } else {
+          // If multiple foreign nationalities, create a tab for each (e.g. เมียนมา, กัมพูชา, ลาว)
+          for (const nat of foreignNats) {
+            const sheetLabel = (nat === 'พม่า' || nat === 'เมียนมา') ? 'เมียนมา' : (nat || 'เมียนมา')
+            const natItems = foreignItems.filter(it => it.nationality === nat)
+            if (natItems.length === 0) continue
+            const natRows = natItems.map(it => it.row)
+            const natDataWithSummary = [...natRows, createSummaryRow(natRows)]
+            const natWs = XLSX.utils.aoa_to_sheet([[`ค่าแรง ${label} (${sheetLabel})`]])
+            XLSX.utils.sheet_add_json(natWs, natDataWithSummary, { origin: 'A2' })
+            natWs['!cols'] = cols
+            XLSX.utils.book_append_sheet(wb, natWs, getSafeSheetName(sheetLabel))
+          }
+        }
+      }
+
+      // Tabs 4..N: Split by payment channel (e.g. เงินสด, ธนาคาร A, ธนาคาร B)
       const distinctChannels = Array.from(new Set(items.map(it => it.channel))).sort((a, b) => {
         if (a === 'เงินสด') return -1
         if (b === 'เงินสด') return 1
@@ -1116,7 +1192,7 @@ export default function Export() {
       }
 
       XLSX.writeFile(wb, `Payroll_Summary_${label.replace(/[\s/*?:[\]]/g, '_')}.xlsx`)
-      toast.success(`ดาวน์โหลด Payroll Excel สำเร็จ (สร้าง 1 แท็ปรวม + ${distinctChannels.length} แท็บตามช่องทางรับเงิน)`)
+      toast.success(`ดาวน์โหลด Payroll Excel สำเร็จ (รวมแท็บสัญชาติ และแยกตามช่องทางรับเงิน)`)
     } catch(e: any) {
       toast.error('เกิดข้อผิดพลาด', { description: e.message })
     } finally {
@@ -1592,6 +1668,262 @@ body>div>div{border:none!important;box-shadow:none!important;border-bottom:1px s
 
     setIsGeneratingSummary(true)
     try {
+      if (isTpi) {
+        const selectedPeriods = periods.filter(p => targetPeriodIds.includes(p.id))
+        if (!selectedPeriods.length) {
+          toast.error('ไม่พบงวดการจ่ายเงินที่เลือก')
+          return
+        }
+        const minStart = selectedPeriods.map(p => p.period_start).sort()[0]
+        const maxEnd = selectedPeriods.map(p => p.period_end).sort().reverse()[0]
+
+        // 1. Fetch TPI Shift entries with pagination
+        let allTpiShifts: any[] = []
+        if (minStart && maxEnd) {
+          let fromShift = 0
+          const PAGE_SHIFT = 1000
+          while (true) {
+            const { data: sData, error: sErr } = await supabase.from('tpi_shift_entries' as any)
+              .select('id,work_date,employee_id,shift_index,job_id,job_code_snapshot,rate_tier,rate_snapshot,is_half_shift,actual_hours,ot_hours,ot_pay,is_holiday_ot')
+              .eq('factory_id', user?.factory_id ?? '')
+              .gte('work_date', minStart)
+              .lte('work_date', maxEnd)
+              .range(fromShift, fromShift + PAGE_SHIFT - 1)
+            if (sErr) break
+            allTpiShifts = allTpiShifts.concat(sData ?? [])
+            if (!sData || sData.length < PAGE_SHIFT) break
+            fromShift += PAGE_SHIFT
+          }
+        }
+
+        // Apply stored factory holidays
+        const storedHolidays = getStoredHolidaysForFactory(user?.factory_id)
+        if (storedHolidays.size > 0) {
+          allTpiShifts = allTpiShifts.map(s => storedHolidays.has(s.work_date) ? { ...s, is_holiday_ot: true } : s)
+        }
+
+        // 2. Fetch payroll entries for target periods (for overrides/extras)
+        const { data: rawPayrollEntries = [] } = await supabase.from('payroll_entries' as any)
+          .select('*')
+          .in('period_id', targetPeriodIds)
+
+        // 3. Fetch advance_payments for target periods
+        const { data: allAdvances = [] } = await supabase.from('advance_payments')
+          .select('employee_id,period_id,amount,request_date,notes,created_at')
+          .in('period_id', targetPeriodIds)
+
+        // 4. Fetch all active employees for this factory
+        const { data: allEmps = [] } = await supabase.from('employees')
+          .select('id, employee_code, prefix, first_name, last_name, position, job_title, payment_method, bank_name, bank_account, status, rate_per_12h, wage_type, nationality, exempt_social_security, is_safety_officer, has_position_allowance')
+          .eq('factory_id', user?.factory_id ?? '')
+
+        let empsToProcess: any[] = []
+        if (!isNormalUser && summaryTarget === 'individual' && summaryEmpId) {
+          const found = allEmps.find(e => e.id === summaryEmpId)
+          if (found) empsToProcess = [found]
+        } else {
+          empsToProcess = allEmps.filter(e => e.status === 'active')
+        }
+
+        if (!empsToProcess.length) {
+          toast.error('ไม่พบข้อมูลพนักงาน')
+          return
+        }
+
+        // 5. Fetch Job Positions & Wage profiles & Job codes
+        const { data: dbJobs = [] } = await supabase.from('tpi_job_positions' as any)
+          .select('id,job_code,job_name')
+        const jobMap = new Map<string, { name: string }>()
+        referenceJobs.forEach(j => jobMap.set(j.code, { name: j.title }))
+        ;(dbJobs || []).forEach((j: any) => jobMap.set(j.job_code, { name: j.job_name }))
+
+        const { data: dbWageProfiles = [] } = await supabase.from('tpi_employee_wage_profiles')
+          .select('*').eq('factory_id', user?.factory_id ?? '')
+
+        const { data: dbTpiJobCodes = [] } = await supabase.from('tpi_job_codes' as any).select('*')
+
+        const profileMap = new Map<string, any>()
+        for (const p of dbWageProfiles || []) {
+          profileMap.set(p.employee_id, p)
+        }
+        const jobsList = (dbTpiJobCodes && dbTpiJobCodes.length > 0) ? dbTpiJobCodes : referenceJobs
+        const isSkilledEmp = (emp?: any) => {
+          if (!emp) return false
+          const profile = profileMap.get(emp.id)
+          if (profile?.rate_tier === 'skilled') return true
+          const form = employeeWageForm(emp.job_title, profile, jobsList)
+          return form.rateTier === 'skilled'
+        }
+
+        type TpiSummaryItem = {
+          emp: any
+          period: any
+          periodLabelStr: string
+          payrollResult: any
+          fullDailyAudit: any[]
+          empAdvances: any[]
+          isSkilled: boolean
+        }
+
+        const summaryItems: TpiSummaryItem[] = []
+        const sortedPeriods = [...selectedPeriods].sort((a, b) => new Date(a.period_start).getTime() - new Date(b.period_start).getTime())
+        const sortedEmps = [...empsToProcess].sort((a, b) => compareEmployeeCode(a.employee_code, b.employee_code))
+
+        for (const emp of sortedEmps) {
+          for (const period of sortedPeriods) {
+            const empShifts = allTpiShifts.filter(s => s.employee_id === emp.id && s.work_date >= period.period_start && s.work_date <= period.period_end)
+            const empEntry = rawPayrollEntries.find((e: any) => e.employee_id === emp.id && e.period_id === period.id)
+            const empAdvances = allAdvances.filter((a: any) => a.employee_id === emp.id && a.period_id === period.id)
+
+            // If "all" target: skip employees who have no shifts and no payroll entries in this period
+            if (summaryTarget === 'all' && empShifts.length === 0 && !empEntry) {
+              continue
+            }
+
+            const payrollResult = calculateTpiPayroll({
+              employee: emp,
+              shifts: empShifts,
+              advances: empAdvances,
+              period: period,
+              overrides: {
+                override_normal: empEntry?.override_normal != null ? Number(empEntry.override_normal) : null,
+                override_shift: empEntry?.override_shift != null ? Number(empEntry.override_shift) : null,
+                override_ot: empEntry?.override_ot != null ? Number(empEntry.override_ot) : null,
+                override_special: empEntry?.override_special != null ? Number(empEntry.override_special) : null,
+              },
+              extras: {
+                amount_diligence: empEntry?.amount_diligence !== undefined ? Number(empEntry.amount_diligence) : undefined,
+                amount_position: empEntry?.amount_position !== undefined ? Number(empEntry.amount_position) : undefined,
+                amount_special: empEntry?.amount_special !== undefined ? Number(empEntry.amount_special) : undefined,
+                special_note: empEntry?.special_note || '',
+                deduct_safety_equipment: Number(empEntry?.deduct_safety_equipment || 0),
+                deduct_uniform: Number(empEntry?.deduct_uniform || 0),
+              }
+            })
+
+            const dates = getDatesInRange(period.period_start, period.period_end)
+            const auditMap = new Map<string, any>()
+            payrollResult.dailyAudit.forEach((a: any) => auditMap.set(a.date, a))
+
+            const fullDailyAudit = dates.map(dStr => {
+              const existing = auditMap.get(dStr)
+              if (existing) return existing
+              return {
+                date: dStr,
+                isHoliday: storedHolidays.has(dStr),
+                shifts: [],
+                dayTotalWage: 0,
+                dayTotalOt: 0,
+              }
+            })
+
+            const periodLabelStr = formatPeriodLabel(period.period_start, period.period_end)
+            summaryItems.push({
+              emp,
+              period,
+              periodLabelStr,
+              payrollResult,
+              fullDailyAudit,
+              empAdvances,
+              isSkilled: isSkilledEmp(emp),
+            })
+          }
+        }
+
+        if (summaryItems.length === 0) {
+          toast.error('ไม่พบข้อมูลการทำงานในช่วงที่เลือก')
+          return
+        }
+
+        const generatedAt = thaiDateTimeNow()
+
+        if (fileType === 'pdf') {
+          const pagesHtml = summaryItems.map((item, i) => {
+            const pageContent = buildTpiEmployeeSummaryPageHtml(
+              item.emp,
+              item.periodLabelStr,
+              item.payrollResult,
+              item.fullDailyAudit,
+              item.empAdvances,
+              generatedAt,
+              item.isSkilled,
+              jobMap
+            )
+            return `<div class="employee-page" style="page-break-after:${i < summaryItems.length - 1 ? 'always' : 'auto'};break-after:${i < summaryItems.length - 1 ? 'page' : 'auto'};padding:0;margin:0">${pageContent}</div>`
+          }).join('')
+
+          const first = summaryItems[0]
+          const mm = String(new Date(first.period.period_start).getMonth() + 1).padStart(2, '0')
+          const yyyy = new Date(first.period.period_start).getFullYear()
+          const filename = summaryTarget === 'individual'
+            ? `TPI_Summary_${first.emp.employee_code}_${first.emp.first_name}_${mm}${yyyy}`
+            : `TPI_All_Employee_Summary_${mm}${yyyy}`
+
+          const win = window.open('', '_blank', 'width=900,height=750')
+          if (!win) { toast.error('กรุณาอนุญาต popup สำหรับการพิมพ์'); return }
+          win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${filename}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box}
+body{margin:0;padding:0;background:#fff;font-family:'Sarabun',sans-serif}
+@page{size:A4 portrait;margin:8mm 10mm}
+@media print{
+  html,body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .employee-page{page-break-inside:avoid;break-inside:avoid}
+}
+</style>
+</head><body>${pagesHtml}</body></html>`)
+          win.document.close()
+          win.focus()
+          setTimeout(() => { win.print(); win.close() }, 500)
+          toast.success('เปิดหน้าต่างพิมพ์ PDF สรุปพนักงานแล้ว')
+          setShowSummaryModal(false)
+        } else {
+          // Excel Export for TPI
+          const XLSX = await import('xlsx')
+          const wb = XLSX.utils.book_new()
+          const allRows: any[][] = []
+
+          summaryItems.forEach((item, idx) => {
+            if (idx > 0) {
+              allRows.push([])
+              allRows.push(['==================================================================================================='])
+              allRows.push([])
+            }
+            const itemRows = buildTpiEmployeeSummaryExcelRows(
+              item.emp,
+              item.periodLabelStr,
+              item.payrollResult,
+              item.fullDailyAudit,
+              item.empAdvances,
+              item.isSkilled,
+              jobMap
+            )
+            allRows.push(...itemRows)
+          })
+
+          const ws = XLSX.utils.aoa_to_sheet(allRows)
+          ws['!cols'] = [
+            { wch: 16 }, { wch: 18 }, { wch: 18 }, { wch: 24 }, { wch: 18 },
+            { wch: 16 }, { wch: 12 }, { wch: 14 }, { wch: 18 }
+          ]
+
+          XLSX.utils.book_append_sheet(wb, ws, 'Employee Summary')
+          const first = summaryItems[0]
+          const mm = String(new Date(first.period.period_start).getMonth() + 1).padStart(2, '0')
+          const yyyy = new Date(first.period.period_start).getFullYear()
+          const filename = summaryTarget === 'individual'
+            ? `TPI_Summary_${first.emp.employee_code}_${first.emp.first_name}_${mm}${yyyy}.xlsx`
+            : `TPI_All_Employee_Summary_${mm}${yyyy}.xlsx`
+
+          XLSX.writeFile(wb, filename)
+          toast.success('ดาวน์โหลด Excel สรุปพนักงานสำเร็จ')
+          setShowSummaryModal(false)
+        }
+        return
+      }
+
       // 1. Fetch payroll entries
       let q = supabase.from('payroll_entries').select(`
         *,
@@ -1643,7 +1975,7 @@ body>div>div{border:none!important;box-shadow:none!important;border-bottom:1px s
           const empAdvances = allAdvances.filter((a: any) => a.employee_id === e.employee_id && a.period_id === e.period_id)
           const stats = calcEmpSummaryStats(e.employee, e.period, empShifts, e, empAdvances)
           const pageContent = buildSummarySinglePdfHtml(e.employee, e.period, stats, empAdvances, generatedAt)
-          return `<div style="page-break-after:${i < sortedEntries.length - 1 ? 'always' : 'auto'};padding:0;margin:0">${pageContent}</div>`
+          return `<div class="employee-page" style="page-break-after:${i < sortedEntries.length - 1 ? 'always' : 'auto'};break-after:${i < sortedEntries.length - 1 ? 'page' : 'auto'};padding:0;margin:0">${pageContent}</div>`
         }).join('')
 
         const first = sortedEntries[0]
@@ -1661,8 +1993,11 @@ body>div>div{border:none!important;box-shadow:none!important;border-bottom:1px s
 <style>
 *{box-sizing:border-box}
 body{margin:0;padding:0;background:#fff;font-family:'Sarabun',sans-serif}
-@page{size:A4 portrait;margin:6mm 6mm}
-@media print{html,body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+@page{size:A4 portrait;margin:8mm 10mm}
+@media print{
+  html,body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .employee-page{page-break-inside:avoid;break-inside:avoid}
+}
 </style>
 </head><body>${pagesHtml}</body></html>`)
         win.document.close(); win.focus()
@@ -1794,6 +2129,7 @@ body{margin:0;padding:0;background:#fff;font-family:'Sarabun',sans-serif}
 
   const allCards = [
     { icon: Grid3x3,      color: 'var(--vk-jade)',      title: 'ตาราง Payroll รวม',        desc: 'ดาวน์โหลดข้อมูล Payroll ทุกคนในรูปแบบ .xlsx พร้อมแยก Tab ตามวิธีการรับเงิน (เงินสด/แต่ละธนาคาร)', btn: 'Download Excel', loading: isExportingXlsx, onClick: handleExportPayroll, adminOnly: true  },
+    { icon: Receipt,      color: '#0f766e',             title: 'ใบสรุปวางบิลเบิกโรงงาน',   desc: 'สรุปยอดวางบิลเบิกต้นสังกัดตามรหัสงาน แยก ชาย/หญิง เรทปกติ/ฝีมือ พร้อมดูพรีวิวและดาวน์โหลด Excel', btn: 'วางบิลเบิกโรงงาน', loading: false,           onClick: () => setShowBillingModal(true), adminOnly: true },
     { icon: FileSpreadsheet, color: '#0284c7',          title: 'ฐานข้อมูลพนักงาน (Excel)',  desc: 'ส่งออกทะเบียนประวัติพนักงานทุกคน พร้อมตัวเลือกกรองสถานะ และแยก Sheet ตามสัญชาติ', btn: 'Export ฐานข้อมูล', loading: isExportingEmployees, onClick: () => setShowEmployeeExportModal(true), adminOnly: true },
     { icon: FileText,     color: 'var(--vk-crimson)',    title: 'PDF – Pay Slip รายบุคคล',  desc: 'สร้างไฟล์ PDF Pay Slip แยกตามรายชื่อพนักงาน หรือพิมพ์ทั้งบริษัท', btn: 'Download PDF',   loading: false,           onClick: ()=>setShowPdfModal(true), adminOnly: false },
     { icon: Users,        color: 'var(--vk-jade)',      title: 'สรุปภาพรวมพนักงาน',       desc: 'ส่งออกรายงานสรุปรายได้และบันทึกรายวัน (PDF/Excel) รายบุคคล หรือทั้งบริษัท', btn: 'ส่งออกข้อมูล',  loading: false,           onClick: ()=>setShowSummaryModal(true), adminOnly: false },
@@ -2514,6 +2850,18 @@ body{margin:0;padding:0;background:#fff;font-family:'Sarabun',sans-serif}
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── Factory Billing Modal ────────────────────────────────────── */}
+      {showBillingModal && (
+        <FactoryBillingModal
+          isOpen={showBillingModal}
+          onClose={() => setShowBillingModal(false)}
+          periods={periods}
+          initialPeriodId={selectedPeriodId}
+          factoryId={user?.factory_id}
+          factoryName={currentFactoryName || 'บริษัท ทีพีไอ โพลีน จำกัด (มหาชน)'}
+        />
       )}
     </div>
   )

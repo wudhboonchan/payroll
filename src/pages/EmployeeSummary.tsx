@@ -7,7 +7,7 @@ import { TopBar } from '../components/layout/TopBar'
 import { useState, useEffect, useMemo } from 'react'
 import { Search, X, CreditCard, FileSpreadsheet, Printer, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { formatPeriodLabel, formatEmployeeFullName, compareEmployeeCode } from '../lib/formatters'
+import { formatPeriodLabel, formatEmployeeFullName, compareEmployeeCode, filterActivePeriods } from '../lib/formatters'
 import { isTpiCompany } from '../features/tpi/model'
 import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
@@ -274,7 +274,7 @@ export default function EmployeeSummary() {
   const isTpi = isTpiCompany(companyName || branchName)
 
   // ── 1. Fetch periods ──
-  const { data: periods = [] } = useQuery<any[]>({
+  const { data: rawPeriods = [] } = useQuery<any[]>({
     queryKey: ['periods', user?.factory_id],
     queryFn: async () => {
       const { data, error } = await supabase.from('payroll_periods').select('*')
@@ -285,9 +285,11 @@ export default function EmployeeSummary() {
     enabled: !!user?.factory_id,
   })
 
+  const periods = useMemo(() => filterActivePeriods(rawPeriods), [rawPeriods])
+
   // Set default period once loaded
   useEffect(() => {
-    if (periods.length > 0 && !selectedPeriodId) {
+    if (periods.length > 0 && (!selectedPeriodId || !periods.some(p => p.id === selectedPeriodId))) {
       setSelectedPeriodId(periods[0].id)
     }
   }, [periods, selectedPeriodId])

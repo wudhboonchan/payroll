@@ -6,7 +6,7 @@ import { useAppStore } from '../store/useAppStore'
 import { TopBar } from '../components/layout/TopBar'
 import { toast } from 'sonner'
 import { ChevronLeft, ChevronRight, Save, X, Clock, Clock4, CheckSquare, Search } from 'lucide-react'
-import { compareEmployeeCode } from '../lib/formatters'
+import { compareEmployeeCode, filterActivePeriods } from '../lib/formatters'
 import '../styles/tokens.css'
 
 // ── helpers ────────────────────────────────────────────────────────────
@@ -87,14 +87,14 @@ export default function ShiftEntry() {
   }, [selectedIds.size > 0]) // re-measure when selection bar appears/disappears
 
   // ── periods ──
-  const { data: periods = [] } = useQuery<Period[]>({
+  const { data: rawPeriods = [] } = useQuery<Period[]>({
     queryKey: ['periods', user?.factory_id],
     queryFn: async () => {
       const { data, error } = await supabase.from('payroll_periods').select('*').eq('factory_id', user?.factory_id ?? '').order('period_start', { ascending: false })
       if (error) throw error; return data
     }, enabled: !!user?.factory_id,
   })
-
+  const periods = useMemo(() => filterActivePeriods(rawPeriods), [rawPeriods])
   const currentPeriod = periods[0]
   const periodStart = currentPeriod ? parseLocal(currentPeriod.period_start) : new Date()
   const periodEnd   = currentPeriod ? parseLocal(currentPeriod.period_end)   : new Date()

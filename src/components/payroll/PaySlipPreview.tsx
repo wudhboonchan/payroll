@@ -143,7 +143,6 @@ export const PaySlipPreview = forwardRef<HTMLDivElement, PaySlipPreviewProps>(({
         <div>
           <h1 style={S.companyName}>ห้างหุ้นส่วนจำกัด วิราญกร</h1>
           <p style={S.companyAddr}>เลขที่ 64 หมู่ 1 ตำบลบ้านธาตุ อำเภอแก่งคอย จังหวัดสระบุรี 18110 (สำนักงานใหญ่)</p>
-          <p style={{ ...S.companyAddr, marginTop: '2px' }}>เลขประจำตัวผู้เสียภาษี: <strong>0193554000514</strong></p>
         </div>
       </div>
 

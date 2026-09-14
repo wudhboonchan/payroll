@@ -25,8 +25,8 @@ export function TopBar({ title, subtitle, onMenuClick }: TopBarProps) {
     }}>
       <button
         onClick={onMenuClick}
-        className="md:hidden"
-        style={{ padding: 6, background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--vk-ink-2)', display: 'flex' }}
+        className="flex md:hidden items-center"
+        style={{ padding: 6, background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--vk-ink-2)' }}
       >
         <Menu style={{ width: 20, height: 20 }} />
       </button>

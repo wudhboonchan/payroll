@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useOutletContext, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
@@ -6,6 +6,7 @@ import { useAppStore } from '../store/useAppStore'
 import { TopBar } from '../components/layout/TopBar'
 import { toast } from 'sonner'
 import { Plus, CheckCircle, XCircle, Pencil, Check, X, Trash2, ArrowUpDown, ArrowUp, ArrowDown, ShieldAlert, ShieldCheck, AlertTriangle, ExternalLink } from 'lucide-react'
+import { filterActivePeriods } from '../lib/formatters'
 import '../styles/tokens.css'
 
 interface PayrollPeriod { id: string; label: string; period_start: string; period_end: string; status: string; social_security_rate: number; approved_by: string | null; approver?: { full_name: string | null } | null }
@@ -75,7 +76,7 @@ export default function Dashboard() {
   const [ssRateDraft, setSSRateDraft] = useState('')
   const [channelSort, setChannelSort] = useState<{ key: 'channel' | 'count' | 'total'; dir: 'asc' | 'desc' }>({ key: 'total', dir: 'desc' })
 
-  const { data: periods = [] } = useQuery<PayrollPeriod[]>({
+  const { data: rawPeriods = [] } = useQuery<PayrollPeriod[]>({
     queryKey: ['periods', user?.factory_id],
     queryFn: async () => {
       const { data, error } = await supabase.from('payroll_periods')
@@ -88,6 +89,7 @@ export default function Dashboard() {
     staleTime: 0,
   })
 
+  const periods = useMemo(() => filterActivePeriods(rawPeriods), [rawPeriods])
   const activePeriod = periods.find(p => p.id === selectedPeriodId) ?? periods[0]
   const isApproved = activePeriod?.status === 'approved'
 

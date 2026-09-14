@@ -9,7 +9,7 @@ import { toast } from 'sonner'
 import type { Job, WageProfile } from '../features/tpi/model'
 import { localDate, isTpiCompany } from '../features/tpi/model'
 import { demoJobs } from '../features/tpi/demoData'
-import { compareEmployeeCode, formatThaiDateDDMMYYYY } from '../lib/formatters'
+import { compareEmployeeCode, formatThaiDateDDMMYYYY, filterActivePeriods } from '../lib/formatters'
 import { ThaiDatePicker } from '../components/common/ThaiDatePicker'
 import '../styles/tokens.css'
 
@@ -208,13 +208,14 @@ export default function Advances() {
     setEmpSearch('')
   }
 
-  const { data: periods = [] } = useQuery<any[]>({
+  const { data: rawPeriods = [] } = useQuery<any[]>({
     queryKey: ['periods', user?.factory_id],
     queryFn: async () => {
       const { data, error } = await supabase.from('payroll_periods').select('*').eq('factory_id', user?.factory_id ?? '').order('period_start', { ascending: false })
       if (error) throw error; return data
     }, enabled: !!user?.factory_id,
   })
+  const periods = useMemo(() => filterActivePeriods(rawPeriods), [rawPeriods])
   const currentPeriod = periods[0]
   const prevPeriod = periods[1] ?? null
 
@@ -583,29 +584,31 @@ export default function Advances() {
       amount: '714.00',
       custom_notes: '',
     })
-    setDiscLookupResult(null)
-    setIsDiscManualOverride(false)
     setDiscEmpSearch('')
     setIsDiscModalOpen(true)
   }
 
   const closeDiscModal = () => {
     setIsDiscModalOpen(false)
-    setDiscLookupResult(null)
-    setIsDiscManualOverride(false)
     setDiscEmpSearch('')
   }
 
   const handleSelectDiscEmployee = (empId: string) => {
-    setDiscForm((prev) => ({ ...prev, employee_id: empId }))
-    lookupFirstShiftForDeduction('disc', empId, discForm.work_date)
+    const prof = wageProfiles.find((p) => p.employee_id === empId)
+    const isSkilled = prof?.rate_tier === 'skilled'
+    const tier: 'normal' | 'skilled' = isSkilled ? 'skilled' : 'normal'
+    const base = isSkilled ? (prof?.daily_rate && prof.daily_rate > 357 ? prof.daily_rate : 377) : 357
+    setDiscForm((prev) => ({
+      ...prev,
+      employee_id: empId,
+      rate_tier: tier,
+      base_rate: base,
+      amount: (base * 2).toFixed(2),
+    }))
   }
 
   const handleDiscDateChange = (newDate: string) => {
     setDiscForm((prev) => ({ ...prev, work_date: newDate }))
-    if (discForm.employee_id) {
-      lookupFirstShiftForDeduction('disc', discForm.employee_id, newDate)
-    }
   }
 
   const handleDiscJobChange = (jobId: string) => {
@@ -627,13 +630,12 @@ export default function Advances() {
   }
 
   const handleDiscTierChange = (tier: 'normal' | 'skilled' | 'custom') => {
-    const job = jobs.find((j) => j.id === discForm.job_id)
+    const prof = wageProfiles.find((p) => p.employee_id === discForm.employee_id)
     let base = discForm.base_rate
     if (tier === 'normal') {
-      base = job?.normal_rate || 357
+      base = 357
     } else if (tier === 'skilled') {
-      const isClerk = job?.job_group === 'clerk' || (job?.code && ['692021', '692032', '692041', '692050'].includes(job.code.trim()))
-      base = job?.skilled_rate ?? (isClerk ? 377 : (job?.normal_rate || 357))
+      base = prof?.daily_rate && prof.daily_rate > 357 ? prof.daily_rate : 377
     }
     setDiscForm((prev) => ({
       ...prev,
@@ -654,15 +656,10 @@ export default function Advances() {
   const saveDiscMutation = useMutation({
     mutationFn: async () => {
       if (!discForm.employee_id) throw new Error('กรุณาเลือกพนักงาน')
-      if (!discForm.job_id) throw new Error('กรุณาเลือกรหัสงาน')
       if (!discForm.amount || parseFloat(discForm.amount) <= 0) throw new Error('กรุณาระบุจำนวนเงินที่ถูกต้อง')
-      const job = jobs.find((j) => j.id === discForm.job_id)
-      const jobCode = job?.code || discLookupResult?.job_code || ''
-      const jobDesc = job?.description ? ` — ${job.description}` : (discLookupResult?.job_desc ? ` — ${discLookupResult.job_desc}` : '')
       const tierLabel = discForm.rate_tier === 'skilled' ? 'ค่าแรงฝีมือ' : discForm.rate_tier === 'custom' ? 'กำหนดเอง' : 'ปกติ'
-      const shiftInfo = discLookupResult?.source === 'shift' && discLookupResult.shift_name ? ` (${discLookupResult.shift_name})` : ''
       const formattedWorkDate = formatThaiDateDDMMYYYY(discForm.work_date)
-      const noteStr = `[ลงโทษ ขาดงานไม่มีคนแทน] วันที่: ${formattedWorkDate} | กะแรก: ${jobCode}${jobDesc}${shiftInfo} (${tierLabel} ฿${discForm.base_rate}) (หัก 2 เท่า = ฿${discForm.amount})${discForm.custom_notes ? ` | ${discForm.custom_notes}` : ''}`
+      const noteStr = `[ลงโทษ ขาดงานไม่มีคนแทน] วันที่: ${formattedWorkDate} (${tierLabel} ฿${discForm.base_rate}) (หัก 2 เท่า = ฿${discForm.amount})${discForm.custom_notes ? ` | ${discForm.custom_notes}` : ''}`
 
       const { error } = await supabase.from('advance_payments').insert({
         period_id: currentPeriod.id,
@@ -1783,7 +1780,7 @@ export default function Advances() {
                 </button>
               </div>
               <div style={{ fontSize: 12, opacity: 0.9, marginTop: 4 }}>
-                ระบบดึงข้อมูลกะแรกในวันเกิดเหตุตามรายงานจาก HR และคำนวณหัก 2 เท่า เพื่อนำไปหักในงวดปัจจุบัน ({currentPeriod?.label})
+                คำนวณหัก 2 เท่าของอัตราค่าแรงในวันเกิดเหตุตามรายงานจาก HR เพื่อนำไปหักในงวดปัจจุบัน ({currentPeriod?.label})
               </div>
             </div>
 
@@ -1958,186 +1955,19 @@ export default function Advances() {
                   required
                 />
                 <div style={{ fontSize: 11, color: 'var(--vk-ink-3)', marginTop: 4 }}>
-                  ระบุวันที่เกิดเหตุในอดีต ระบบจะดึงข้อมูลกะแรกของวันนั้นให้อัตโนมัติ
+                  ระบุวันที่เกิดเหตุตามรายงานจาก HR
                 </div>
               </div>
 
-              {/* 3. Shift Lookup Result & Job Selection */}
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <label className="vk-eyebrow">
-                    3. ข้อมูลกะแรกในวันนั้น (ระบบดึงอัตโนมัติ)
-                  </label>
-                  {discLookupResult?.source === 'shift' && (
-                    <button
-                      type="button"
-                      onClick={() => setIsDiscManualOverride(!isDiscManualOverride)}
-                      style={{
-                        background: 'none',
-                        border: 'none',
-                        color: '#c2410c',
-                        fontSize: 11,
-                        cursor: 'pointer',
-                        textDecoration: 'underline',
-                        padding: 0,
-                      }}
-                    >
-                      {isDiscManualOverride ? 'ซ่อนการเปลี่ยนรหัสงาน' : 'เปลี่ยนรหัสงาน'}
-                    </button>
-                  )}
-                </div>
-
-                {!discForm.employee_id ? (
-                  <div
-                    style={{
-                      background: 'var(--vk-paper)',
-                      border: '1px dashed var(--vk-rule)',
-                      padding: '16px',
-                      borderRadius: 6,
-                      textAlign: 'center',
-                      fontSize: 12,
-                      color: 'var(--vk-ink-3)',
-                    }}
-                  >
-                    กรุณาเลือกพนักงานเพื่อดึงข้อมูลกะแรกในวันที่ระบุ
-                  </div>
-                ) : discLookupLoading ? (
-                  <div
-                    style={{
-                      background: '#fff7ed',
-                      border: '1px solid #fdba74',
-                      padding: '16px',
-                      borderRadius: 6,
-                      textAlign: 'center',
-                      fontSize: 12,
-                      color: '#c2410c',
-                      fontWeight: 600,
-                    }}
-                  >
-                    กำลังดึงข้อมูลกะแรกของวันที่ {formatThaiDateDDMMYYYY(discForm.work_date)}...
-                  </div>
-                ) : discLookupResult?.source === 'shift' ? (
-                  <div
-                    style={{
-                      background: '#fff',
-                      border: '1px solid #fdba74',
-                      borderRadius: 6,
-                      padding: '12px 14px',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 8,
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <span
-                          style={{
-                            background: '#dcfce7',
-                            color: '#166534',
-                            border: '1px solid #86efac',
-                            fontSize: 10,
-                            fontWeight: 700,
-                            padding: '1px 6px',
-                            borderRadius: 4,
-                          }}
-                        >
-                          ✓ พบตารางกะในระบบ
-                        </span>
-                        <span style={{ fontSize: 12, fontWeight: 700, color: '#9a3412' }}>
-                          {discLookupResult.shift_name}
-                        </span>
-                      </div>
-                      <span style={{ fontSize: 11, color: 'var(--vk-ink-3)' }}>
-                        {discForm.rate_tier === 'skilled' ? 'ระดับค่าแรงฝีมือ' : 'ระดับค่าแรงปกติ'}
-                      </span>
-                    </div>
-
-                    <div style={{ fontSize: 13, color: 'var(--vk-ink)', fontWeight: 600 }}>
-                      หน้าที่ / รหัสงาน: <span style={{ color: '#c2410c', fontFamily: 'var(--vk-mono)' }}>{discLookupResult.job_code}</span> {discLookupResult.job_desc ? `— ${discLookupResult.job_desc}` : ''}
-                    </div>
-
-                    {isDiscManualOverride && (
-                      <div
-                        style={{
-                          marginTop: 6,
-                          padding: '10px',
-                          background: 'var(--vk-bone)',
-                          borderRadius: 4,
-                          border: '1px solid var(--vk-rule-soft)',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: 6,
-                        }}
-                      >
-                        <label className="vk-eyebrow" style={{ display: 'block', fontSize: 10 }}>
-                          เลือกรหัสงานอื่น
-                        </label>
-                        <select
-                          className="vk-input"
-                          style={{ fontSize: 12, padding: '4px 8px' }}
-                          value={discForm.job_id}
-                          onChange={(e) => handleDiscJobChange(e.target.value)}
-                        >
-                          {jobs.map((j) => (
-                            <option key={j.id} value={j.id}>
-                              {j.code} {j.description ? `— ${j.description}` : ''} (ปกติ ฿{j.normal_rate}{j.skilled_rate ? `/ฝีมือ ฿${j.skilled_rate}` : ''})
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div
-                    style={{
-                      background: '#fff7ed',
-                      border: '1px solid #fdba74',
-                      borderRadius: 6,
-                      padding: '12px 14px',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 8,
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#c2410c', fontWeight: 700, fontSize: 12 }}>
-                      <AlertTriangle style={{ width: 16, height: 16, flexShrink: 0 }} />
-                      ไม่พบข้อมูลกะของพนักงานในระบบในวันที่ระบุ
-                    </div>
-                    <div style={{ fontSize: 11, color: 'var(--vk-ink-2)', lineHeight: 1.4 }}>
-                      พนักงานอาจยังไม่ได้ลงบันทึกกะ หรือไม่ได้ลงเวลาทำงานในวันดังกล่าว กรุณาเลือกรหัสงานและกำหนดอัตราค่าแรงด้วยตนเอง (Manual)
-                    </div>
-                    <div>
-                      <label className="vk-eyebrow" style={{ display: 'block', marginBottom: 4, fontSize: 10 }}>
-                        เลือกรหัสงานที่ต้องการ <span style={{ color: '#c2410c' }}>*</span>
-                      </label>
-                      <select
-                        className="vk-input"
-                        value={discForm.job_id}
-                        onChange={(e) => handleDiscJobChange(e.target.value)}
-                        style={{ borderColor: !discForm.job_id ? '#f97316' : undefined }}
-                      >
-                        <option value="" disabled>-- กรุณาเลือกรหัสงาน --</option>
-                        {jobs.map((j) => (
-                          <option key={j.id} value={j.id}>
-                            {j.code} {j.description ? `— ${j.description}` : ''} (ปกติ ฿{j.normal_rate}{j.skilled_rate ? `/ฝีมือ ฿${j.skilled_rate}` : ''})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* 4. Wage Tier (Matching uploaded screenshot) */}
+              {/* 3. Wage Tier */}
               <div>
                 <label className="vk-eyebrow" style={{ display: 'block', marginBottom: 6 }}>
-                  4. อัตราค่าแรงในวันนั้น
+                  3. อัตราค่าแรงในวันนั้น
                 </label>
                 {(() => {
-                  const job = jobs.find((j) => j.id === discForm.job_id)
-                  const normalRate = job?.normal_rate ?? 357
-                  const isClerk = job?.job_group === 'clerk' || (job?.code && ['692021', '692032', '692041', '692050'].includes(job.code.trim()))
-                  const skilledRate = job?.skilled_rate ?? (isClerk ? 377 : normalRate)
+                  const prof = wageProfiles.find((p) => p.employee_id === discForm.employee_id)
+                  const normalRate = 357
+                  const skilledRate = prof?.daily_rate && prof.daily_rate > 357 ? prof.daily_rate : 377
                   return (
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
                       <label
@@ -2241,7 +2071,7 @@ export default function Advances() {
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
                   <div>
                     <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#9a3412', fontWeight: 700 }}>
-                      อัตราค่าแรงกะแรกในวันนั้น
+                      อัตราค่าแรงในวันนั้น
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
                       <span style={{ fontSize: 13, color: '#7c2d12' }}>฿</span>
@@ -2280,14 +2110,14 @@ export default function Advances() {
                 </div>
 
                 <div style={{ fontSize: 11, color: '#9a3412', borderTop: '1px dashed #fdba74', paddingTop: 8 }}>
-                  💡 ขาดงานไม่มีคนแทน หัก 2 เท่าของค่าแรงกะแรกในวันนั้นตามกฎระเบียบวินัย ({discForm.base_rate} × 2 = ฿{discForm.amount})
+                  💡 ขาดงานไม่มีคนแทน หัก 2 เท่าของค่าแรงในวันนั้นตามกฎระเบียบวินัย ({discForm.base_rate} × 2 = ฿{discForm.amount})
                 </div>
               </div>
 
-              {/* 5. Custom Notes */}
+              {/* 4. Custom Notes */}
               <div>
                 <label className="vk-eyebrow" style={{ display: 'block', marginBottom: 5 }}>
-                  5. หมายเหตุเพิ่มเติม / เลขที่รายงาน HR (ระบุหรือไม่ก็ได้)
+                  4. หมายเหตุเพิ่มเติม / เลขที่รายงาน HR (ระบุหรือไม่ก็ได้)
                 </label>
                 <input
                   className="vk-input"
@@ -2318,7 +2148,7 @@ export default function Advances() {
                   border: 'none',
                   fontWeight: 700,
                 }}
-                disabled={saveDiscMutation.isPending || !discForm.employee_id || !discForm.job_id || parseFloat(discForm.amount) <= 0 || discLookupLoading}
+                disabled={saveDiscMutation.isPending || !discForm.employee_id || parseFloat(discForm.amount) <= 0}
                 onClick={() => saveDiscMutation.mutate()}
               >
                 {saveDiscMutation.isPending ? 'กำลังบันทึก...' : `ยืนยันบันทึกหักเงิน ฿ ${discForm.amount}`}

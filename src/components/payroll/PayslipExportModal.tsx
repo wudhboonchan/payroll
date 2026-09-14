@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -15,7 +15,7 @@ import { useAppStore } from '../../store/useAppStore'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
-import { compareEmployeeCode, formatThaiDateDDMMYYYY } from '../../lib/formatters'
+import { compareEmployeeCode, formatThaiDateDDMMYYYY, filterActivePeriods } from '../../lib/formatters'
 import type { PaySlipData } from './PaySlipPreview'
 
 type Props = {
@@ -77,7 +77,7 @@ export default function PayslipExportModal({ isOpen, onClose, uniqueMonths }: Pr
   const [isGenerating, setIsGenerating] = useState(false)
 
   // We need to fetch periods again to map month names back to period IDs
-  const { data: periods = [] } = useQuery({
+  const { data: rawPeriods = [] } = useQuery({
     queryKey: ['periods', user?.factory_id],
     queryFn: async () => {
       if (!user?.factory_id) return []
@@ -92,9 +92,11 @@ export default function PayslipExportModal({ isOpen, onClose, uniqueMonths }: Pr
     enabled: isOpen && !!user?.factory_id
   })
 
+  const periods = useMemo(() => filterActivePeriods(rawPeriods), [rawPeriods])
+
   // Initialize selectedPeriodId when data loads
   useEffect(() => {
-    if (periods.length > 0 && !selectedPeriodId) {
+    if (periods.length > 0 && (!selectedPeriodId || !periods.some(p => p.id === selectedPeriodId))) {
       setSelectedPeriodId(periods[0].id)
     }
   }, [periods, selectedPeriodId])

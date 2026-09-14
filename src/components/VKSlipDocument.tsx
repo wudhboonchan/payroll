@@ -24,7 +24,6 @@ export interface VKSlipDocumentProps {
   logoSrc?: string
   companyName?: string          // "ห้างหุ้นส่วนจำกัด วิราญกร" etc.
   companyAddress?: string
-  taxId?: string
   generatedAt?: string          // pre-formatted string; defaults to now
 
   // Employee band
@@ -67,7 +66,6 @@ export function VKSlipDocument({
   logoSrc = '/logo.png',
   companyName = 'ห้างหุ้นส่วนจำกัด วิราญกร',
   companyAddress = 'เลขที่ 64 หมู่ 1 ตำบลบ้านธาตุ อำเภอแก่งคอย จังหวัดสระบุรี 18110',
-  taxId = '0193554000514',
   generatedAt,
   employeeName,
   employeeCode,
@@ -107,8 +105,7 @@ export function VKSlipDocument({
               {companyName}
             </div>
             <div style={{ fontSize: 11, color: '#888', marginTop: 4, lineHeight: 1.7 }}>
-              {companyAddress}<br />
-              เลขประจำตัวผู้เสียภาษี: <span style={{ color: '#555', fontWeight: 600 }}>{taxId}</span>
+              {companyAddress}
             </div>
           </div>
         </div>
@@ -125,13 +122,8 @@ export function VKSlipDocument({
       <div style={{ background: '#f7f7f7', borderBottom: '1px solid #e8e8e8', display: 'grid', gridTemplateColumns: '1fr 380px', gap: 0 }}>
         <div style={{ padding: '14px 28px' }}>
           <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#aaa', marginBottom: 5 }}>พนักงาน</div>
-          <div style={{ fontWeight: 700, fontSize: 17, color: '#1a1a1a', letterSpacing: '-0.01em', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-            <span>{employeeName}</span>
-            {isSkilled && (
-              <span title="พนักงานค่าแรงฝีมือ" style={{ fontSize: 15, flexShrink: 0 }}>
-                ⭐
-              </span>
-            )}
+          <div style={{ fontWeight: 700, fontSize: 17, color: '#1a1a1a', letterSpacing: '-0.01em' }}>
+            {employeeName}
           </div>
           <div style={{ fontSize: 11, color: '#777', marginTop: 3 }}>
             <span style={{ fontFamily: 'monospace' }}>{employeeCode}</span>
@@ -167,27 +159,38 @@ export function VKSlipDocument({
           <div style={{ padding: '10px 24px', background: '#fafafa', borderBottom: '1px solid #e8e8e8' }}>
             <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#777' }}>รายได้</span>
           </div>
-          <div style={{ flex: 1, padding: '0 24px' }}>
-            {income.map((r, i) => (
-              <div key={i} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, padding: '9px 0 2px' }}>
-                  <span style={{ fontSize: 13, color: '#1a1a1a', fontWeight: 500, whiteSpace: 'pre-line' }}>{r.label}</span>
-                  <span style={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 600, color: '#1a1a1a', whiteSpace: 'nowrap' }}>{mono(r.value)}</span>
-                </div>
-                {r.detail && (
-                  <div style={{ fontFamily: 'monospace', fontSize: 10, color: '#b44a2a', paddingBottom: 5 }}>{r.detail}</div>
-                )}
-                {r.subs?.map((sub, si) => (
-                  <div key={si} style={{ display: 'flex', gap: 6, padding: '3px 0 3px 8px', alignItems: 'center' }}>
-                    <span style={{ fontSize: 10, color: '#bbb', flexShrink: 0 }}>·</span>
-                    <span style={{ fontSize: 11, color: '#999', flex: 1 }}>{sub}</span>
+          <div style={{ flex: 1, padding: '6px 24px 14px', minHeight: 180, display: 'flex', flexDirection: 'column' }}>
+            {income.map((r, i) => {
+              const hasExtra = !!(r.detail || (r.subs && r.subs.length > 0))
+              const isLast = i === income.length - 1
+              return (
+                <div key={i} style={{ borderBottom: isLast ? 'none' : '1px solid #f0f0f0' }}>
+                  <div style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'baseline',
+                    gap: 12,
+                    paddingTop: 10,
+                    paddingBottom: hasExtra ? 4 : 10,
+                  }}>
+                    <span style={{ fontSize: 13, color: '#1a1a1a', fontWeight: 500, lineHeight: 1.5, whiteSpace: 'pre-line' }}>{r.label}</span>
+                    <span style={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 600, color: '#1a1a1a', lineHeight: 1.5, whiteSpace: 'nowrap' }}>{mono(r.value)}</span>
                   </div>
-                ))}
-                {(r.subs?.length ?? 0) > 0 && <div style={{ paddingBottom: 6 }} />}
-              </div>
-            ))}
+                  {r.detail && (
+                    <div style={{ fontFamily: 'monospace', fontSize: 10, color: '#b44a2a', paddingBottom: 6, lineHeight: 1.4 }}>{r.detail}</div>
+                  )}
+                  {r.subs?.map((sub, si) => (
+                    <div key={si} style={{ display: 'flex', gap: 6, padding: '2px 0 3px 8px', alignItems: 'center' }}>
+                      <span style={{ fontSize: 10, color: '#bbb', flexShrink: 0 }}>·</span>
+                      <span style={{ fontSize: 11, color: '#888', flex: 1, lineHeight: 1.4 }}>{sub}</span>
+                    </div>
+                  ))}
+                  {(r.subs?.length ?? 0) > 0 && <div style={{ paddingBottom: 6 }} />}
+                </div>
+              )
+            })}
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '11px 24px', background: '#f7f7f7', borderTop: '1px solid #e8e8e8', marginTop: 'auto' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 24px', background: '#f7f7f7', borderTop: '1px solid #e8e8e8', marginTop: 'auto' }}>
             <span style={{ fontSize: 11, fontWeight: 700, color: '#555', letterSpacing: '0.04em' }}>รวมรายได้</span>
             <span style={{ fontFamily: 'monospace', fontWeight: 800, fontSize: 14, color: '#1a7a3c' }}>{mono(totalIncome)}</span>
           </div>
@@ -198,30 +201,41 @@ export function VKSlipDocument({
           <div style={{ padding: '10px 24px', background: '#fafafa', borderBottom: '1px solid #e8e8e8' }}>
             <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#777' }}>รายการหัก</span>
           </div>
-          <div style={{ flex: 1, padding: '0 24px' }}>
+          <div style={{ flex: 1, padding: '6px 24px 14px', minHeight: 180, display: 'flex', flexDirection: 'column' }}>
             {deductions.length === 0
-              ? <div style={{ padding: '9px 0', fontSize: 12, color: '#bbb' }}>ไม่มีรายการหัก</div>
-              : deductions.map((r, i) => (
-                <div key={i} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, padding: '9px 0 2px' }}>
-                    <span style={{ fontSize: 13, color: '#1a1a1a', fontWeight: 500, whiteSpace: 'pre-line' }}>{r.label}</span>
-                    <span style={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 600, color: '#c0392b', whiteSpace: 'nowrap' }}>{mono(r.value)}</span>
-                  </div>
-                  {r.detail && (
-                    <div style={{ fontFamily: 'monospace', fontSize: 10, color: '#b44a2a', paddingBottom: 5, wordBreak: 'break-word', whiteSpace: 'normal' }}>{r.detail}</div>
-                  )}
-                  {r.subs?.map((sub, si) => (
-                    <div key={si} style={{ display: 'flex', gap: 6, padding: '3px 0 3px 8px', alignItems: 'center' }}>
-                      <span style={{ fontSize: 10, color: '#bbb', flexShrink: 0 }}>·</span>
-                      <span style={{ fontSize: 11, color: '#999', flex: 1, wordBreak: 'break-word', whiteSpace: 'normal' }}>{sub}</span>
+              ? <div style={{ padding: '16px 0', fontSize: 12, color: '#bbb' }}>ไม่มีรายการหัก</div>
+              : deductions.map((r, i) => {
+                const hasExtra = !!(r.detail || (r.subs && r.subs.length > 0))
+                const isLast = i === deductions.length - 1
+                return (
+                  <div key={i} style={{ borderBottom: isLast ? 'none' : '1px solid #f0f0f0' }}>
+                    <div style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'baseline',
+                      gap: 12,
+                      paddingTop: 10,
+                      paddingBottom: hasExtra ? 4 : 10,
+                    }}>
+                      <span style={{ fontSize: 13, color: '#1a1a1a', fontWeight: 500, lineHeight: 1.5, whiteSpace: 'pre-line' }}>{r.label}</span>
+                      <span style={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 600, color: '#c0392b', lineHeight: 1.5, whiteSpace: 'nowrap' }}>{mono(r.value)}</span>
                     </div>
-                  ))}
-                  {(r.subs?.length ?? 0) > 0 && <div style={{ paddingBottom: 6 }} />}
-                </div>
-              ))
+                    {r.detail && (
+                      <div style={{ fontFamily: 'monospace', fontSize: 10, color: '#b44a2a', paddingBottom: 6, lineHeight: 1.4, wordBreak: 'break-word', whiteSpace: 'normal' }}>{r.detail}</div>
+                    )}
+                    {r.subs?.map((sub, si) => (
+                      <div key={si} style={{ display: 'flex', gap: 6, padding: '2px 0 3px 8px', alignItems: 'center' }}>
+                        <span style={{ fontSize: 10, color: '#bbb', flexShrink: 0 }}>·</span>
+                        <span style={{ fontSize: 11, color: '#888', flex: 1, lineHeight: 1.4, wordBreak: 'break-word', whiteSpace: 'normal' }}>{sub}</span>
+                      </div>
+                    ))}
+                    {(r.subs?.length ?? 0) > 0 && <div style={{ paddingBottom: 6 }} />}
+                  </div>
+                )
+              })
             }
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '11px 24px', background: '#f7f7f7', borderTop: '1px solid #e8e8e8', marginTop: 'auto' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 24px', background: '#f7f7f7', borderTop: '1px solid #e8e8e8', marginTop: 'auto' }}>
             <span style={{ fontSize: 11, fontWeight: 700, color: '#555', letterSpacing: '0.04em' }}>รวมรายการหัก</span>
             <span style={{ fontFamily: 'monospace', fontWeight: 800, fontSize: 14, color: '#c0392b' }}>{mono(totalDeduct)}</span>
           </div>

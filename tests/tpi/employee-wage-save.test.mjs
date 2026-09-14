@@ -29,9 +29,9 @@ function setup(tier, profileError = null, skilledFrom = '2026-09-07') {
       },
     }
   } }
-  const save = new Function('supabase', 'queryClient', 'user', 'employeeId', 'isTpi', 'tpiRateTier', 'tpiJobCode', 'tpiJobId', 'tpiSkilledFrom', 'normalizePrefix', `${js}; return save`)(
+  const save = new Function('supabase', 'queryClient', 'user', 'employeeId', 'isTpi', 'tpiRateTier', 'tpiJobCode', 'tpiJobId', 'tpiSkilledFrom', 'normalizePrefix', 'cleanEmployeeNameData', `${js}; return save`)(
     supabase, { setQueryData: (...args) => cache.push(args) }, { factory_id: 'factory' }, 'employee', true,
-    tier, '692021', 'job-id', skilledFrom, value => value,
+    tier, '692021', 'job-id', skilledFrom, value => value, data => data,
   )
   return { save, writes, cache }
 }

@@ -15,7 +15,7 @@ import {
 import { calculateTpiPayroll, isEndOfMonthPeriod } from '../features/tpi/payrollCalc'
 import type { AttendanceLog } from '../features/tpi/attendanceApi'
 import { loadMonthlyAttendanceLogs, getAttendanceTypeLabel, formatAttendanceSummary } from '../features/tpi/attendanceApi'
-import { formatEmployeeFullName, formatThaiDateDDMMYYYY, formatThaiDateShort, formatMonthlyCycleRange } from '../lib/formatters'
+import { formatEmployeeFullName, formatThaiDateDDMMYYYY, formatThaiDateShort, formatMonthlyCycleRange, filterActivePeriods } from '../lib/formatters'
 import { employeeWageForm } from '../features/tpi/employeeWageForm'
 import { referenceJobs } from '../features/tpi/referenceJobs'
 import '../styles/tokens.css'
@@ -98,7 +98,6 @@ export default function TpiPayrollEntry() {
   const [empSearch, setEmpSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'saved' | 'outdated' | 'unsaved' | null>(null)
   const [showDailyBreakdown, setShowDailyBreakdown] = useState<boolean>(true)
-  const [selectedPeriodId, setSelectedPeriodId] = useState<string>('')
   // Inactive/expired job warning modal state
   const [inactiveJobWarning, setInactiveJobWarning] = useState<{
     empName: string
@@ -111,7 +110,7 @@ export default function TpiPayrollEntry() {
   const dismissedWarningEmpIds = React.useRef<Set<string>>(new Set())
 
   // ── 1. Payroll Periods ──
-  const { data: periods = [] } = useQuery<any[]>({
+  const { data: rawPeriods = [] } = useQuery<any[]>({
     queryKey: ['periods', user?.factory_id],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -125,12 +124,13 @@ export default function TpiPayrollEntry() {
     enabled: !!user?.factory_id,
   })
 
+  // Filter out future placeholder periods
+  const periods = useMemo(() => filterActivePeriods(rawPeriods), [rawPeriods])
+
   const currentPeriod = useMemo(() => {
-    if (selectedPeriodId) {
-      return periods.find(p => p.id === selectedPeriodId) || periods[0] || null
-    }
-    return periods[0] || null
-  }, [periods, selectedPeriodId])
+    if (periods.length === 0) return null
+    return periods[0]
+  }, [periods])
 
   // ── 2. Active Employees in TPI ──
   const { data: employees = [] } = useQuery<Employee[]>({
@@ -698,6 +698,8 @@ export default function TpiPayrollEntry() {
     <>
       <TopBar title="กรอกค่าจ้าง" subtitle={currentPeriod?.label} onMenuClick={onMenuClick} />
 
+
+
       {/* ── Inactive / Expired Job Warning Modal ── */}
       {inactiveJobWarning && (
         <div style={{
@@ -768,26 +770,7 @@ export default function TpiPayrollEntry() {
         </div>
       )}
 
-      {/* ── Period Selector & Simulation Banner ── */}
-      <div style={{ background: '#fff7ed', borderBottom: '1px solid #fed7aa', padding: '10px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, color: '#9a3412' }}>
-            <span>งวดจ่ายเงินเดือน:</span>
-            <select
-              value={currentPeriod?.id || ''}
-              onChange={e => setSelectedPeriodId(e.target.value)}
-              style={{ fontSize: 12, padding: '3px 8px', borderRadius: 4, border: '1px solid #fdba74', background: '#ffffff', color: '#7c2d12', fontWeight: 600 }}
-            >
-              {periods.map(p => (
-                <option key={p.id} value={p.id}>
-                  {p.label || `${p.period_start} ถึง ${p.period_end}`}
-                </option>
-              ))}
-            </select>
-          </div>
 
-        </div>
-      </div>
 
       <div className="vk-split">
         {/* Left panel — Employee List */}

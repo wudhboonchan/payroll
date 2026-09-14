@@ -18,6 +18,8 @@ import {
   UserX,
   ShieldAlert,
   AlertTriangle,
+  Calendar,
+  Check,
 } from 'lucide-react'
 import type { Job, Employee, Entry, QuotaStatus } from '../features/tpi/model'
 import { AttendanceModal } from '../features/tpi/AttendanceModal'
@@ -32,13 +34,21 @@ import {
   usage,
   getJobQuotaStatus,
   calculateEntryOt,
+  getShiftOtTimeRange,
 } from '../features/tpi/model'
 import { getMainDepartment, cleanJobNotes } from '../features/tpi/referenceJobs'
 import { employeeWageForm } from '../features/tpi/employeeWageForm'
 import { demoJobs, demoEmployees, demoWageProfiles, demoInitialEntries } from '../features/tpi/demoData'
-import { loadDay, saveDay, errorMessage } from '../features/tpi/api'
-import { formatThaiBuddhistDate, compareEmployeeCode } from '../lib/formatters'
+import { loadDay, saveDay, preassignShifts, errorMessage } from '../features/tpi/api'
+import { formatThaiBuddhistDate, compareEmployeeCode, formatPeriodLabel, filterActivePeriods } from '../lib/formatters'
 import { ThaiDatePicker } from '../components/common/ThaiDatePicker'
+import type { SafetyIncident } from '../features/tpi/safetyFines'
+import {
+  groupSafetyAdvancesToIncidents,
+  formatIsoToThaiDate,
+  formatSafetyFineNote,
+  calculateFineInstallments,
+} from '../features/tpi/safetyFines'
 import '../styles/tokens.css'
 import './TpiShiftEntry.css'
 
@@ -243,9 +253,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
   const queryClient = useQueryClient()
 
   // ── Periods & Dates ────────────────────────────────────────────────
-  const [selectedPeriodId, setSelectedPeriodId] = useState<string>('')
-
-  const { data: periods = [] } = useQuery<Period[]>({
+  const { data: rawPeriods = [] } = useQuery<Period[]>({
     queryKey: ['periods', user?.factory_id],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -259,12 +267,8 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
     enabled: !!user?.factory_id && !preview,
   })
 
-  const currentPeriod = useMemo(() => {
-    if (selectedPeriodId) {
-      return periods.find((p) => p.id === selectedPeriodId) || periods[0] || null
-    }
-    return periods[0] || null
-  }, [periods, selectedPeriodId])
+  const periods = useMemo(() => filterActivePeriods(rawPeriods), [rawPeriods])
+  const currentPeriod = periods[0] || null
 
   const periodStart = currentPeriod ? parseLocal(currentPeriod.period_start) : new Date(new Date().getFullYear(), new Date().getMonth(), 1)
   const periodEnd = currentPeriod ? parseLocal(currentPeriod.period_end) : new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0)
@@ -305,14 +309,31 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
     if (initialDate) {
       return parseLocal(initialDate)
     }
-    const initialPeriod = periods[0]
+    try {
+      const savedDate = localStorage.getItem('tpi_selected_date')
+      if (savedDate) return parseLocal(savedDate)
+    } catch {}
+    const initialPeriod = currentPeriod
     return getValidDateForPeriod(null, initialPeriod || null)
   })
+
+  const handleSelectDate = (d: Date) => {
+    setCurrentDate(d)
+    try {
+      localStorage.setItem('tpi_selected_date', fmtDate(d))
+    } catch {}
+  }
 
   // Whenever currentPeriod updates or loads, clamp currentDate strictly into the period
   useEffect(() => {
     if (!currentPeriod) return
-    setCurrentDate((prev) => getValidDateForPeriod(prev, currentPeriod))
+    setCurrentDate((prev) => {
+      const valid = getValidDateForPeriod(prev, currentPeriod)
+      try {
+        localStorage.setItem('tpi_selected_date', fmtDate(valid))
+      } catch {}
+      return valid
+    })
   }, [currentPeriod?.id, currentPeriod?.period_start, currentPeriod?.period_end])
 
   const activeDateStr = fmtDate(currentDate)
@@ -328,7 +349,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
     d.setDate(d.getDate() + dir)
     const dStr = fmtDate(d)
     if (dStr < currentPeriod.period_start || dStr > currentPeriod.period_end) return
-    setCurrentDate(d)
+    handleSelectDate(d)
     setSelectedPoolIds(new Set())
   }
 
@@ -461,6 +482,13 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
 
   // Daily attendance state & query
   const [isAttendanceModalOpen, setIsAttendanceModalOpen] = useState(false)
+
+  // Pre-assign shifts to other dates in the period
+  const [isPreassignModalOpen, setIsPreassignModalOpen] = useState(false)
+  const [preassignSelectedEmpIds, setPreassignSelectedEmpIds] = useState<Set<string>>(new Set())
+  const [preassignTargetDates, setPreassignTargetDates] = useState<Set<string>>(new Set())
+  const [isPreassignSubmitting, setIsPreassignSubmitting] = useState(false)
+
   const { data: dailyAttendance = [], refetch: refetchAttendance } = useQuery({
     queryKey: ['tpi-daily-attendance', user?.factory_id, activeDateStr],
     queryFn: async () => {
@@ -494,7 +522,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
         console.warn('loadDay fallback:', e)
         const { data } = await supabase
           .from('tpi_shift_entries')
-          .select('employee_id, shift_index, job_id, rate_tier, rate_snapshot, job_code_snapshot, is_half_shift, actual_hours, ot_hours, ot_pay, is_holiday_ot')
+          .select('employee_id, shift_index, job_id, rate_tier, rate_snapshot, job_code_snapshot, is_half_shift, actual_hours, ot_hours, ot_pay, is_holiday_ot, is_ot_before_shift, ot_job_id, ot_job_code_snapshot, is_pending')
           .eq('factory_id', user.factory_id)
           .eq('work_date', activeDateStr)
         const hasDbHoliday = (data || []).some((e: any) => !!e.is_holiday_ot)
@@ -564,6 +592,8 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
   const [modalShift1IsHalf, setModalShift1IsHalf] = useState<boolean>(false)
   const [modalShift1HasOt, setModalShift1HasOt] = useState<boolean>(false)
   const [modalShift1OtHours, setModalShift1OtHours] = useState<number>(1)
+  const [modalShift1OtBeforeShift, setModalShift1OtBeforeShift] = useState<boolean>(false)
+  const [modalShift1OtJobId, setModalShift1OtJobId] = useState<string>('')
   const [modalHasShift2, setModalHasShift2] = useState<boolean>(false)
   const [modalShift2JobId, setModalShift2JobId] = useState<string>('')
   const [modalShift2Index, setModalShift2Index] = useState<number>(1)
@@ -571,11 +601,31 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
   const [modalShift2HasOt, setModalShift2HasOt] = useState<boolean>(false)
   const [modalShift2OtHours, setModalShift2OtHours] = useState<number>(1)
 
-  // ── Modal State for จป. Disciplinary Fine ────────────────────────────
+  // ── Modal State for จป. & HR Disciplinary Fine & Incident ─────────
   const [modalSafetyFineEnabled, setModalSafetyFineEnabled] = useState<boolean>(false)
   const [modalSafetyFineDate, setModalSafetyFineDate] = useState<string>('')
   const [modalSafetyFineReason, setModalSafetyFineReason] = useState<string>('')
+  const [modalSafetyFineSafetyAmount, setModalSafetyFineSafetyAmount] = useState<number>(1000)
+  const [modalSafetyFineIncludeHr, setModalSafetyFineIncludeHr] = useState<boolean>(false)
+  const [modalSafetyFineShiftRate, setModalSafetyFineShiftRate] = useState<number>(357)
   const [modalSafetyFineSubmitting, setModalSafetyFineSubmitting] = useState<boolean>(false)
+  const [editingIncident, setEditingIncident] = useState<SafetyIncident | null>(null)
+
+  // Confirm delete safety incident modal state
+  const [deleteIncidentTarget, setDeleteIncidentTarget] = useState<SafetyIncident | null>(null)
+  const [isDeletingIncident, setIsDeletingIncident] = useState<boolean>(false)
+
+  const hrFineAmount = useMemo(() => {
+    return modalSafetyFineIncludeHr ? Math.round(modalSafetyFineShiftRate * 3 * 100) / 100 : 0
+  }, [modalSafetyFineIncludeHr, modalSafetyFineShiftRate])
+
+  const totalFineAmount = useMemo(() => {
+    return Math.round(((modalSafetyFineSafetyAmount || 0) + hrFineAmount) * 100) / 100
+  }, [modalSafetyFineSafetyAmount, hrFineAmount])
+
+  const fineInstallments = useMemo(() => {
+    return calculateFineInstallments(totalFineAmount)
+  }, [totalFineAmount])
 
   // Query all active safety fine records
   const { data: allSafetyAdvances = [], refetch: refetchSafetyAdvances } = useQuery<any[]>({
@@ -640,6 +690,27 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
 
   const totalPeopleCount = empUsageMap.size
   const doubleShiftCount = useMemo(() => Array.from(empUsageMap.values()).filter(u => u.count >= 2).length, [empUsageMap])
+
+  // Group daily entries by unique employee for Preassign Modal (one card per employee)
+  const preassignUniqueEmployees = useMemo(() => {
+    const map = new Map<string, { emp: Employee | undefined; entries: Entry[] }>()
+    for (const entry of entries) {
+      if (!map.has(entry.employee_id)) {
+        map.set(entry.employee_id, {
+          emp: empMap.get(entry.employee_id),
+          entries: [],
+        })
+      }
+      map.get(entry.employee_id)!.entries.push(entry)
+    }
+    return Array.from(map.entries())
+      .map(([empId, data]) => ({
+        empId,
+        emp: data.emp,
+        entries: data.entries.sort((a, b) => a.shift_index - b.shift_index),
+      }))
+      .sort((a, b) => compareEmployeeCode(a.emp?.employee_code, b.emp?.employee_code))
+  }, [entries, empMap])
 
   const availableJobs = useMemo(() => {
     return jobs.filter((j) => isJobAvailable(j, activeDateStr))
@@ -878,8 +949,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
   const openEmployeeModal = (emp: Employee) => {
     const empEntries = entries.filter((e) => e.employee_id === emp.id)
     const defaultJobId = availableJobs[0]?.id || jobs[0]?.id || ''
-    const isClerk = emp.position === 'clerk'
-    const defaultOtHours = isClerk ? 8 : 1
+    const defaultOtHours = 1
 
     if (empEntries.length === 0) {
       setModalShift1JobId(defaultJobId)
@@ -887,6 +957,8 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
       setModalShift1IsHalf(false)
       setModalShift1HasOt(false)
       setModalShift1OtHours(defaultOtHours)
+      setModalShift1OtBeforeShift(false)
+      setModalShift1OtJobId(defaultJobId)
       setModalHasShift2(false)
       setModalShift2JobId(defaultJobId)
       setModalShift2Index(1)
@@ -898,8 +970,10 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
       setModalShift1JobId(s1.job_id)
       setModalShift1Index(s1.shift_index)
       setModalShift1IsHalf(!!s1.is_half_shift)
-      setModalShift1HasOt(!isClerk && !!(s1.ot_hours && s1.ot_hours > 0))
+      setModalShift1HasOt(!!(s1.ot_hours && s1.ot_hours > 0))
       setModalShift1OtHours(s1.ot_hours || defaultOtHours)
+      setModalShift1OtBeforeShift(!!s1.is_ot_before_shift)
+      setModalShift1OtJobId(s1.ot_job_id || s1.job_id || defaultJobId)
       setModalHasShift2(false)
       setModalShift2JobId(s1.job_id)
       setModalShift2Index((s1.shift_index + 1) % 3)
@@ -912,35 +986,98 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
       setModalShift1JobId(s1.job_id)
       setModalShift1Index(s1.shift_index)
       setModalShift1IsHalf(!!s1.is_half_shift)
-      setModalShift1HasOt(!isClerk && !!(s1.ot_hours && s1.ot_hours > 0))
-      setModalShift1OtHours(s1.ot_hours || defaultOtHours)
+      // 2 shifts (16h) cannot do OT
+      setModalShift1HasOt(false)
+      setModalShift1OtHours(defaultOtHours)
+      setModalShift1OtBeforeShift(false)
+      setModalShift1OtJobId(s1.ot_job_id || s1.job_id || defaultJobId)
       setModalHasShift2(true)
       setModalShift2JobId(s2.job_id)
       setModalShift2Index(s2.shift_index)
       setModalShift2IsHalf(!!s2.is_half_shift)
-      setModalShift2HasOt(!!(s2.ot_hours && s2.ot_hours > 0))
-      setModalShift2OtHours(s2.ot_hours || defaultOtHours)
+      setModalShift2HasOt(false)
+      setModalShift2OtHours(defaultOtHours)
     }
-    setModalSafetyFineEnabled(false)
-    setModalSafetyFineDate(activeDateStr)
-    setModalSafetyFineReason('')
+    const prof = wageProfiles.find((p) => p.employee_id === emp.id)
+    const isSkilled = prof?.rate_tier === 'skilled'
+    const s1Job = empEntries[0] ? jobs.find((j) => j.id === empEntries[0].job_id) : (availableJobs[0] || jobs[0])
+    const defaultShiftRate = isSkilled
+      ? (s1Job?.skilled_rate ?? (prof?.daily_rate && prof.daily_rate > 357 ? prof.daily_rate : 377))
+      : (s1Job?.normal_rate ?? 357)
+    // Check existing safety fine incidents for this worker
+    const empAdvances = allSafetyAdvances.filter((a) => a.employee_id === emp.id)
+    const empIncidents = groupSafetyAdvancesToIncidents(empAdvances, currentPeriod?.id)
+
+    if (empIncidents.length > 0) {
+      const activeInc = empIncidents[0]
+      setEditingIncident(activeInc)
+      setModalSafetyFineEnabled(true)
+      setModalSafetyFineDate(activeInc.incidentDate || activeDateStr)
+      setModalSafetyFineReason(activeInc.reason)
+      setModalSafetyFineSafetyAmount(activeInc.safetyAmount)
+      setModalSafetyFineIncludeHr(activeInc.includeHr)
+      setModalSafetyFineShiftRate(activeInc.shiftRate || defaultShiftRate)
+    } else {
+      setEditingIncident(null)
+      setModalSafetyFineShiftRate(defaultShiftRate)
+      setModalSafetyFineSafetyAmount(1000)
+      setModalSafetyFineIncludeHr(false)
+      setModalSafetyFineEnabled(false)
+      setModalSafetyFineDate(activeDateStr)
+      setModalSafetyFineReason('')
+    }
     setModalEmp(emp)
   }
 
-  const handleDeleteSafetyFine = async (fineId: string) => {
-    if (!confirm('ยืนยันลบรายการหักค่าปรับ จป. นี้หรือไม่?')) return
+  const handleLoadIncidentForEdit = (inc: SafetyIncident) => {
+    setEditingIncident(inc)
+    setModalSafetyFineEnabled(true)
+    setModalSafetyFineDate(inc.incidentDate || activeDateStr)
+    setModalSafetyFineReason(inc.reason)
+    setModalSafetyFineSafetyAmount(inc.safetyAmount)
+    setModalSafetyFineIncludeHr(inc.includeHr)
+    if (inc.shiftRate) {
+      setModalSafetyFineShiftRate(inc.shiftRate)
+    }
+  }
+
+  const handleStartNewIncident = (defaultRate: number) => {
+    setEditingIncident(null)
+    setModalSafetyFineEnabled(true)
+    setModalSafetyFineDate(activeDateStr)
+    setModalSafetyFineReason('')
+    setModalSafetyFineSafetyAmount(1000)
+    setModalSafetyFineIncludeHr(false)
+    setModalSafetyFineShiftRate(defaultRate)
+  }
+
+  const handleConfirmDeleteIncident = async () => {
+    if (!deleteIncidentTarget) return
+    setIsDeletingIncident(true)
     try {
-      const { error } = await supabase.from('advance_payments').delete().eq('id', fineId)
+      const { error } = await supabase
+        .from('advance_payments')
+        .delete()
+        .in('id', deleteIncidentTarget.rowIds)
       if (error) throw error
-      toast.success('ลบรายการค่าปรับ จป. เรียบร้อยแล้ว')
+      toast.success(`ลบรายการค่าปรับสำเร็จ (ทั้งหมด ${deleteIncidentTarget.installments.length} งวด)`)
       queryClient.invalidateQueries({ queryKey: ['all-safety-advances'] })
       queryClient.invalidateQueries({ queryKey: ['tpi-advances'] })
       queryClient.invalidateQueries({ queryKey: ['advances'] })
       queryClient.invalidateQueries({ queryKey: ['advances-v2'] })
       queryClient.invalidateQueries({ queryKey: ['payslip-advances'] })
       queryClient.invalidateQueries({ queryKey: ['all-payroll-entries'] })
+
+      if (editingIncident?.id === deleteIncidentTarget.id) {
+        setEditingIncident(null)
+        setModalSafetyFineEnabled(false)
+        setModalSafetyFineReason('')
+      }
+      setDeleteIncidentTarget(null)
     } catch (e: any) {
       toast.error('ลบรายการไม่สำเร็จ: ' + (e?.message || ''))
+    } finally {
+      setIsDeletingIncident(false)
     }
   }
 
@@ -954,97 +1091,82 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
       toast.error('กรุณาระบุสาเหตุความผิดระเบียบวินัยเพื่อเก็บเป็นหลักฐาน')
       return
     }
+    if (totalFineAmount <= 0) {
+      toast.error('ยอดค่าปรับต้องมากกว่า 0 บาท')
+      return
+    }
+
     setModalSafetyFineSubmitting(true)
     try {
       const incidentDate = modalSafetyFineDate || activeDateStr
-      const [yr, mo, dy] = incidentDate.split('-')
-      const thYear = Number(yr) + 543
-      const thDateStr = `${dy}/${mo}/${thYear}`
+      const thDateStr = formatIsoToThaiDate(incidentDate)
 
-      // Check existing fines in current period for this employee
-      const existingInCurrent = allSafetyAdvances.filter(
-        (a) => a.employee_id === modalEmp.id && a.period_id === currentPeriod.id
-      )
+      const installments = fineInstallments
+      const totalSteps = installments.length
 
-      const sortedPeriods = [...periods].sort((a, b) => a.period_start.localeCompare(b.period_start))
-      const currIdx = sortedPeriods.findIndex((p) => p.id === currentPeriod.id)
-      const futurePeriods = currIdx >= 0 ? sortedPeriods.slice(currIdx + 1) : []
+      // Only link to periods that actually exist in the database; NEVER auto-insert future payroll_periods
+      const allSorted = [...periods].sort((a, b) => a.period_start.localeCompare(b.period_start))
+      const currIdx = allSorted.findIndex((p) => p.id === currentPeriod.id)
+      const targetPeriodIds: (string | null)[] = [currentPeriod.id]
 
-      if (existingInCurrent.length > 0) {
-        // 2nd violation in the same period: expand to 4 installments (2,000 THB total, 500 THB/period)
-        const first = existingInCurrent[0]
-        const prevNotes = first.notes || ''
-        const prevReasonMatch = prevNotes.match(/สาเหตุ:\s*([^\|]+)/)
-        const prevReason = prevReasonMatch ? prevReasonMatch[1].trim() : ''
-        const combinedReason = prevReason && !prevReason.includes(modalSafetyFineReason.trim())
-          ? `${prevReason}, ${modalSafetyFineReason.trim()}`
-          : (prevReason || modalSafetyFineReason.trim())
-
-        const updatedNote = `[หักค่าปรับ จป.] หักค่าปรับผิดระเบียบ (วันที่ ${thDateStr} [1/4]) | สาเหตุ: ${combinedReason} | ยอดปรับเต็ม 2,000 บ. (ผ่อนงวดละ 500 บ.)`
-        const { error: updErr } = await supabase
-          .from('advance_payments')
-          .update({ notes: updatedNote })
-          .eq('id', first.id)
-        if (updErr) throw updErr
-
-        // Queue future installments [2/4], [3/4], [4/4] into subsequent periods if available
-        if (futurePeriods[0]) {
-          const note2 = `[หักค่าปรับ จป.] หักค่าปรับผิดระเบียบ (วันที่ ${thDateStr} [2/4]) | สาเหตุ: ${combinedReason} | ยอดปรับเต็ม 2,000 บ. (ผ่อนงวดละ 500 บ.)`
-          await supabase.from('advance_payments').insert({
-            period_id: futurePeriods[0].id,
-            employee_id: modalEmp.id,
-            amount: 500,
-            notes: note2,
-            is_carryover: false,
-          })
+      for (let i = 1; i < totalSteps; i++) {
+        if (currIdx >= 0 && currIdx + i < allSorted.length) {
+          targetPeriodIds.push(allSorted[currIdx + i].id)
+        } else {
+          targetPeriodIds.push(null)
         }
-        if (futurePeriods[1]) {
-          const note3 = `[หักค่าปรับ จป.] หักค่าปรับผิดระเบียบ (วันที่ ${thDateStr} [3/4]) | สาเหตุ: ${combinedReason} | ยอดปรับเต็ม 2,000 บ. (ผ่อนงวดละ 500 บ.)`
-          await supabase.from('advance_payments').insert({
-            period_id: futurePeriods[1].id,
-            employee_id: modalEmp.id,
-            amount: 500,
-            notes: note3,
-            is_carryover: false,
-          })
-        }
-        if (futurePeriods[2]) {
-          const note4 = `[หักค่าปรับ จป.] หักค่าปรับผิดระเบียบ (วันที่ ${thDateStr} [4/4]) | สาเหตุ: ${combinedReason} | ยอดปรับเต็ม 2,000 บ. (ผ่อนงวดละ 500 บ.)`
-          await supabase.from('advance_payments').insert({
-            period_id: futurePeriods[2].id,
-            employee_id: modalEmp.id,
-            amount: 500,
-            notes: note4,
-            is_carryover: false,
-          })
-        }
-
-        toast.success(`บันทึกค่าปรับ จป. สำเร็จ (ยอดรวม 2,000 บ. ขยายเป็น 4 งวด หักงวดละ 500 บ. [1/4])`)
-      } else {
-        // 1st violation: 1,000 THB in 2 installments of 500 THB
-        const note1 = `[หักค่าปรับ จป.] หักค่าปรับผิดระเบียบ (วันที่ ${thDateStr} [1/2]) | สาเหตุ: ${modalSafetyFineReason.trim()} | ยอดปรับเต็ม 1,000 บ. (ผ่อนงวดละ 500 บ.)`
-        const { error: insErr } = await supabase.from('advance_payments').insert({
-          period_id: currentPeriod.id,
-          employee_id: modalEmp.id,
-          amount: 500,
-          notes: note1,
-          is_carryover: false,
-        })
-        if (insErr) throw insErr
-
-        if (futurePeriods[0]) {
-          const note2 = `[หักค่าปรับ จป.] หักค่าปรับผิดระเบียบ (วันที่ ${thDateStr} [2/2]) | สาเหตุ: ${modalSafetyFineReason.trim()} | ยอดปรับเต็ม 1,000 บ. (ผ่อนงวดละ 500 บ.)`
-          await supabase.from('advance_payments').insert({
-            period_id: futurePeriods[0].id,
-            employee_id: modalEmp.id,
-            amount: 500,
-            notes: note2,
-            is_carryover: false,
-          })
-        }
-
-        toast.success(`บันทึกค่าปรับ จป. สำเร็จ (ยอด 1,000 บ. หักงวดละ 500 บ. [1/2])`)
       }
+
+      // If updating an existing incident, delete its previous installment rows first
+      if (editingIncident && editingIncident.rowIds.length > 0) {
+        const { error: delOldErr } = await supabase
+          .from('advance_payments')
+          .delete()
+          .in('id', editingIncident.rowIds)
+        if (delOldErr) throw delOldErr
+      }
+
+      const caseId = editingIncident?.id || `case_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+
+      // Insert installments for existing periods only (never forge fake future payroll periods)
+      const insertRows = installments
+        .map((amt, idx) => {
+          const step = idx + 1
+          const targetPeriodId = targetPeriodIds[idx]
+          // If future period does not exist yet in database, only record installment 1 for current period
+          if (!targetPeriodId && idx > 0) return null
+
+          const note = formatSafetyFineNote({
+            caseId,
+            thDateStr,
+            step,
+            totalSteps,
+            reason: modalSafetyFineReason,
+            totalAmount: totalFineAmount,
+            safetyAmount: modalSafetyFineSafetyAmount,
+            includeHr: modalSafetyFineIncludeHr,
+            hrAmount: hrFineAmount,
+            shiftRate: modalSafetyFineShiftRate,
+            installmentAmount: amt,
+          })
+          return {
+            period_id: targetPeriodId || currentPeriod.id,
+            employee_id: modalEmp.id,
+            amount: amt,
+            notes: note,
+            is_carryover: false,
+          }
+        })
+        .filter(Boolean) as any[]
+
+      const { error: insErr } = await supabase.from('advance_payments').insert(insertRows)
+      if (insErr) throw insErr
+
+      toast.success(
+        editingIncident
+          ? `อัปเดตรายการค่าปรับสำเร็จ ยอดรวม ฿${totalFineAmount.toLocaleString()} แบ่งผ่อน ${totalSteps} งวด`
+          : `บันทึกค่าปรับสำเร็จ ยอดรวม ฿${totalFineAmount.toLocaleString()} แบ่งผ่อน ${totalSteps} งวด (งวดแรก ฿${installments[0].toLocaleString()}${totalSteps > 1 ? `, งวดสุดท้าย ฿${installments[totalSteps - 1].toLocaleString()}` : ''})`
+      )
 
       queryClient.invalidateQueries({ queryKey: ['all-safety-advances'] })
       queryClient.invalidateQueries({ queryKey: ['tpi-advances'] })
@@ -1052,10 +1174,12 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
       queryClient.invalidateQueries({ queryKey: ['advances-v2'] })
       queryClient.invalidateQueries({ queryKey: ['payslip-advances'] })
       queryClient.invalidateQueries({ queryKey: ['all-payroll-entries'] })
+      queryClient.invalidateQueries({ queryKey: ['periods'] })
+      setEditingIncident(null)
       setModalSafetyFineEnabled(false)
       setModalSafetyFineReason('')
     } catch (err: any) {
-      toast.error('บันทึกค่าปรับ จป. ไม่สำเร็จ: ' + (err?.message || ''))
+      toast.error('บันทึกค่าปรับไม่สำเร็จ: ' + (err?.message || ''))
     } finally {
       setModalSafetyFineSubmitting(false)
     }
@@ -1080,13 +1204,15 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
       return
     }
 
-    const isClerk = modalEmp.position === 'clerk'
-    const tier1 = wageTier(wageProfiles.find((p) => p.employee_id === modalEmp.id), activeDateStr)
-    const isClerkJob1 = isClerkJob(job1)
-    const baseRate1 = isClerkJob1
-      ? (tier1 === 'skilled' ? (job1?.skilled_rate ?? 377) : (job1?.normal_rate ?? 357))
-      : ((tier1 === 'skilled' && job1?.skilled_rate) ? job1.skilled_rate : (job1?.normal_rate || 357))
-    const ot1 = (!isClerk && modalShift1HasOt) ? calculateEntryOt(modalShift1OtHours, baseRate1, isClerk) : { ot_hours: 0, ot_pay: 0 }
+    const otJobId = modalShift1HasOt ? (modalShift1OtJobId || modalShift1JobId) : null
+    const otJob = otJobId ? jobs.find((j) => j.id === otJobId) : undefined
+    const otTier = wageTier(wageProfiles.find((p) => p.employee_id === modalEmp.id), activeDateStr)
+    const isClerkOt = isClerkJob(otJob)
+    const otBaseRate = isClerkOt
+      ? (otTier === 'skilled' ? (otJob?.skilled_rate ?? 377) : (otJob?.normal_rate ?? 357))
+      : ((otTier === 'skilled' && otJob?.skilled_rate) ? otJob.skilled_rate : (otJob?.normal_rate || 357))
+
+    const ot1 = (!modalHasShift2 && modalShift1HasOt) ? calculateEntryOt(modalShift1OtHours, otBaseRate) : { ot_hours: 0, ot_pay: 0 }
 
     const updatedEntries = entries.filter((e) => e.employee_id !== modalEmp.id)
     const newEmpEntries: Entry[] = [
@@ -1098,6 +1224,9 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
         actual_hours: modalShift1IsHalf ? 4 : 8,
         ot_hours: ot1.ot_hours,
         ot_pay: ot1.ot_pay,
+        is_ot_before_shift: (!modalHasShift2 && modalShift1HasOt) ? modalShift1OtBeforeShift : false,
+        ot_job_id: (!modalHasShift2 && modalShift1HasOt) ? (otJobId || null) : null,
+        ot_job_code_snapshot: (!modalHasShift2 && modalShift1HasOt) ? (otJob?.code || null) : null,
       },
     ]
 
@@ -1120,21 +1249,15 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
         return
       }
 
-      const tier2 = wageTier(wageProfiles.find((p) => p.employee_id === modalEmp.id), activeDateStr)
-      const isClerkJob2 = isClerkJob(job2)
-      const baseRate2 = isClerkJob2
-        ? (tier2 === 'skilled' ? (job2?.skilled_rate ?? 377) : (job2?.normal_rate ?? 357))
-        : ((tier2 === 'skilled' && job2?.skilled_rate) ? job2.skilled_rate : (job2?.normal_rate || 357))
-      const ot2 = modalShift2HasOt ? calculateEntryOt(modalShift2OtHours, baseRate2, isClerk) : { ot_hours: 0, ot_pay: 0 }
-
       newEmpEntries.push({
         employee_id: modalEmp.id,
         job_id: modalShift2JobId,
         shift_index: modalShift2Index,
         is_half_shift: modalShift2IsHalf,
         actual_hours: modalShift2IsHalf ? 4 : 8,
-        ot_hours: ot2.ot_hours,
-        ot_pay: ot2.ot_pay,
+        ot_hours: 0,
+        ot_pay: 0,
+        is_ot_before_shift: false,
       })
     }
 
@@ -1225,6 +1348,103 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
     )
   }
 
+  const handleConfirmPending = (empId: string, jobId: string, shiftIndex: number) => {
+    setEntries((prev) =>
+      prev.map((e) =>
+        e.employee_id === empId && e.job_id === jobId && e.shift_index === shiftIndex
+          ? { ...e, is_pending: false }
+          : e
+      )
+    )
+    const emp = empMap.get(empId)
+    toast.success(`✓ ยืนยันการเข้างานของ ${emp ? `${emp.first_name} ${emp.last_name}` : 'พนักงาน'} แล้ว`)
+  }
+
+  const handleConfirmAllPending = async () => {
+    const pendingCount = entries.filter((e) => !!e.is_pending).length
+    if (pendingCount === 0) return
+
+    const updatedEntries = entries.map((e) => (e.is_pending ? { ...e, is_pending: false } : e))
+    setEntries(updatedEntries)
+
+    if (!user?.factory_id || preview) {
+      toast.success(`✓ ยืนยันการเข้างานพนักงานทั้งหมด ${pendingCount} คนเรียบร้อย`)
+      return
+    }
+
+    try {
+      const validEntries = await ensureValidJobUuids(updatedEntries, user.factory_id, jobs)
+      const nextRev = await saveDay(user.factory_id, activeDateStr, {
+        revision: dayRevision,
+        is_holiday: isHoliday,
+        entries: validEntries.map((e) => ({ ...e, is_holiday_ot: isHoliday })),
+      })
+      setDayRevision(nextRev)
+      queryClient.invalidateQueries({ queryKey: ['tpi-shift-day', user.factory_id, activeDateStr] })
+      queryClient.invalidateQueries({ queryKey: ['all-tpi-period-shifts'] })
+      queryClient.invalidateQueries({ queryKey: ['summary-all-shifts'] })
+      toast.success(`✓ ยืนยันและบันทึกการเข้างานพนักงานทั้งหมด ${pendingCount} คนเรียบร้อย`)
+    } catch (err: any) {
+      console.error('Confirm all pending error:', err)
+      toast.error('ยืนยันไม่สำเร็จ', { description: errorMessage(err) })
+    }
+  }
+
+  const handleOpenPreassignModal = () => {
+    if (entries.length === 0) {
+      toast.warning('ไม่พบข้อมูลการจัดกะในวันนี้', {
+        description: 'กรุณาจัดกะในวันนี้ก่อน จึงจะสามารถคัดลอกหรือจัดกะล่วงหน้าไปวันอื่นๆ ได้',
+      })
+      return
+    }
+    setPreassignSelectedEmpIds(new Set())
+    setPreassignTargetDates(new Set())
+    setIsPreassignModalOpen(true)
+  }
+
+  const handleConfirmPreassign = async () => {
+    if (preassignSelectedEmpIds.size === 0) {
+      toast.error('กรุณาเลือกพนักงานอย่างน้อย 1 คน')
+      return
+    }
+    if (preassignTargetDates.size === 0) {
+      toast.error('กรุณาเลือกวันที่ต้องการจัดกะล่วงหน้าอย่างน้อย 1 วัน')
+      return
+    }
+
+    const selectedEntries = entries.filter((e) =>
+      preassignSelectedEmpIds.has(e.employee_id)
+    )
+    if (selectedEntries.length === 0) return
+
+    setIsPreassignSubmitting(true)
+    try {
+      if (!user?.factory_id || preview) {
+        toast.info('โหมดตัวอย่าง: จำลองการจัดกะล่วงหน้าเรียบร้อย')
+        setIsPreassignModalOpen(false)
+        return
+      }
+
+      const validEntries = await ensureValidJobUuids(selectedEntries, user.factory_id, jobs)
+      await preassignShifts(user.factory_id, Array.from(preassignTargetDates), validEntries)
+
+      await queryClient.invalidateQueries({ queryKey: ['tpi-shift-day'] })
+      await queryClient.invalidateQueries({ queryKey: ['all-tpi-period-shifts'] })
+      await queryClient.invalidateQueries({ queryKey: ['summary-all-shifts'] })
+
+      toast.success(
+        `✓ จัดกะล่วงหน้าให้พนักงาน ${preassignSelectedEmpIds.size} คน (${selectedEntries.length} กะ) ไปยัง ${preassignTargetDates.size} วันเรียบร้อยแล้ว`,
+        { description: 'พนักงานจะมีสถานะ "รอยืนยัน" ในวันที่ถูกจัดกะ' }
+      )
+      setIsPreassignModalOpen(false)
+    } catch (err: any) {
+      console.error('Preassign error:', err)
+      toast.error('จัดกะล่วงหน้าไม่สำเร็จ', { description: errorMessage(err) })
+    } finally {
+      setIsPreassignSubmitting(false)
+    }
+  }
+
   // ── Render Grouped Consecutive 2-Shift Cards ───────────────────────
   const renderJobDoubleShifts = (
     jobId: string,
@@ -1251,6 +1471,19 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
       const hasHalf = empDoubleEntries.some((e) => e.is_half_shift)
       const hasOt = empDoubleEntries.some((e) => (e.ot_hours ?? 0) > 0)
       const totalOtHrs = empDoubleEntries.reduce((sum, e) => sum + (e.ot_hours || 0), 0)
+      const isAnyPending = empDoubleEntries.some((e) => !!e.is_pending)
+
+      const handleConfirmDouble = (e: React.MouseEvent) => {
+        e.stopPropagation()
+        setEntries((prev) =>
+          prev.map((entry) =>
+            entry.employee_id === empId && entry.job_id === jobId
+              ? { ...entry, is_pending: false }
+              : entry
+          )
+        )
+        toast.success(`✓ ยืนยันการเข้างานของ ${emp.first_name} ${emp.last_name} แล้ว`)
+      }
 
       const handleRemoveDouble = (e: React.MouseEvent) => {
         e.stopPropagation()
@@ -1263,8 +1496,9 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
           <div
             key={`double-${empId}-ma`}
             className="vk-tpi-double-span-card span-morning-afternoon"
+            style={isAnyPending ? { borderLeft: '3px solid #10b981', background: '#f0fdf4' } : undefined}
             onClick={() => openEmployeeModal(emp)}
-            title="คลิกเพื่อแก้ไขการจัดกะ"
+            title={isAnyPending ? 'รอยืนยันเข้างาน (คลิกเพื่อแก้ไขการจัดกะ)' : 'คลิกเพื่อแก้ไขการจัดกะ'}
           >
             <div className="vk-tpi-double-main">
               <div className="vk-tpi-double-line1">
@@ -1277,11 +1511,29 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                     ⭐
                   </span>
                 )}
+                {isAnyPending && (
+                  <span
+                    style={{
+                      fontSize: 9,
+                      fontWeight: 700,
+                      padding: '1px 6px',
+                      borderRadius: 999,
+                      background: 'rgba(0,120,80,0.1)',
+                      color: '#065f46',
+                      border: '1px solid rgba(0,120,80,0.25)',
+                      letterSpacing: '0.04em',
+                      flexShrink: 0,
+                    }}
+                    title="จัดกะล่วงหน้ามา - รอยืนยันเข้างาน"
+                  >
+                    รอยืนยัน
+                  </span>
+                )}
                 <span className="vk-double-badge">ควบกะเช้า + กะบ่าย</span>
                 {hasHalf && <span className="vk-tpi-wp-half">ครึ่งกะ</span>}
                 {hasOt && (
                   <span className="vk-tpi-wp-ot">
-                    {emp.position === 'clerk' ? 'OT 8 ชม.' : `OT ${totalOtHrs} ชม.`}
+                    OT {totalOtHrs} ชม.
                   </span>
                 )}
               </div>
@@ -1290,6 +1542,37 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
               </div>
             </div>
             <div className="vk-tpi-double-right">
+              {isAnyPending && (
+                <button
+                  type="button"
+                  onClick={handleConfirmDouble}
+                  title="ยืนยันเข้างาน"
+                  style={{
+                    background: 'rgba(0,120,80,0.12)',
+                    border: '1px solid rgba(0,120,80,0.3)',
+                    cursor: 'pointer',
+                    color: '#065f46',
+                    padding: '2px 7px',
+                    borderRadius: 4,
+                    fontSize: 12,
+                    fontWeight: 700,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    marginRight: 4,
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = '#059669'
+                    e.currentTarget.style.color = '#ffffff'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'rgba(0,120,80,0.12)'
+                    e.currentTarget.style.color = '#065f46'
+                  }}
+                >
+                  ✓
+                </button>
+              )}
               <button
                 type="button"
                 className="vk-tpi-btn-del"
@@ -1308,8 +1591,9 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
           <div
             key={`double-${empId}-an`}
             className="vk-tpi-double-span-card span-afternoon-night"
+            style={isAnyPending ? { borderLeft: '3px solid #10b981', background: '#f0fdf4' } : undefined}
             onClick={() => openEmployeeModal(emp)}
-            title="คลิกเพื่อแก้ไขการจัดกะ"
+            title={isAnyPending ? 'รอยืนยันเข้างาน (คลิกเพื่อแก้ไขการจัดกะ)' : 'คลิกเพื่อแก้ไขการจัดกะ'}
           >
             <div className="vk-tpi-double-main">
               <div className="vk-tpi-double-line1">
@@ -1322,11 +1606,29 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                     ⭐
                   </span>
                 )}
+                {isAnyPending && (
+                  <span
+                    style={{
+                      fontSize: 9,
+                      fontWeight: 700,
+                      padding: '1px 6px',
+                      borderRadius: 999,
+                      background: 'rgba(0,120,80,0.1)',
+                      color: '#065f46',
+                      border: '1px solid rgba(0,120,80,0.25)',
+                      letterSpacing: '0.04em',
+                      flexShrink: 0,
+                    }}
+                    title="จัดกะล่วงหน้ามา - รอยืนยันเข้างาน"
+                  >
+                    รอยืนยัน
+                  </span>
+                )}
                 <span className="vk-double-badge">ควบกะบ่าย + กะดึก</span>
                 {hasHalf && <span className="vk-tpi-wp-half">ครึ่งกะ</span>}
                 {hasOt && (
                   <span className="vk-tpi-wp-ot">
-                    {emp.position === 'clerk' ? 'OT 8 ชม.' : `OT ${totalOtHrs} ชม.`}
+                    OT {totalOtHrs} ชม.
                   </span>
                 )}
               </div>
@@ -1335,6 +1637,37 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
               </div>
             </div>
             <div className="vk-tpi-double-right">
+              {isAnyPending && (
+                <button
+                  type="button"
+                  onClick={handleConfirmDouble}
+                  title="ยืนยันเข้างาน"
+                  style={{
+                    background: 'rgba(0,120,80,0.12)',
+                    border: '1px solid rgba(0,120,80,0.3)',
+                    cursor: 'pointer',
+                    color: '#065f46',
+                    padding: '2px 7px',
+                    borderRadius: 4,
+                    fontSize: 12,
+                    fontWeight: 700,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    marginRight: 4,
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = '#059669'
+                    e.currentTarget.style.color = '#ffffff'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'rgba(0,120,80,0.12)'
+                    e.currentTarget.style.color = '#065f46'
+                  }}
+                >
+                  ✓
+                </button>
+              )}
               <button
                 type="button"
                 className="vk-tpi-btn-del"
@@ -1355,8 +1688,9 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
           {/* Column 1: Morning Shift Box */}
           <div
             className="vk-tpi-split-double-card card-morning"
+            style={isAnyPending ? { borderLeft: '3px solid #10b981', background: '#f0fdf4' } : undefined}
             onClick={() => openEmployeeModal(emp)}
-            title="คลิกเพื่อแก้ไขการจัดกะ"
+            title={isAnyPending ? 'รอยืนยันเข้างาน (คลิกเพื่อแก้ไขการจัดกะ)' : 'คลิกเพื่อแก้ไขการจัดกะ'}
           >
             <div className="vk-tpi-double-main">
               <div className="vk-tpi-double-line1">
@@ -1369,11 +1703,29 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                     ⭐
                   </span>
                 )}
+                {isAnyPending && (
+                  <span
+                    style={{
+                      fontSize: 9,
+                      fontWeight: 700,
+                      padding: '1px 6px',
+                      borderRadius: 999,
+                      background: 'rgba(0,120,80,0.1)',
+                      color: '#065f46',
+                      border: '1px solid rgba(0,120,80,0.25)',
+                      letterSpacing: '0.04em',
+                      flexShrink: 0,
+                    }}
+                    title="จัดกะล่วงหน้ามา - รอยืนยันเข้างาน"
+                  >
+                    รอยืนยัน
+                  </span>
+                )}
                 <span className="vk-double-badge">ควบเช้า + ดึก</span>
                 {hasHalf && <span className="vk-tpi-wp-half">ครึ่งกะ</span>}
                 {hasOt && (
                   <span className="vk-tpi-wp-ot">
-                    {emp.position === 'clerk' ? 'OT 8 ชม.' : `OT ${totalOtHrs} ชม.`}
+                    OT {totalOtHrs} ชม.
                   </span>
                 )}
               </div>
@@ -1382,6 +1734,37 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
               </div>
             </div>
             <div className="vk-tpi-double-right">
+              {isAnyPending && (
+                <button
+                  type="button"
+                  onClick={handleConfirmDouble}
+                  title="ยืนยันเข้างาน"
+                  style={{
+                    background: 'rgba(0,120,80,0.12)',
+                    border: '1px solid rgba(0,120,80,0.3)',
+                    cursor: 'pointer',
+                    color: '#065f46',
+                    padding: '2px 7px',
+                    borderRadius: 4,
+                    fontSize: 12,
+                    fontWeight: 700,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    marginRight: 4,
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = '#059669'
+                    e.currentTarget.style.color = '#ffffff'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'rgba(0,120,80,0.12)'
+                    e.currentTarget.style.color = '#065f46'
+                  }}
+                >
+                  ✓
+                </button>
+              )}
               <button
                 type="button"
                 className="vk-tpi-btn-del"
@@ -1401,8 +1784,9 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
           {/* Column 3: Night Shift Box */}
           <div
             className="vk-tpi-split-double-card card-night"
+            style={isAnyPending ? { borderLeft: '3px solid #10b981', background: '#f0fdf4' } : undefined}
             onClick={() => openEmployeeModal(emp)}
-            title="คลิกเพื่อแก้ไขการจัดกะ"
+            title={isAnyPending ? 'รอยืนยันเข้างาน (คลิกเพื่อแก้ไขการจัดกะ)' : 'คลิกเพื่อแก้ไขการจัดกะ'}
           >
             <div className="vk-tpi-double-main">
               <div className="vk-tpi-double-line1">
@@ -1415,11 +1799,29 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                     ⭐
                   </span>
                 )}
+                {isAnyPending && (
+                  <span
+                    style={{
+                      fontSize: 9,
+                      fontWeight: 700,
+                      padding: '1px 6px',
+                      borderRadius: 999,
+                      background: 'rgba(0,120,80,0.1)',
+                      color: '#065f46',
+                      border: '1px solid rgba(0,120,80,0.25)',
+                      letterSpacing: '0.04em',
+                      flexShrink: 0,
+                    }}
+                    title="จัดกะล่วงหน้ามา - รอยืนยันเข้างาน"
+                  >
+                    รอยืนยัน
+                  </span>
+                )}
                 <span className="vk-double-badge">ควบเช้า + ดึก</span>
                 {hasHalf && <span className="vk-tpi-wp-half">ครึ่งกะ</span>}
                 {hasOt && (
                   <span className="vk-tpi-wp-ot">
-                    {emp.position === 'clerk' ? 'OT 8 ชม.' : `OT ${totalOtHrs} ชม.`}
+                    OT {totalOtHrs} ชม.
                   </span>
                 )}
               </div>
@@ -1428,6 +1830,37 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
               </div>
             </div>
             <div className="vk-tpi-double-right">
+              {isAnyPending && (
+                <button
+                  type="button"
+                  onClick={handleConfirmDouble}
+                  title="ยืนยันเข้างาน"
+                  style={{
+                    background: 'rgba(0,120,80,0.12)',
+                    border: '1px solid rgba(0,120,80,0.3)',
+                    cursor: 'pointer',
+                    color: '#065f46',
+                    padding: '2px 7px',
+                    borderRadius: 4,
+                    fontSize: 12,
+                    fontWeight: 700,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    marginRight: 4,
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = '#059669'
+                    e.currentTarget.style.color = '#ffffff'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'rgba(0,120,80,0.12)'
+                    e.currentTarget.style.color = '#065f46'
+                  }}
+                >
+                  ✓
+                </button>
+              )}
               <button
                 type="button"
                 className="vk-tpi-btn-del"
@@ -1587,147 +2020,118 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
           zIndex: 20,
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, flexWrap: 'wrap' }}>
-          {/* Period selector if multiple periods */}
-          {periods.length > 1 && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginRight: 6 }}>
-              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--vk-ink-3)' }}>งวด:</span>
-              <select
-                value={currentPeriod?.id || ''}
-                onChange={(e) => setSelectedPeriodId(e.target.value)}
-                style={{
-                  fontSize: 12,
-                  padding: '3px 8px',
-                  borderRadius: 6,
-                  border: '1px solid var(--vk-rule-soft)',
-                  background: 'var(--vk-paper)',
-                  color: 'var(--vk-ink)',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                }}
-              >
-                {periods.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.label || `${p.period_start} ถึง ${p.period_end}`}
-                  </option>
-                ))}
-              </select>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, position: 'relative' }}>
+          <button
+            type="button"
+            className="vk-btn vk-btn--ghost"
+            style={{ height: 32, padding: '0 10px' }}
+            disabled={isAtStart}
+            onClick={() => navigateDate(-1)}
+            title="วันก่อนหน้า"
+          >
+            <ChevronLeft style={{ width: 15, height: 15 }} />
+          </button>
+
+          {periodDates.length > 0 ? (
+            <select
+              value={activeDateStr}
+              onChange={(e) => {
+                handleSelectDate(parseLocal(e.target.value))
+                setSelectedPoolIds(new Set())
+              }}
+              style={{
+                fontFamily: 'var(--vk-sans)',
+                fontWeight: 700,
+                fontSize: 16,
+                letterSpacing: '-0.01em',
+                color: isHoliday ? '#6F4A0E' : weekend ? '#5b21b6' : 'var(--vk-ink)',
+                background: 'var(--vk-paper)',
+                border: '1px solid var(--vk-rule-soft)',
+                borderRadius: 6,
+                padding: '4px 10px',
+                cursor: 'pointer',
+                outline: 'none',
+                width: 240,
+                textAlign: 'center',
+              }}
+              aria-label="เลือกวันที่ในงวด"
+            >
+              {periodDates.map((dStr) => (
+                <option key={dStr} value={dStr}>
+                  {fmtDisplay(dStr)}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <div
+              style={{
+                fontFamily: 'var(--vk-sans)',
+                fontWeight: 700,
+                fontSize: 17,
+                letterSpacing: '-0.01em',
+                color: isHoliday ? '#6F4A0E' : weekend ? '#5b21b6' : 'var(--vk-ink)',
+                width: 240,
+                textAlign: 'center',
+              }}
+            >
+              {fmtDisplay(activeDateStr)}
             </div>
           )}
 
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, position: 'relative' }}>
-            <button
-              type="button"
-              className="vk-btn vk-btn--ghost"
-              style={{ height: 32, padding: '0 10px' }}
-              disabled={isAtStart}
-              onClick={() => navigateDate(-1)}
-              title="วันก่อนหน้า"
-            >
-              <ChevronLeft style={{ width: 15, height: 15 }} />
-            </button>
+          <button
+            type="button"
+            className="vk-btn vk-btn--ghost"
+            style={{ height: 32, padding: '0 10px' }}
+            disabled={isAtEnd}
+            onClick={() => navigateDate(1)}
+            title="วันถัดไป"
+          >
+            <ChevronRight style={{ width: 15, height: 15 }} />
+          </button>
 
-            {periodDates.length > 0 ? (
-              <select
-                value={activeDateStr}
-                onChange={(e) => {
-                  setCurrentDate(parseLocal(e.target.value))
-                  setSelectedPoolIds(new Set())
-                }}
+          {/* Badges positioned next to ChevronRight without shifting arrow buttons */}
+          <div style={{
+            position: 'absolute',
+            left: '100%',
+            marginLeft: 10,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            whiteSpace: 'nowrap',
+            pointerEvents: 'none',
+          }}>
+            {weekend && (
+              <span
                 style={{
-                  fontFamily: 'var(--vk-sans)',
+                  fontSize: 10,
                   fontWeight: 700,
-                  fontSize: 16,
-                  letterSpacing: '-0.01em',
-                  color: isHoliday ? '#6F4A0E' : weekend ? '#5b21b6' : 'var(--vk-ink)',
-                  background: 'var(--vk-paper)',
-                  border: '1px solid var(--vk-rule-soft)',
-                  borderRadius: 6,
-                  padding: '4px 10px',
-                  cursor: 'pointer',
-                  outline: 'none',
-                  width: 240,
-                  textAlign: 'center',
-                }}
-                aria-label="เลือกวันที่ในงวด"
-              >
-                {periodDates.map((dStr) => (
-                  <option key={dStr} value={dStr}>
-                    {fmtDisplay(dStr)}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <div
-                style={{
-                  fontFamily: 'var(--vk-sans)',
-                  fontWeight: 700,
-                  fontSize: 17,
-                  letterSpacing: '-0.01em',
-                  color: isHoliday ? '#6F4A0E' : weekend ? '#5b21b6' : 'var(--vk-ink)',
-                  width: 240,
-                  textAlign: 'center',
+                  letterSpacing: '0.08em',
+                  color: '#5b21b6',
+                  background: 'rgba(91,33,182,0.08)',
+                  padding: '2px 8px',
+                  borderRadius: 999,
+                  whiteSpace: 'nowrap',
                 }}
               >
-                {fmtDisplay(activeDateStr)}
-              </div>
+                วันหยุดสุดสัปดาห์
+              </span>
             )}
-
-            <button
-              type="button"
-              className="vk-btn vk-btn--ghost"
-              style={{ height: 32, padding: '0 10px' }}
-              disabled={isAtEnd}
-              onClick={() => navigateDate(1)}
-              title="วันถัดไป"
-            >
-              <ChevronRight style={{ width: 15, height: 15 }} />
-            </button>
-
-            {/* Badges positioned next to ChevronRight without shifting arrow buttons */}
-            <div style={{
-              position: 'absolute',
-              left: '100%',
-              marginLeft: 10,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              whiteSpace: 'nowrap',
-              pointerEvents: 'none',
-            }}>
-              {weekend && (
-                <span
-                  style={{
-                    fontSize: 10,
-                    fontWeight: 700,
-                    letterSpacing: '0.08em',
-                    color: '#5b21b6',
-                    background: 'rgba(91,33,182,0.08)',
-                    padding: '2px 8px',
-                    borderRadius: 999,
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  วันหยุดสุดสัปดาห์
-                </span>
-              )}
-              {isHoliday && (
-                <span
-                  style={{
-                    fontSize: 10,
-                    fontWeight: 700,
-                    letterSpacing: '0.08em',
-                    color: '#6F4A0E',
-                    background: 'rgba(235,160,0,0.18)',
-                    padding: '2px 8px',
-                    borderRadius: 999,
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  วันหยุดนักขัตฤกษ์
-                </span>
-              )}
-            </div>
+            {isHoliday && (
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  letterSpacing: '0.08em',
+                  color: '#6F4A0E',
+                  background: 'rgba(235,160,0,0.18)',
+                  padding: '2px 8px',
+                  borderRadius: 999,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                วันหยุดนักขัตฤกษ์
+              </span>
+            )}
           </div>
         </div>
 
@@ -1791,6 +2195,25 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
 
             <button
               type="button"
+              className="vk-btn vk-btn-secondary"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: 13,
+                background: '#ffffff',
+                borderColor: 'var(--vk-rule-soft)',
+                color: 'var(--vk-ink-2)',
+              }}
+              onClick={handleOpenPreassignModal}
+              title="คัดลอกหรือจัดกะล่วงหน้าให้พนักงานในวันนี้ไปวันอื่นๆ ในงวด"
+            >
+              <Calendar style={{ width: 14, height: 14, color: '#059669' }} />
+              จัดกะล่วงหน้าไปวันอื่น
+            </button>
+
+            <button
+              type="button"
               className="vk-btn vk-btn--primary"
               style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13 }}
               onClick={() => saveMutation.mutate()}
@@ -1802,6 +2225,60 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Pending Attendance Confirmation Banner (DRT Pattern) */}
+      {entries.some((e) => !!e.is_pending) && (
+        <div
+          style={{
+            margin: '10px 16px 0',
+            padding: '10px 18px',
+            borderRadius: 8,
+            background: 'linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%)',
+            border: '1px solid #a7f3d0',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 16,
+            boxShadow: '0 1px 3px rgba(16,185,129,0.08)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 18 }}>📋</span>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 13, color: '#065f46' }}>
+                มีพนักงานรอยืนยันเข้างานในวันนี้ {entries.filter((e) => !!e.is_pending).length} คน
+              </div>
+              <div style={{ fontSize: 12, color: '#047857', marginTop: 1 }}>
+                พนักงานถูกจัดกะล่วงหน้ามาจากวันอื่น กรุณากดปุ่ม [✓] สีเขียวที่รายชื่อพนักงาน หรือกดยืนยันทั้งหมด
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="vk-btn"
+            onClick={handleConfirmAllPending}
+            style={{
+              background: '#059669',
+              color: '#ffffff',
+              fontWeight: 700,
+              fontSize: 13,
+              padding: '6px 14px',
+              borderRadius: 6,
+              border: 'none',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              boxShadow: '0 1px 2px rgba(5,150,105,0.2)',
+            }}
+            title="ยืนยันการเข้างานของพนักงานรอยืนยันทั้งหมดในวันนี้และบันทึกข้อมูล"
+          >
+            <Check style={{ width: 15, height: 15 }} />
+            ✓ ยืนยันพนักงานทั้งหมด ({entries.filter((e) => !!e.is_pending).length} คน)
+          </button>
+        </div>
+      )}
 
       {/* 3. Selection Bar (Diamond Pattern: Appears when workers selected in Pool) */}
       {hasSelection && (
@@ -2040,8 +2517,8 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                             </span>
                           )}
                           {allSafetyAdvances.some(a => a.employee_id === emp.id && a.period_id === currentPeriod?.id) && (
-                            <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 4, background: '#ede9fe', color: '#6d28d9', border: '1px solid #c4b5fd' }} title="มีบันทึกค่าปรับผิดระเบียบ จป. ในงวดนี้">
-                              จป.
+                            <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 4, background: '#fef2f2', color: '#b91c1c', border: '1px solid #fca5a5' }} title="มีบันทึกค่าปรับผิดระเบียบ จป. ในงวดนี้">
+                              ปรับ จป.
                             </span>
                           )}
                         </div>
@@ -2227,13 +2704,14 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                                         <div
                                           key={`${entry.employee_id}-${shiftIndex}`}
                                           className="vk-tpi-worker-pill"
+                                          style={entry.is_pending ? { borderLeft: '3px solid #10b981', background: '#f0fdf4' } : undefined}
                                           draggable={!isPaused}
                                           onDragStart={(e) => handleDragStartFromCell(e, emp.id, job.id, shiftIndex)}
                                           onClick={(e) => {
                                             e.stopPropagation()
                                             openEmployeeModal(emp)
                                           }}
-                                          title="คลิกเพื่อจัดการกะ หรือเพิ่มกะที่ 2"
+                                          title={entry.is_pending ? 'พนักงานรอยืนยันเข้างาน (คลิกเพื่อจัดการกะ)' : 'คลิกเพื่อจัดการกะ หรือเพิ่มกะที่ 2'}
                                         >
                                           <div className="vk-tpi-worker-pill-main">
                                             <div className="vk-tpi-worker-pill-line1">
@@ -2243,6 +2721,24 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                                                 </span>
                                                 {isSkilledWorker(emp.id) && <span title="พนักงานค่าแรงฝีมือ" style={{ flexShrink: 0, fontSize: 11 }}>⭐</span>}
                                               </div>
+                                              {entry.is_pending && (
+                                                <span
+                                                  style={{
+                                                    fontSize: 9,
+                                                    fontWeight: 700,
+                                                    padding: '1px 6px',
+                                                    borderRadius: 999,
+                                                    background: 'rgba(0,120,80,0.1)',
+                                                    color: '#065f46',
+                                                    border: '1px solid rgba(0,120,80,0.25)',
+                                                    letterSpacing: '0.04em',
+                                                    flexShrink: 0,
+                                                  }}
+                                                  title="จัดกะล่วงหน้ามา - รอยืนยันเข้างาน"
+                                                >
+                                                  รอยืนยัน
+                                                </span>
+                                              )}
                                               {totalWorkerShifts > 1 && (
                                                 <span className="vk-tpi-wp-2shift" title="มีอีก 1 กะในรหัสงานอื่น">
                                                   2 กะ
@@ -2254,13 +2750,19 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                                                 </span>
                                               )}
                                               {(Number(entry.ot_hours) || 0) > 0 && (
-                                                <span className="vk-tpi-wp-ot" title={emp.position === 'clerk' ? 'OT เสมียนเต็มกะ 8 ชม. (2 เท่า)' : `OT ${entry.ot_hours} ชม. (1.5 เท่า/ชม.)`}>
-                                                  {emp.position === 'clerk' ? 'OT 8 ชม. (2x)' : `OT ${entry.ot_hours} ชม. (1.5x)`}
+                                                <span
+                                                  className="vk-tpi-wp-ot"
+                                                  title={`OT ${entry.is_ot_before_shift ? "ก่อนเข้ากะ " : "หลังเลิกกะ "}${entry.ot_hours} ชม. ${entry.ot_job_code_snapshot && entry.ot_job_code_snapshot !== entry.job_code_snapshot ? `(รหัสงาน OT: ${entry.ot_job_code_snapshot}) ` : ""}(${getShiftOtTimeRange(entry.shift_index, entry.ot_hours || 0, !!entry.is_ot_before_shift)}) 1.5 เท่า`}
+                                                >
+                                                  OT {entry.is_ot_before_shift ? "ก่อนกะ " : ""}{entry.ot_hours} ชม.
+                                                  {entry.ot_job_code_snapshot && entry.ot_job_code_snapshot !== entry.job_code_snapshot && (
+                                                    <span style={{ fontSize: 9, opacity: 0.9, marginLeft: 3, fontWeight: 700 }}>[{entry.ot_job_code_snapshot}]</span>
+                                                  )}
                                                 </span>
                                               )}
                                               {allSafetyAdvances.some(a => a.employee_id === emp.id && a.period_id === currentPeriod?.id) && (
-                                                <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 4, background: '#ede9fe', color: '#6d28d9', border: '1px solid #c4b5fd' }} title="มีบันทึกค่าปรับผิดระเบียบ จป. ในงวดนี้">
-                                                  จป.
+                                                <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 4, background: '#fef2f2', color: '#b91c1c', border: '1px solid #fca5a5' }} title="มีบันทึกค่าปรับผิดระเบียบ จป. ในงวดนี้">
+                                                  ปรับ จป.
                                                 </span>
                                               )}
                                             </div>
@@ -2268,17 +2770,53 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                                               <span className="vk-tpi-wp-code">{emp.employee_code}</span>
                                             </div>
                                           </div>
-                                          <button
-                                            type="button"
-                                            onClick={(e) => {
-                                              e.stopPropagation()
-                                              handleRemove(emp.id, job.id, shiftIndex)
-                                            }}
-                                            className="vk-tpi-btn-del"
-                                            title="ลบออกจากกะ"
-                                          >
-                                            <X style={{ width: 14, height: 14 }} />
-                                          </button>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                            {entry.is_pending && (
+                                              <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                  e.stopPropagation()
+                                                  handleConfirmPending(emp.id, job.id, shiftIndex)
+                                                }}
+                                                title="ยืนยันเข้างาน"
+                                                style={{
+                                                  background: 'rgba(0,120,80,0.12)',
+                                                  border: '1px solid rgba(0,120,80,0.3)',
+                                                  cursor: 'pointer',
+                                                  color: '#065f46',
+                                                  padding: '2px 7px',
+                                                  borderRadius: 4,
+                                                  fontSize: 12,
+                                                  fontWeight: 700,
+                                                  display: 'flex',
+                                                  alignItems: 'center',
+                                                  justifyContent: 'center',
+                                                  transition: 'all 0.15s ease',
+                                                }}
+                                                onMouseEnter={(e) => {
+                                                  e.currentTarget.style.background = '#059669'
+                                                  e.currentTarget.style.color = '#ffffff'
+                                                }}
+                                                onMouseLeave={(e) => {
+                                                  e.currentTarget.style.background = 'rgba(0,120,80,0.12)'
+                                                  e.currentTarget.style.color = '#065f46'
+                                                }}
+                                              >
+                                                ✓
+                                              </button>
+                                            )}
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation()
+                                                handleRemove(emp.id, job.id, shiftIndex)
+                                              }}
+                                              className="vk-tpi-btn-del"
+                                              title="ลบออกจากกะ"
+                                            >
+                                              <X style={{ width: 14, height: 14 }} />
+                                            </button>
+                                          </div>
                                         </div>
                                       )
                                     })}
@@ -2445,13 +2983,14 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                                         <div
                                           key={`${entry.employee_id}-${shiftIndex}`}
                                           className="vk-tpi-worker-pill"
+                                          style={entry.is_pending ? { borderLeft: '3px solid #10b981', background: '#f0fdf4' } : undefined}
                                           draggable={!isPaused}
                                           onDragStart={(e) => handleDragStartFromCell(e, emp.id, job.id, shiftIndex)}
                                           onClick={(e) => {
                                             e.stopPropagation()
                                             openEmployeeModal(emp)
                                           }}
-                                          title="คลิกเพื่อจัดการกะ หรือเพิ่มกะที่ 2"
+                                          title={entry.is_pending ? 'พนักงานรอยืนยันเข้างาน (คลิกเพื่อจัดการกะ)' : 'คลิกเพื่อจัดการกะ หรือเพิ่มกะที่ 2'}
                                         >
                                           <div className="vk-tpi-worker-pill-main">
                                             <div className="vk-tpi-worker-pill-line1">
@@ -2461,6 +3000,24 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                                                 </span>
                                                 {isSkilledWorker(emp.id) && <span title="พนักงานค่าแรงฝีมือ" style={{ flexShrink: 0, fontSize: 11 }}>⭐</span>}
                                               </div>
+                                              {entry.is_pending && (
+                                                <span
+                                                  style={{
+                                                    fontSize: 9,
+                                                    fontWeight: 700,
+                                                    padding: '1px 6px',
+                                                    borderRadius: 999,
+                                                    background: 'rgba(0,120,80,0.1)',
+                                                    color: '#065f46',
+                                                    border: '1px solid rgba(0,120,80,0.25)',
+                                                    letterSpacing: '0.04em',
+                                                    flexShrink: 0,
+                                                  }}
+                                                  title="จัดกะล่วงหน้ามา - รอยืนยันเข้างาน"
+                                                >
+                                                  รอยืนยัน
+                                                </span>
+                                              )}
                                               {totalWorkerShifts > 1 && (
                                                 <span className="vk-tpi-wp-2shift" title="มีอีก 1 กะในรหัสงานอื่น">
                                                   2 กะ
@@ -2472,13 +3029,19 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                                                 </span>
                                               )}
                                               {(Number(entry.ot_hours) || 0) > 0 && (
-                                                <span className="vk-tpi-wp-ot" title={emp.position === 'clerk' ? 'OT เสมียนเต็มกะ 8 ชม. (2 เท่า)' : `OT ${entry.ot_hours} ชม. (1.5 เท่า/ชม.)`}>
-                                                  {emp.position === 'clerk' ? 'OT 8 ชม. (2x)' : `OT ${entry.ot_hours} ชม. (1.5x)`}
+                                                <span
+                                                  className="vk-tpi-wp-ot"
+                                                  title={`OT ${entry.is_ot_before_shift ? "ก่อนเข้ากะ " : "หลังเลิกกะ "}${entry.ot_hours} ชม. ${entry.ot_job_code_snapshot && entry.ot_job_code_snapshot !== entry.job_code_snapshot ? `(รหัสงาน OT: ${entry.ot_job_code_snapshot}) ` : ""}(${getShiftOtTimeRange(entry.shift_index, entry.ot_hours || 0, !!entry.is_ot_before_shift)}) 1.5 เท่า`}
+                                                >
+                                                  OT {entry.is_ot_before_shift ? "ก่อนกะ " : ""}{entry.ot_hours} ชม.
+                                                  {entry.ot_job_code_snapshot && entry.ot_job_code_snapshot !== entry.job_code_snapshot && (
+                                                    <span style={{ fontSize: 9, opacity: 0.9, marginLeft: 3, fontWeight: 700 }}>[{entry.ot_job_code_snapshot}]</span>
+                                                  )}
                                                 </span>
                                               )}
                                               {allSafetyAdvances.some(a => a.employee_id === emp.id && a.period_id === currentPeriod?.id) && (
-                                                <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 4, background: '#ede9fe', color: '#6d28d9', border: '1px solid #c4b5fd' }} title="มีบันทึกค่าปรับผิดระเบียบ จป. ในงวดนี้">
-                                                  จป.
+                                                <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 4, background: '#fef2f2', color: '#b91c1c', border: '1px solid #fca5a5' }} title="มีบันทึกค่าปรับผิดระเบียบ จป. ในงวดนี้">
+                                                  ปรับ จป.
                                                 </span>
                                               )}
                                             </div>
@@ -2486,17 +3049,53 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                                               <span className="vk-tpi-wp-code">{emp.employee_code}</span>
                                             </div>
                                           </div>
-                                          <button
-                                            type="button"
-                                            onClick={(e) => {
-                                              e.stopPropagation()
-                                              handleRemove(emp.id, job.id, shiftIndex)
-                                            }}
-                                            className="vk-tpi-btn-del"
-                                            title="ลบออกจากกะ"
-                                          >
-                                            <X style={{ width: 14, height: 14 }} />
-                                          </button>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                            {entry.is_pending && (
+                                              <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                  e.stopPropagation()
+                                                  handleConfirmPending(emp.id, job.id, shiftIndex)
+                                                }}
+                                                title="ยืนยันเข้างาน"
+                                                style={{
+                                                  background: 'rgba(0,120,80,0.12)',
+                                                  border: '1px solid rgba(0,120,80,0.3)',
+                                                  cursor: 'pointer',
+                                                  color: '#065f46',
+                                                  padding: '2px 7px',
+                                                  borderRadius: 4,
+                                                  fontSize: 12,
+                                                  fontWeight: 700,
+                                                  display: 'flex',
+                                                  alignItems: 'center',
+                                                  justifyContent: 'center',
+                                                  transition: 'all 0.15s ease',
+                                                }}
+                                                onMouseEnter={(e) => {
+                                                  e.currentTarget.style.background = '#059669'
+                                                  e.currentTarget.style.color = '#ffffff'
+                                                }}
+                                                onMouseLeave={(e) => {
+                                                  e.currentTarget.style.background = 'rgba(0,120,80,0.12)'
+                                                  e.currentTarget.style.color = '#065f46'
+                                                }}
+                                              >
+                                                ✓
+                                              </button>
+                                            )}
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation()
+                                                handleRemove(emp.id, job.id, shiftIndex)
+                                              }}
+                                              className="vk-tpi-btn-del"
+                                              title="ลบออกจากกะ"
+                                            >
+                                              <X style={{ width: 14, height: 14 }} />
+                                            </button>
+                                          </div>
                                         </div>
                                       )
                                     })}
@@ -2547,15 +3146,18 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
           ? (modalTier === 'skilled' ? (modalJob2?.skilled_rate ?? 377) : (modalJob2?.normal_rate ?? 357))
           : (modalTier === 'skilled' && modalJob2?.skilled_rate ? modalJob2.skilled_rate : (modalJob2?.normal_rate || 357))
 
+        const modalOtJob = jobs.find((j) => j.id === (modalShift1OtJobId || modalShift1JobId)) || modalJob1
+        const isClerkOtJob = isClerkJob(modalOtJob)
+        const modalOtBaseRate = isClerkOtJob
+          ? (modalTier === 'skilled' ? (modalOtJob?.skilled_rate ?? 377) : (modalOtJob?.normal_rate ?? 357))
+          : (modalTier === 'skilled' && modalOtJob?.skilled_rate ? modalOtJob.skilled_rate : (modalOtJob?.normal_rate || 357))
+
         const modalShift1Wage = modalShift1IsHalf ? modalBaseRate1 / 2 : modalBaseRate1
-        const modalShift1OtCalc = (!modalIsClerk && modalShift1HasOt)
-          ? calculateEntryOt(modalShift1OtHours, modalBaseRate1, modalIsClerk)
+        const modalShift1OtCalc = modalShift1HasOt
+          ? calculateEntryOt(modalShift1OtHours, modalOtBaseRate)
           : { ot_hours: 0, ot_pay: 0 }
 
         const modalShift2Wage = modalShift2IsHalf ? modalBaseRate2 / 2 : modalBaseRate2
-        const modalShift2OtCalc = modalShift2HasOt
-          ? calculateEntryOt(modalShift2OtHours, modalBaseRate2, modalIsClerk)
-          : { ot_hours: 0, ot_pay: 0 }
 
         return (
           <div className="vk-modal-backdrop" onClick={() => setModalEmp(null)}>
@@ -2751,113 +3353,227 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                     </span>
                   </div>
 
-                  {/* OT Section for Shift 1 — Hidden for clerks (Clerks must work 8h Shift 1; OT is only allowed in Shift 2) */}
-                  {!modalIsClerk && (
-                    <div
-                      style={{
-                        marginTop: 10,
-                        padding: '10px 12px',
-                        background: modalShift1HasOt ? '#fff7ed' : '#f8fafc',
-                        border: `1px solid ${modalShift1HasOt ? '#f97316' : '#e2e8f0'}`,
-                        borderRadius: 6,
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
-                        <label
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 8,
-                            cursor: 'pointer',
-                            userSelect: 'none',
-                            fontSize: 12,
-                            fontWeight: 600,
-                            color: modalShift1HasOt ? '#9a3412' : 'var(--vk-ink-2)',
-                          }}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={modalShift1HasOt}
-                            onChange={(e) => {
-                              setModalShift1HasOt(e.target.checked)
-                              if (e.target.checked && modalShift1OtHours <= 0) {
+                  {/* OT Section for Shift 1 — identical UI for all positions */}
+                  <div
+                    style={{
+                      marginTop: 10,
+                      padding: '10px 12px',
+                      background: modalShift1HasOt ? '#fff7ed' : '#f8fafc',
+                      border: `1px solid ${modalShift1HasOt ? '#f97316' : '#e2e8f0'}`,
+                      borderRadius: 6,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
+                      <label
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          cursor: modalHasShift2 ? 'not-allowed' : 'pointer',
+                          userSelect: 'none',
+                          fontSize: 12,
+                          fontWeight: 600,
+                          color: modalShift1HasOt ? '#9a3412' : (modalHasShift2 ? 'var(--vk-ink-3)' : 'var(--vk-ink-2)'),
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          disabled={modalHasShift2}
+                          checked={modalShift1HasOt}
+                          onChange={(e) => {
+                            setModalShift1HasOt(e.target.checked)
+                            if (e.target.checked) {
+                              setModalHasShift2(false)
+                              if (modalShift1OtHours <= 0) {
                                 setModalShift1OtHours(1)
                               }
-                            }}
-                            style={{ accentColor: '#ea580c', width: 15, height: 15 }}
-                          />
-                          <span>OT (จ่าย 1.5 เท่าต่อชั่วโมง)</span>
-                        </label>
-                        {modalShift1HasOt && (
-                          <span style={{ fontSize: 12, fontWeight: 700, color: '#c2410c' }}>
-                            +฿{modalShift1OtCalc.ot_pay.toFixed(2)}
-                          </span>
-                        )}
-                      </div>
-
+                            }
+                          }}
+                          style={{ accentColor: '#ea580c', width: 15, height: 15 }}
+                        />
+                        <span>OT (จ่าย 1.5 เท่าต่อชั่วโมง)</span>
+                      </label>
                       {modalShift1HasOt && (
-                        <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed #fed7aa' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
-                              <span style={{ fontSize: 11, color: '#9a3412', fontWeight: 600 }}>จำนวนชั่วโมง OT:</span>
-                              {[1, 2, 3, 4].map((h) => (
-                                <button
-                                  key={h}
-                                  type="button"
-                                  onClick={() => setModalShift1OtHours(h)}
-                                  style={{
-                                    fontSize: 11,
-                                    fontWeight: modalShift1OtHours === h ? 700 : 500,
-                                    padding: '2px 8px',
-                                    borderRadius: 4,
-                                    border: `1px solid ${modalShift1OtHours === h ? '#ea580c' : '#fdba74'}`,
-                                    background: modalShift1OtHours === h ? '#ea580c' : '#ffffff',
-                                    color: modalShift1OtHours === h ? '#ffffff' : '#9a3412',
-                                    cursor: 'pointer',
-                                  }}
-                                >
-                                  {h} ชม.
-                                </button>
-                              ))}
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-                                <input
-                                  type="number"
-                                  min={0.5}
-                                  max={12}
-                                  step={0.5}
-                                  value={modalShift1OtHours}
-                                  onChange={(e) => setModalShift1OtHours(Math.max(0, Number(e.target.value)))}
-                                  style={{
-                                    width: 48,
-                                    height: 24,
-                                    fontSize: 11,
-                                    textAlign: 'center',
-                                    borderRadius: 4,
-                                    border: '1px solid #fdba74',
-                                    padding: '0 4px',
-                                  }}
-                                />
-                                <span style={{ fontSize: 11, color: '#9a3412' }}>ชม.</span>
-                              </div>
-                            </div>
-                            <div style={{ fontSize: 11, color: '#c2410c' }}>
-                              (อัตรา (฿{modalBaseRate1}/8 × 1.5) = ฿{(modalBaseRate1 / 8 * 1.5).toFixed(2)}/ชม.)
-                            </div>
-                          </div>
-                        </div>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: '#c2410c' }}>
+                          +฿{modalShift1OtCalc.ot_pay.toFixed(2)}
+                        </span>
                       )}
-
-                      {modalShift1HasOt && (
-                        <div style={{ marginTop: 6, fontSize: 11, color: '#9a3412', background: 'rgba(254, 215, 170, 0.4)', padding: '4px 8px', borderRadius: 4 }}>
-                          <span>ค่าแรงกะ ฿{modalShift1Wage.toFixed(2)} + OT {modalShift1OtHours} ชม. ฿{modalShift1OtCalc.ot_pay.toFixed(2)} = <strong>รวม ฿{(modalShift1Wage + modalShift1OtCalc.ot_pay).toFixed(2)}</strong></span>
-                        </div>
+                      {modalHasShift2 && (
+                        <span style={{ fontSize: 11, color: '#9a3412', background: '#ffedd5', padding: '2px 8px', borderRadius: 4 }}>
+                          ทำงานควบ 2 กะ (16 ชม.) ไม่สามารถทำ OT ได้
+                        </span>
                       )}
                     </div>
-                  )}
+
+                    {modalShift1HasOt && (
+                      <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed #fed7aa', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {/* OT Job Code Selection (can differ from Shift 1) */}
+                        <div style={{ background: '#fff', border: '1px solid #fed7aa', borderRadius: 6, padding: '8px 10px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                            <label style={{ fontSize: 11, fontWeight: 700, color: '#9a3412' }}>
+                              รหัสงานสำหรับการทำ OT:
+                            </label>
+                            {modalOtJob && modalOtJob.id !== modalShift1JobId && (
+                              <span style={{ fontSize: 10, background: '#ea580c', color: '#ffffff', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>
+                                📍 คนละตำแหน่งกับกะที่ 1
+                              </span>
+                            )}
+                          </div>
+                          <select
+                            className="vk-modal-select"
+                            value={modalShift1OtJobId || modalShift1JobId}
+                            onChange={(e) => setModalShift1OtJobId(e.target.value)}
+                            style={{ borderColor: '#fdba74', background: '#ffffff', fontSize: 12 }}
+                          >
+                            <optgroup label="1. ประเภทงานประจำ">
+                              {regularJobs.map((j) => (
+                                <option key={j.id} value={j.id}>
+                                  {isClerkJob(j) ? '🏢 [เสมียน] ' : ''}{j.code} - {j.description.substring(0, 32)}... (ปกติ ฿{j.normal_rate ?? 357}{j.skilled_rate != null ? ` | ฝีมือ ฿${j.skilled_rate}` : ''})
+                                </option>
+                              ))}
+                            </optgroup>
+                            <optgroup label="2. ประเภทงานชั่วคราว">
+                              {temporaryJobs.map((j) => (
+                                <option key={j.id} value={j.id}>
+                                  {isClerkJob(j) ? '🏢 [เสมียน] ' : ''}{j.code} - {j.description.substring(0, 32)}... (ปกติ ฿{j.normal_rate ?? 357}{j.skilled_rate != null ? ` | ฝีมือ ฿${j.skilled_rate}` : ''})
+                                </option>
+                              ))}
+                            </optgroup>
+                          </select>
+                          {modalOtJob && (
+                            <div style={{ fontSize: 11, color: '#c2410c', marginTop: 4, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                              {isClerkJob(modalOtJob) && (
+                                <span className="vk-tpi-clerk-badge-prefix" style={{ fontSize: 10 }}>
+                                  🏢 รหัสงานกลุ่มเสมียน
+                                </span>
+                              )}
+                              <span>
+                                เรทงานนี้: เรทปกติ ฿{modalOtJob.normal_rate ?? 357} · เรทฝีมือ {modalOtJob.skilled_rate != null ? `฿${modalOtJob.skilled_rate}` : 'ไม่มี'}
+                                {' · '}คำนวณจากฐาน <strong>฿{modalOtBaseRate}</strong>/กะ (<strong>฿{(modalOtBaseRate / 8 * 1.5).toFixed(2)}/ชม.</strong>)
+                              </span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Pre-shift OT Checkbox & Time Range Display */}
+                        <div
+                          style={{
+                            padding: '8px 10px',
+                            background: '#ffedd5',
+                            borderRadius: 6,
+                            border: '1px solid #fed7aa',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            flexWrap: 'wrap',
+                            gap: 8,
+                          }}
+                        >
+                          <label
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 6,
+                              cursor: 'pointer',
+                              userSelect: 'none',
+                              fontSize: 12,
+                              fontWeight: 600,
+                              color: '#9a3412',
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={modalShift1OtBeforeShift}
+                              onChange={(e) => setModalShift1OtBeforeShift(e.target.checked)}
+                              style={{ accentColor: '#ea580c', width: 15, height: 15 }}
+                            />
+                            <span>ทำ OT ก่อนเริ่มงาน</span>
+                          </label>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{ fontSize: 11, color: '#9a3412', fontWeight: 600 }}>
+                              ช่วงเวลา OT ({modalShift1OtBeforeShift ? 'ก่อนเข้ากะ' : 'หลังเลิกกะ'}):
+                            </span>
+                            <span
+                              style={{
+                                fontSize: 12,
+                                fontWeight: 700,
+                                color: '#c2410c',
+                                background: '#ffffff',
+                                padding: '2px 8px',
+                                borderRadius: 4,
+                                border: '1px solid #fdba74',
+                                letterSpacing: '0.02em',
+                              }}
+                            >
+                              🕒 {getShiftOtTimeRange(modalShift1Index, modalShift1OtHours, modalShift1OtBeforeShift)}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Hours selection */}
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: 11, color: '#9a3412', fontWeight: 600 }}>จำนวนชั่วโมง OT:</span>
+                            {[1, 2, 3, 4].map((h) => (
+                              <button
+                                key={h}
+                                type="button"
+                                onClick={() => setModalShift1OtHours(h)}
+                                style={{
+                                  fontSize: 11,
+                                  fontWeight: modalShift1OtHours === h ? 700 : 500,
+                                  padding: '2px 8px',
+                                  borderRadius: 4,
+                                  border: `1px solid ${modalShift1OtHours === h ? '#ea580c' : '#fdba74'}`,
+                                  background: modalShift1OtHours === h ? '#ea580c' : '#ffffff',
+                                  color: modalShift1OtHours === h ? '#ffffff' : '#9a3412',
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                {h} ชม.
+                              </button>
+                            ))}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                              <input
+                                type="number"
+                                min={0.5}
+                                max={12}
+                                step={0.5}
+                                value={modalShift1OtHours}
+                                onChange={(e) => setModalShift1OtHours(Math.max(0, Number(e.target.value)))}
+                                style={{
+                                  width: 48,
+                                  height: 24,
+                                  fontSize: 11,
+                                  textAlign: 'center',
+                                  borderRadius: 4,
+                                  border: '1px solid #fdba74',
+                                  padding: '0 4px',
+                                }}
+                              />
+                              <span style={{ fontSize: 11, color: '#9a3412' }}>ชม.</span>
+                            </div>
+                          </div>
+                          <div style={{ fontSize: 11, color: '#c2410c' }}>
+                            (อัตรา (฿{modalOtBaseRate}/8 × 1.5) = ฿{(modalOtBaseRate / 8 * 1.5).toFixed(2)}/ชม.)
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {modalShift1HasOt && (
+                      <div style={{ marginTop: 6, fontSize: 11, color: '#9a3412', background: 'rgba(254, 215, 170, 0.4)', padding: '4px 8px', borderRadius: 4 }}>
+                        <span>
+                          ค่าแรงกะ ฿{modalShift1Wage.toFixed(2)} + OT {modalShift1OtHours} ชม.
+                          {modalOtJob && modalOtJob.id !== modalShift1JobId ? ` (งาน ${modalOtJob.code})` : ''} ฿{modalShift1OtCalc.ot_pay.toFixed(2)} = <strong>รวม ฿{(modalShift1Wage + modalShift1OtCalc.ot_pay).toFixed(2)}</strong>
+                        </span>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
-                {/* Shift 2 (Optional Double Shift) Configuration — hidden when Shift 1 is half-shift */}
-                {!modalShift1IsHalf && (
+                {/* Shift 2 (Optional Double Shift) Configuration — hidden when Shift 1 is half-shift OR when Shift 1 has OT */}
+                {!modalShift1IsHalf && !modalShift1HasOt && (
                 <div className={`vk-shift-config-card ${modalHasShift2 ? 'is-active' : 'is-disabled'}`}>
                   <div className="vk-shift-card-head">
                     <label className="vk-shift2-toggle-label">
@@ -2867,6 +3583,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                         onChange={(e) => {
                           setModalHasShift2(e.target.checked)
                           if (e.target.checked) {
+                            setModalShift1HasOt(false)
                             if (!modalShift2JobId) setModalShift2JobId(modalShift1JobId)
                             if (modalShift2Index === modalShift1Index) {
                               setModalShift2Index((modalShift1Index + 1) % 3)
@@ -2991,112 +3708,23 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                         </span>
                       </div>
 
-                      {/* OT Section for Shift 2 */}
+                      {/* Shift 2 16h limit notice — no OT allowed for 2 shifts */}
                       <div
                         style={{
                           marginTop: 10,
-                          padding: '10px 12px',
-                          background: modalShift2HasOt ? '#fff7ed' : '#f8fafc',
-                          border: `1px solid ${modalShift2HasOt ? '#f97316' : '#e2e8f0'}`,
+                          padding: '8px 12px',
+                          background: '#f8fafc',
+                          border: '1px solid #e2e8f0',
                           borderRadius: 6,
+                          fontSize: 11,
+                          color: '#64748b',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
                         }}
                       >
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
-                          <label
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 8,
-                              cursor: 'pointer',
-                              userSelect: 'none',
-                              fontSize: 12,
-                              fontWeight: 600,
-                              color: modalShift2HasOt ? '#9a3412' : 'var(--vk-ink-2)',
-                            }}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={modalShift2HasOt}
-                              onChange={(e) => {
-                                setModalShift2HasOt(e.target.checked)
-                                if (e.target.checked && modalShift2OtHours <= 0) {
-                                  setModalShift2OtHours(modalIsClerk ? 8 : 1)
-                                }
-                              }}
-                              style={{ accentColor: '#ea580c', width: 15, height: 15 }}
-                            />
-                            <span>
-                              {modalIsClerk ? 'ทำ OT เต็มกะ (8 ชม.) — ได้รับเงิน 2 เท่าจากค่าแรง' : 'OT (จ่าย 1.5 เท่าต่อชั่วโมง)'}
-                            </span>
-                          </label>
-                          {modalShift2HasOt && (
-                            <span style={{ fontSize: 12, fontWeight: 700, color: '#c2410c' }}>
-                              +฿{modalShift2OtCalc.ot_pay.toFixed(2)}
-                            </span>
-                          )}
-                        </div>
-
-                        {modalShift2HasOt && !modalIsClerk && (
-                          <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed #fed7aa' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
-                                <span style={{ fontSize: 11, color: '#9a3412', fontWeight: 600 }}>จำนวนชั่วโมง OT:</span>
-                                {[1, 2, 3, 4].map((h) => (
-                                  <button
-                                    key={h}
-                                    type="button"
-                                    onClick={() => setModalShift2OtHours(h)}
-                                    style={{
-                                      fontSize: 11,
-                                      fontWeight: modalShift2OtHours === h ? 700 : 500,
-                                      padding: '2px 8px',
-                                      borderRadius: 4,
-                                      border: `1px solid ${modalShift2OtHours === h ? '#ea580c' : '#fdba74'}`,
-                                      background: modalShift2OtHours === h ? '#ea580c' : '#ffffff',
-                                      color: modalShift2OtHours === h ? '#ffffff' : '#9a3412',
-                                      cursor: 'pointer',
-                                    }}
-                                  >
-                                    {h} ชม.
-                                  </button>
-                                ))}
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-                                  <input
-                                    type="number"
-                                    min={0.5}
-                                    max={12}
-                                    step={0.5}
-                                    value={modalShift2OtHours}
-                                    onChange={(e) => setModalShift2OtHours(Math.max(0, Number(e.target.value)))}
-                                    style={{
-                                      width: 48,
-                                      height: 24,
-                                      fontSize: 11,
-                                      textAlign: 'center',
-                                      borderRadius: 4,
-                                      border: '1px solid #fdba74',
-                                      padding: '0 4px',
-                                    }}
-                                  />
-                                  <span style={{ fontSize: 11, color: '#9a3412' }}>ชม.</span>
-                                </div>
-                              </div>
-                              <div style={{ fontSize: 11, color: '#c2410c' }}>
-                                (อัตรา (฿{modalBaseRate2}/8 × 1.5) = ฿{(modalBaseRate2 / 8 * 1.5).toFixed(2)}/ชม.)
-                              </div>
-                            </div>
-                          </div>
-                        )}
-
-                        {modalShift2HasOt && (
-                          <div style={{ marginTop: 6, fontSize: 11, color: '#9a3412', background: 'rgba(254, 215, 170, 0.4)', padding: '4px 8px', borderRadius: 4 }}>
-                            {modalIsClerk ? (
-                              <span>OT เสมียนเต็มกะ 8 ชม. (จ่าย 2 เท่า): <strong>฿{modalShift2OtCalc.ot_pay.toFixed(2)}</strong> <span style={{ fontSize: 10, color: '#b45309', marginLeft: 4 }}>(คิดเป็น OT 2 เท่า และไม่นำไปรวมกับค่ากะซ้ำซ้อน)</span></span>
-                            ) : (
-                              <span>ค่าแรงกะ ฿{modalShift2Wage.toFixed(2)} + OT {modalShift2OtHours} ชม. ฿{modalShift2OtCalc.ot_pay.toFixed(2)} = <strong>รวม ฿{(modalShift2Wage + modalShift2OtCalc.ot_pay).toFixed(2)}</strong></span>
-                            )}
-                          </div>
-                        )}
+                        <span>💡</span>
+                        <span>ทำงานควบ 2 กะ (รวม 16 ชม.) ครบโควตาสูงสุดแล้ว จึงไม่สามารถทำ OT ได้</span>
                       </div>
                     </>
                   )}
@@ -3109,37 +3737,93 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                   marginTop: 4,
                   padding: '14px 16px',
                   borderRadius: 8,
-                  background: '#faf5ff',
-                  border: '1.5px solid #d8b4fe',
+                  background: '#fef2f2',
+                  border: '1.5px solid #fca5a5',
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, flexWrap: 'wrap', gap: 6 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <ShieldAlert style={{ width: 18, height: 18, color: '#7c3aed' }} />
-                    <span style={{ fontWeight: 700, fontSize: 13, color: '#581c87' }}>
-                      รายงานความผิดระเบียบวินัยจาก จป.
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <ShieldAlert style={{ width: 18, height: 18, color: '#b91c1c' }} />
+                    <span style={{ fontWeight: 700, fontSize: 13, color: '#991b1b' }}>
+                      บันทึกความผิดระเบียบวินัยและค่าปรับ (จป. / HR)
                     </span>
+                    {editingIncident ? (
+                      <span style={{ fontSize: 11, fontWeight: 700, color: '#92400e', background: '#fef3c7', padding: '2px 8px', borderRadius: 999, border: '1px solid #fde68a' }}>
+                        ✏️ กำลังแก้ไขรายการเดิม
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: 11, fontWeight: 700, color: '#b91c1c', background: '#fee2e2', padding: '2px 8px', borderRadius: 999, border: '1px solid #fca5a5' }}>
+                        หักผ่อนงวดละ 500 บ. (งวดสุดท้ายคิดตามจริง)
+                      </span>
+                    )}
                   </div>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: '#7c3aed', background: '#ede9fe', padding: '2px 8px', borderRadius: 999, border: '1px solid #ddd6fe' }}>
-                    ปรับครั้งละ 1,000 บ. · หักงวดละ 500 บ.
-                  </span>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {editingIncident ? (
+                      <button
+                        type="button"
+                        onClick={() => handleStartNewIncident(modalBaseRate1)}
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 600,
+                          color: '#1e40af',
+                          background: '#eff6ff',
+                          border: '1px solid #bfdbfe',
+                          borderRadius: 4,
+                          padding: '3px 8px',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        + เพิ่มรายการความผิดใหม่
+                      </button>
+                    ) : (
+                      (() => {
+                        const empAdvances = allSafetyAdvances.filter((a) => a.employee_id === modalEmp.id)
+                        const empIncidents = groupSafetyAdvancesToIncidents(empAdvances, currentPeriod?.id)
+                        if (empIncidents.length === 0) return null
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => handleLoadIncidentForEdit(empIncidents[0])}
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 600,
+                              color: '#92400e',
+                              background: '#fef3c7',
+                              border: '1px solid #fde68a',
+                              borderRadius: 4,
+                              padding: '3px 8px',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            ← กลับไปแก้ไขรายการเดิม
+                          </button>
+                        )
+                      })()
+                    )}
+                  </div>
                 </div>
 
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', userSelect: 'none', fontSize: 13, fontWeight: 600, color: '#4c1d95', marginBottom: modalSafetyFineEnabled ? 12 : 6 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', userSelect: 'none', fontSize: 13, fontWeight: 600, color: '#991b1b', marginBottom: modalSafetyFineEnabled ? 12 : 6 }}>
                   <input
                     type="checkbox"
                     checked={modalSafetyFineEnabled}
                     onChange={(e) => setModalSafetyFineEnabled(e.target.checked)}
-                    style={{ accentColor: '#7c3aed', width: 16, height: 16 }}
+                    style={{ accentColor: '#dc2626', width: 16, height: 16 }}
                   />
-                  <span>บันทึกความผิดระเบียบวินัยจาก จป. ในงวดนี้ (หักเงินงวดละ 500 บาท)</span>
+                  <span>
+                    {editingIncident
+                      ? `แก้ไขรายการความผิดระเบียบวินัย (${editingIncident.thDateStr ? `วันที่ ${editingIncident.thDateStr}` : 'รายการเดิม'})`
+                      : 'บันทึกความผิดระเบียบวินัยในงวดนี้ (หักเงินงวดละ 500 บาท)'}
+                  </span>
                 </label>
 
                 {modalSafetyFineEnabled && (
-                  <div style={{ marginTop: 10, paddingTop: 12, borderTop: '1px dashed #d8b4fe', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div style={{ marginTop: 10, paddingTop: 12, borderTop: '1px dashed #fca5a5', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    {/* Date & Quick Reason */}
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 10 }}>
                       <div>
-                        <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6d28d9', marginBottom: 4 }}>
+                        <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#991b1b', marginBottom: 4 }}>
                           วันที่เกิดเหตุ:
                         </label>
                         <ThaiDatePicker
@@ -3149,7 +3833,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                         />
                       </div>
                       <div>
-                        <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6d28d9', marginBottom: 4 }}>
+                        <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#991b1b', marginBottom: 4 }}>
                           เลือกสาเหตุด่วน:
                         </label>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
@@ -3167,9 +3851,9 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                                 fontSize: 11,
                                 padding: '3px 8px',
                                 borderRadius: 4,
-                                border: `1px solid ${modalSafetyFineReason === preset ? '#7c3aed' : '#ddd6fe'}`,
-                                background: modalSafetyFineReason === preset ? '#7c3aed' : '#ffffff',
-                                color: modalSafetyFineReason === preset ? '#ffffff' : '#581c87',
+                                border: `1px solid ${modalSafetyFineReason === preset ? '#dc2626' : '#fecaca'}`,
+                                background: modalSafetyFineReason === preset ? '#dc2626' : '#ffffff',
+                                color: modalSafetyFineReason === preset ? '#ffffff' : '#991b1b',
                                 cursor: 'pointer',
                               }}
                             >
@@ -3180,8 +3864,9 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                       </div>
                     </div>
 
+                    {/* Reason Text */}
                     <div>
-                      <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6d28d9', marginBottom: 4 }}>
+                      <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#991b1b', marginBottom: 4 }}>
                         ระบุสาเหตุ / รายละเอียดความผิด (ใช้เป็นหลักฐาน):
                       </label>
                       <input
@@ -3195,7 +3880,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                           padding: '0 10px',
                           fontSize: 12,
                           borderRadius: 6,
-                          border: '1px solid #c4b5fd',
+                          border: '1px solid #fca5a5',
                           background: '#ffffff',
                           color: '#1e1b4b',
                           boxSizing: 'border-box',
@@ -3203,89 +3888,287 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                       />
                     </div>
 
-                    <div style={{ background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: 6, padding: '8px 12px', fontSize: 11, color: '#5b21b6', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
-                      <div>
-                        💡 <strong>ระบบผ่อนชำระ:</strong> ยอดปรับเต็ม 1,000 บาท · ระบบจะหักงวดละ 500 บาท และส่งต่องวดถัดไปให้อัตโนมัติ (แสดงงวด [X/Y])
+                    {/* Fine Calculation Grid (จป. & HR) */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                      {/* Sub-section 1: จป. Fine */}
+                      <div style={{ background: '#ffffff', border: '1px solid #fed7aa', borderRadius: 6, padding: '10px 12px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: '#9a3412' }}>
+                            1. ค่าปรับจาก จป. (บาท)
+                          </span>
+                          <div style={{ display: 'flex', gap: 4 }}>
+                            {[0, 1000, 2000].map((amt) => (
+                              <button
+                                key={amt}
+                                type="button"
+                                onClick={() => setModalSafetyFineSafetyAmount(amt)}
+                                style={{
+                                  fontSize: 10,
+                                  padding: '1px 6px',
+                                  borderRadius: 4,
+                                  border: `1px solid ${modalSafetyFineSafetyAmount === amt ? '#ea580c' : '#fdba74'}`,
+                                  background: modalSafetyFineSafetyAmount === amt ? '#ea580c' : '#fff7ed',
+                                  color: modalSafetyFineSafetyAmount === amt ? '#ffffff' : '#9a3412',
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                {amt === 0 ? '0 บ.' : `${amt.toLocaleString()} บ.`}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <input
+                          type="number"
+                          value={modalSafetyFineSafetyAmount}
+                          onChange={(e) => setModalSafetyFineSafetyAmount(Math.max(0, parseFloat(e.target.value) || 0))}
+                          style={{
+                            width: '100%',
+                            height: 32,
+                            padding: '0 8px',
+                            fontSize: 13,
+                            fontWeight: 700,
+                            borderRadius: 4,
+                            border: '1px solid #fdba74',
+                            color: '#9a3412',
+                            boxSizing: 'border-box',
+                          }}
+                        />
                       </div>
-                      <button
-                        type="button"
-                        disabled={modalSafetyFineSubmitting || !modalSafetyFineReason.trim()}
-                        onClick={handleSaveSafetyFine}
-                        style={{
-                          background: modalSafetyFineReason.trim() ? '#7c3aed' : '#d8b4fe',
-                          color: '#ffffff',
-                          border: 'none',
-                          borderRadius: 4,
-                          padding: '4px 12px',
-                          fontSize: 11,
-                          fontWeight: 700,
-                          cursor: modalSafetyFineReason.trim() ? 'pointer' : 'not-allowed',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 4,
-                        }}
-                      >
-                        {modalSafetyFineSubmitting ? 'กำลังบันทึก...' : 'บันทึกค่าปรับ จป. ทันที'}
-                      </button>
+
+                      {/* Sub-section 2: HR Penalty (3x Shift Rate) */}
+                      <div style={{ background: modalSafetyFineIncludeHr ? '#fff1f2' : '#ffffff', border: `1px solid ${modalSafetyFineIncludeHr ? '#f43f5e' : '#fecdd3'}`, borderRadius: 6, padding: '10px 12px' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', userSelect: 'none', marginBottom: 6 }}>
+                          <input
+                            type="checkbox"
+                            checked={modalSafetyFineIncludeHr}
+                            onChange={(e) => setModalSafetyFineIncludeHr(e.target.checked)}
+                            style={{ accentColor: '#e11d48', width: 15, height: 15 }}
+                          />
+                          <span style={{ fontSize: 12, fontWeight: 700, color: '#9f1239' }}>
+                            2. ปรับเพิ่มเติมจาก HR (3 เท่า)
+                          </span>
+                        </label>
+                        {modalSafetyFineIncludeHr ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <span style={{ fontSize: 11, color: '#881337', whiteSpace: 'nowrap' }}>ค่าแรงกะ:</span>
+                              <input
+                                type="number"
+                                value={modalSafetyFineShiftRate}
+                                onChange={(e) => setModalSafetyFineShiftRate(Math.max(0, parseFloat(e.target.value) || 0))}
+                                style={{
+                                  width: 80,
+                                  height: 26,
+                                  padding: '0 6px',
+                                  fontSize: 12,
+                                  fontWeight: 700,
+                                  borderRadius: 4,
+                                  border: '1px solid #f43f5e',
+                                  color: '#9f1239',
+                                  boxSizing: 'border-box',
+                                }}
+                              />
+                              <span style={{ fontSize: 11, color: '#881337' }}>บ.</span>
+                            </div>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: '#be123c', background: '#ffe4e6', padding: '3px 6px', borderRadius: 4, border: '1px dashed #fda4af' }}>
+                              คำนวณ ฿{modalSafetyFineShiftRate} × 3 = ฿{hrFineAmount.toLocaleString()}
+                            </div>
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: 11, color: 'var(--vk-ink-3)', marginTop: 4 }}>
+                            ติ๊กเพื่อคำนวณค่าปรับ 3 เท่าจากค่าแรงกะนั้น
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Summary & Installment Plan */}
+                    <div style={{ background: '#ffffff', border: '1px solid #fca5a5', borderRadius: 6, padding: '12px 14px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
+                        <div>
+                          <div style={{ fontSize: 11, color: '#991b1b', fontWeight: 600 }}>
+                            สรุปยอดค่าปรับรวม:
+                          </div>
+                          <div style={{ fontSize: 16, fontWeight: 800, color: '#b91c1c' }}>
+                            ฿{totalFineAmount.toLocaleString()}{' '}
+                            <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--vk-ink-3)' }}>
+                              (จป. ฿{modalSafetyFineSafetyAmount.toLocaleString()}{modalSafetyFineIncludeHr ? ` + HR ฿${hrFineAmount.toLocaleString()}` : ''})
+                            </span>
+                          </div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: '#991b1b', background: '#fee2e2', padding: '3px 8px', borderRadius: 4, border: '1px solid #fca5a5' }}>
+                            แบ่งผ่อน {fineInstallments.length} งวด (งวดละ 500 บ.)
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Visual Installment Pills */}
+                      {fineInstallments.length > 0 && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                          {fineInstallments.map((amt, idx) => {
+                            const isCurrent = idx === 0
+                            const isLast = idx === fineInstallments.length - 1
+                            return (
+                              <div
+                                key={idx}
+                                style={{
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  alignItems: 'center',
+                                  padding: '4px 8px',
+                                  borderRadius: 4,
+                                  background: isCurrent ? '#fef2f2' : '#f8fafc',
+                                  border: `1px solid ${isCurrent ? '#f87171' : '#cbd5e1'}`,
+                                  minWidth: 70,
+                                }}
+                              >
+                                <span style={{ fontSize: 10, color: isCurrent ? '#b91c1c' : '#64748b', fontWeight: 600 }}>
+                                  งวด {idx + 1}/{fineInstallments.length}{isCurrent ? ' (งวดนี้)' : isLast ? ' (สุดท้าย)' : ''}
+                                </span>
+                                <span style={{ fontSize: 13, fontWeight: 800, color: isCurrent ? '#991b1b' : '#334155' }}>
+                                  ฿{amt.toLocaleString()}
+                                </span>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+
+                      <div style={{ fontSize: 11, color: '#991b1b', borderTop: '1px dashed #fca5a5', paddingTop: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                        <div>
+                          💡 <strong>แผนการหัก:</strong> งวดนี้หัก ฿{fineInstallments[0]?.toLocaleString() || 0} และระบบจะตั้งงวดถัดไปให้อัตโนมัติงวดละ ฿500 จนครบยอด
+                          {fineInstallments.length > 1 && fineInstallments[fineInstallments.length - 1] < 500 && (
+                            <span> (งวดสุดท้ายเหลือ ฿{fineInstallments[fineInstallments.length - 1]})</span>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          disabled={modalSafetyFineSubmitting || !modalSafetyFineReason.trim() || totalFineAmount <= 0}
+                          onClick={handleSaveSafetyFine}
+                          style={{
+                            background: modalSafetyFineReason.trim() && totalFineAmount > 0 ? '#dc2626' : '#fca5a5',
+                            color: '#ffffff',
+                            border: 'none',
+                            borderRadius: 4,
+                            padding: '6px 14px',
+                            fontSize: 12,
+                            fontWeight: 700,
+                            cursor: modalSafetyFineReason.trim() && totalFineAmount > 0 ? 'pointer' : 'not-allowed',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 6,
+                          }}
+                        >
+                          <ShieldAlert style={{ width: 14, height: 14 }} />
+                          {modalSafetyFineSubmitting
+                            ? 'กำลังบันทึก...'
+                            : editingIncident
+                            ? `บันทึกการแก้ไข (อัปเดตยอด ฿${totalFineAmount.toLocaleString()} / ${fineInstallments.length} งวด)`
+                            : `บันทึกค่าปรับ ฿${totalFineAmount.toLocaleString()} ทันที (${fineInstallments.length} งวด)`}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 )}
 
-                {/* Existing safety fines list for this employee */}
+                {/* Grouped Incidents History for this employee */}
                 {(() => {
-                  const empFines = allSafetyAdvances.filter((a) => a.employee_id === modalEmp.id)
-                  if (empFines.length === 0) return null
+                  const empAdvances = allSafetyAdvances.filter((a) => a.employee_id === modalEmp.id)
+                  const empIncidents = groupSafetyAdvancesToIncidents(empAdvances, currentPeriod?.id)
+                  if (empIncidents.length === 0) return null
                   return (
-                    <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px dashed #d8b4fe' }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: '#6d28d9', marginBottom: 6 }}>
-                        ประวัติรายการค่าปรับ จป. ของพนักงานคนนี้ ({empFines.length} รายการ):
+                    <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px dashed #fca5a5' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, flexWrap: 'wrap', gap: 6 }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: '#991b1b' }}>
+                          ประวัติรายการความผิดระเบียบวินัย / ค่าปรับ ({empIncidents.length} รายการ):
+                        </div>
+                        <div style={{ fontSize: 11, color: '#b91c1c' }}>
+                          คลิก "แก้ไข" เพื่อเปิดปรับปรุงข้อมูล หรือ "ลบ" เพื่อยกเลิกทั้งรายการ
+                        </div>
                       </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                        {empFines.map((fine) => {
-                          const isCurrent = fine.period_id === currentPeriod?.id
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {empIncidents.map((incident) => {
+                          const isBeingEdited = editingIncident?.id === incident.id
                           return (
                             <div
-                              key={fine.id}
+                              key={incident.id}
                               style={{
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'space-between',
-                                background: '#ffffff',
-                                padding: '6px 10px',
-                                borderRadius: 4,
-                                border: `1px solid ${isCurrent ? '#c4b5fd' : '#e9d5ff'}`,
-                                fontSize: 11,
-                                gap: 8,
+                                background: isBeingEdited ? '#fff7ed' : '#ffffff',
+                                padding: '8px 12px',
+                                borderRadius: 6,
+                                border: `1px solid ${isBeingEdited ? '#ea580c' : '#fca5a5'}`,
+                                fontSize: 12,
+                                gap: 10,
+                                boxShadow: isBeingEdited ? '0 0 0 2px rgba(234, 88, 12, 0.2)' : 'none',
                               }}
                             >
                               <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ fontWeight: 600, color: '#4c1d95', display: 'flex', alignItems: 'center', gap: 6 }}>
-                                  <span>{fine.notes?.replace(/\[หักค่าปรับ จป\.\]/g, '').trim() || 'ค่าปรับ จป.'}</span>
-                                  {isCurrent && (
-                                    <span style={{ fontSize: 9, fontWeight: 700, background: '#ede9fe', color: '#6d28d9', padding: '1px 5px', borderRadius: 4 }}>
-                                      งวดปัจจุบัน
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 2 }}>
+                                  <span style={{ fontWeight: 700, color: '#991b1b' }}>
+                                    {incident.reason}
+                                  </span>
+                                  {isBeingEdited && (
+                                    <span style={{ fontSize: 10, fontWeight: 700, background: '#ea580c', color: '#ffffff', padding: '1px 6px', borderRadius: 4 }}>
+                                      กำลังแก้ไข
                                     </span>
                                   )}
+                                  <span style={{ fontSize: 10, fontWeight: 600, background: '#fee2e2', color: '#b91c1c', padding: '1px 6px', borderRadius: 4, border: '1px solid #fca5a5' }}>
+                                    ผ่อน {incident.installments.length} งวด
+                                  </span>
+                                </div>
+                                <div style={{ fontSize: 11, color: 'var(--vk-ink-2)', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                                  <span>วันที่เกิดเหตุ: <strong>{incident.thDateStr || '-'}</strong></span>
+                                  <span>
+                                    ยอดรวม: <strong style={{ color: '#dc2626' }}>฿{incident.totalAmount.toLocaleString()}</strong>{' '}
+                                    <span style={{ color: 'var(--vk-ink-3)', fontSize: 10 }}>
+                                      (จป. ฿{incident.safetyAmount.toLocaleString()}{incident.includeHr ? ` + HR ฿${incident.hrAmount.toLocaleString()}` : ''})
+                                    </span>
+                                  </span>
                                 </div>
                               </div>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                                <span style={{ fontFamily: 'var(--vk-mono)', fontWeight: 700, color: '#7c3aed' }}>
-                                  ฿{Number(fine.amount).toFixed(2)}
-                                </span>
+
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
                                 <button
                                   type="button"
-                                  onClick={() => handleDeleteSafetyFine(fine.id)}
+                                  className="vk-btn"
+                                  onClick={() => handleLoadIncidentForEdit(incident)}
                                   style={{
-                                    background: 'none',
-                                    border: 'none',
-                                    color: '#b91c1c',
+                                    fontSize: 11,
+                                    padding: '4px 10px',
+                                    background: isBeingEdited ? '#ea580c' : '#f8fafc',
+                                    color: isBeingEdited ? '#ffffff' : '#1e40af',
+                                    border: `1px solid ${isBeingEdited ? '#ea580c' : '#cbd5e1'}`,
+                                    borderRadius: 4,
                                     cursor: 'pointer',
-                                    padding: 2,
-                                    display: 'flex',
+                                    fontWeight: 600,
                                   }}
-                                  title="ลบรายการนี้"
+                                >
+                                  {isBeingEdited ? '✓ กำลังแก้ไข' : '✏️ แก้ไขรายการนี้'}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="vk-btn"
+                                  onClick={() => setDeleteIncidentTarget(incident)}
+                                  style={{
+                                    fontSize: 11,
+                                    padding: '4px 8px',
+                                    background: '#fef2f2',
+                                    color: '#b91c1c',
+                                    border: '1px solid #fecaca',
+                                    borderRadius: 4,
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 4,
+                                  }}
+                                  title="ลบรายการความผิดนี้ทั้งรายการ"
                                 >
                                   <Trash2 style={{ width: 13, height: 13 }} />
+                                  <span>ลบ</span>
                                 </button>
                               </div>
                             </div>
@@ -3542,6 +4425,482 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
               >
                 <CheckSquare style={{ width: 14, height: 14 }} />
                 บันทึกและนำไปใช้ในการจัดกะ (รวม {modalGrandTotal} คน)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Pre-assign Shifts Modal (จัดกะล่วงหน้าไปวันอื่นในงวด) ── */}
+      {isPreassignModalOpen && (
+        <div className="vk-modal-backdrop" onClick={() => !isPreassignSubmitting && setIsPreassignModalOpen(false)}>
+          <div
+            className="vk-targets-modal-container"
+            style={{ maxWidth: 820 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="vk-modal-header">
+              <div className="vk-modal-header-left">
+                <div className="vk-modal-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Calendar style={{ width: 18, height: 18, color: '#059669' }} />
+                  จัดกะล่วงหน้าไปวันอื่น (Pre-assign Shifts)
+                </div>
+                <div className="vk-modal-subtitle">
+                  คัดลอกตำแหน่งงานและกะจาก <strong>{fmtDisplay(activeDateStr)}</strong> ไปยังวันอื่นๆ ในงวด (สถานะ: รอยืนยัน)
+                </div>
+              </div>
+              <button
+                type="button"
+                className="vk-modal-btn-close"
+                onClick={() => !isPreassignSubmitting && setIsPreassignModalOpen(false)}
+                disabled={isPreassignSubmitting}
+                title="ปิดหน้าต่าง"
+              >
+                <X style={{ width: 20, height: 20 }} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 20, maxHeight: 'calc(85vh - 130px)', overflowY: 'auto' }}>
+              {/* Section 1: เลือกพนักงาน */}
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: 14 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+                  <div>
+                    <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--vk-ink)' }}>
+                      1. เลือกพนักงานที่ต้องการจัดกะล่วงหน้า
+                    </span>
+                    <span style={{ fontSize: 12, color: 'var(--vk-ink-3)', marginLeft: 8 }}>
+                      (เลือกแล้ว {preassignSelectedEmpIds.size} จาก {preassignUniqueEmployees.length} คน)
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button
+                      type="button"
+                      className="vk-btn vk-btn--ghost"
+                      style={{ fontSize: 11, padding: '2px 8px', height: 26 }}
+                      onClick={() => {
+                        const allIds = new Set(preassignUniqueEmployees.map((u) => u.empId))
+                        setPreassignSelectedEmpIds(allIds)
+                      }}
+                    >
+                      เลือกทั้งหมด
+                    </button>
+                    <button
+                      type="button"
+                      className="vk-btn vk-btn--ghost"
+                      style={{ fontSize: 11, padding: '2px 8px', height: 26 }}
+                      onClick={() => setPreassignSelectedEmpIds(new Set())}
+                    >
+                      ล้างการเลือก
+                    </button>
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 8, maxHeight: 190, overflowY: 'auto', paddingRight: 4 }}>
+                  {preassignUniqueEmployees.map(({ empId, emp, entries: empEntries }) => {
+                    const isChecked = preassignSelectedEmpIds.has(empId)
+                    const shiftLabels = empEntries.map((e) => `กะ ${e.shift_index + 1}`).join(', ')
+                    const jobCodes = Array.from(
+                      new Set(
+                        empEntries.map((e) => {
+                          const j = jobs.find((x) => x.id === e.job_id) || demoJobs.find((x) => x.id === e.job_id)
+                          return j?.code || e.job_code_snapshot || '-'
+                        })
+                      )
+                    ).join(', ')
+                    const totalOt = empEntries.reduce((sum, e) => sum + (Number(e.ot_hours) || 0), 0)
+
+                    return (
+                      <label
+                        key={empId}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 10,
+                          padding: '8px 12px',
+                          borderRadius: 6,
+                          background: isChecked ? '#f0fdf4' : '#ffffff',
+                          border: `1px solid ${isChecked ? '#86efac' : '#e2e8f0'}`,
+                          cursor: 'pointer',
+                          userSelect: 'none',
+                          fontSize: 12,
+                          transition: 'all 0.15s ease',
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) => {
+                            const next = new Set(preassignSelectedEmpIds)
+                            if (e.target.checked) next.add(empId)
+                            else next.delete(empId)
+                            setPreassignSelectedEmpIds(next)
+                          }}
+                          style={{ accentColor: '#059669', width: 16, height: 16, cursor: 'pointer' }}
+                        />
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                            <span style={{ fontWeight: 700, color: 'var(--vk-ink)', fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {emp ? `${emp.first_name} ${emp.last_name}` : empId}
+                            </span>
+                            {isSkilledWorker(empId) && (
+                              <span title="พนักงานค่าแรงฝีมือ" style={{ fontSize: 11, flexShrink: 0 }}>⭐</span>
+                            )}
+                            {empEntries.length > 1 && (
+                              <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 4, background: 'rgba(91,33,182,0.1)', color: '#5b21b6', flexShrink: 0 }}>
+                                2 กะ
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--vk-ink-3)', marginTop: 2, flexWrap: 'wrap' }}>
+                            <span style={{ fontFamily: 'var(--vk-mono)', fontWeight: 600 }}>{emp?.employee_code}</span>
+                            <span>•</span>
+                            <span style={{ color: '#047857', fontWeight: 600 }}>{shiftLabels}</span>
+                            <span>•</span>
+                            <span style={{ maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={jobCodes}>
+                              {jobCodes}
+                            </span>
+                            {totalOt > 0 && (
+                              <>
+                                <span>•</span>
+                                <span style={{ color: '#b45309', fontWeight: 600 }}>OT {totalOt} ชม.</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </label>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* Section 2: เลือกวันที่ในงวด */}
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: 14 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+                  <div>
+                    <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--vk-ink)' }}>
+                      2. เลือกวันที่เป้าหมายในงวดนี้
+                    </span>
+                    <span style={{ fontSize: 12, color: 'var(--vk-ink-3)', marginLeft: 8 }}>
+                      (เลือกแล้ว {preassignTargetDates.size} วัน)
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="vk-btn vk-btn--ghost"
+                      style={{ fontSize: 11, padding: '2px 8px', height: 26 }}
+                      onClick={() => {
+                        const weekdays = periodDates.filter((dStr) => !isWeekend(dStr) && dStr !== activeDateStr)
+                        setPreassignTargetDates(new Set(weekdays))
+                      }}
+                      title="เลือกวันจันทร์ถึงวันศุกร์ (ไม่รวมเสาร์-อาทิตย์ และไม่รวมวันนี้)"
+                    >
+                      จันทร์ - ศุกร์
+                    </button>
+                    <button
+                      type="button"
+                      className="vk-btn vk-btn--ghost"
+                      style={{ fontSize: 11, padding: '2px 8px', height: 26 }}
+                      onClick={() => {
+                        const remaining = periodDates.filter((dStr) => dStr > activeDateStr)
+                        setPreassignTargetDates(new Set(remaining))
+                      }}
+                      title="เลือกทุกวันที่อยู่หลังวันปัจจุบันจนถึงสิ้นงวด"
+                    >
+                      วันที่เหลือในงวด
+                    </button>
+                    <button
+                      type="button"
+                      className="vk-btn vk-btn--ghost"
+                      style={{ fontSize: 11, padding: '2px 8px', height: 26 }}
+                      onClick={() => {
+                        const allOthers = periodDates.filter((dStr) => dStr !== activeDateStr)
+                        setPreassignTargetDates(new Set(allOthers))
+                      }}
+                      title="เลือกทุกวันในงวดนี้ (ยกเว้นวันนี้)"
+                    >
+                      ทุกวันในงวด
+                    </button>
+                    <button
+                      type="button"
+                      className="vk-btn vk-btn--ghost"
+                      style={{ fontSize: 11, padding: '2px 8px', height: 26 }}
+                      onClick={() => setPreassignTargetDates(new Set())}
+                    >
+                      ล้างวันที่
+                    </button>
+                  </div>
+                </div>
+
+                {/* Calendar Date Cards Grid */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(88px, 1fr))', gap: 6, maxHeight: 220, overflowY: 'auto', paddingRight: 4 }}>
+                  {periodDates.map((dStr) => {
+                    const d = parseLocal(dStr)
+                    const isToday = dStr === activeDateStr
+                    const isSelected = preassignTargetDates.has(dStr)
+                    const weekendDay = isWeekend(dStr)
+                    const holidayDay = getStoredHoliday(user?.factory_id, dStr)
+
+                    return (
+                      <button
+                        key={dStr}
+                        type="button"
+                        disabled={isToday}
+                        onClick={() => {
+                          const next = new Set(preassignTargetDates)
+                          if (isSelected) next.delete(dStr)
+                          else next.add(dStr)
+                          setPreassignTargetDates(next)
+                        }}
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          padding: '8px 4px',
+                          borderRadius: 6,
+                          border: isToday
+                            ? '1px dashed #cbd5e1'
+                            : isSelected
+                            ? '2px solid #059669'
+                            : '1px solid #e2e8f0',
+                          background: isToday
+                            ? '#f1f5f9'
+                            : isSelected
+                            ? '#ecfdf5'
+                            : holidayDay
+                            ? 'var(--vk-marigold-tint)'
+                            : weekendDay
+                            ? '#faf5ff'
+                            : '#ffffff',
+                          cursor: isToday ? 'not-allowed' : 'pointer',
+                          opacity: isToday ? 0.6 : 1,
+                          transition: 'all 0.15s ease',
+                          position: 'relative',
+                        }}
+                        title={isToday ? 'วันนี้ (ต้นทาง)' : fmtDisplay(dStr)}
+                      >
+                        <span style={{ fontSize: 11, fontWeight: 600, color: weekendDay ? '#7c3aed' : 'var(--vk-ink-3)' }}>
+                          {DAYS[d.getDay()]}
+                        </span>
+                        <span style={{ fontSize: 16, fontWeight: 800, color: isSelected ? '#065f46' : 'var(--vk-ink)', margin: '2px 0' }}>
+                          {d.getDate()}
+                        </span>
+                        <span style={{ fontSize: 10, color: 'var(--vk-ink-3)' }}>
+                          {MONTHS[d.getMonth()]}
+                        </span>
+
+                        {isToday && (
+                          <span style={{ fontSize: 9, fontWeight: 700, color: '#64748b', marginTop: 2 }}>
+                            (ต้นทาง)
+                          </span>
+                        )}
+                        {isSelected && (
+                          <div style={{ position: 'absolute', top: 3, right: 3, width: 14, height: 14, borderRadius: '50%', background: '#059669', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700 }}>
+                            ✓
+                          </div>
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div
+              style={{
+                padding: '12px 20px',
+                borderTop: '1px solid #e2e8f0',
+                background: '#ffffff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: 12,
+              }}
+            >
+              <div style={{ fontSize: 13, color: 'var(--vk-ink-2)' }}>
+                {preassignSelectedEmpIds.size > 0 && preassignTargetDates.size > 0 ? (
+                  <span>
+                    จะจัดกะพนักงาน <strong>{preassignSelectedEmpIds.size}</strong> คน ({entries.filter((e) => preassignSelectedEmpIds.has(e.employee_id)).length} กะ) ไปยัง <strong>{preassignTargetDates.size}</strong> วัน
+                  </span>
+                ) : (
+                  <span style={{ color: 'var(--vk-ink-3)' }}>
+                    กรุณาเลือกพนักงานและวันที่เป้าหมายอย่างน้อย 1 วัน
+                  </span>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  type="button"
+                  className="vk-btn vk-btn-secondary"
+                  onClick={() => setIsPreassignModalOpen(false)}
+                  disabled={isPreassignSubmitting}
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="button"
+                  className="vk-btn vk-btn--primary"
+                  onClick={handleConfirmPreassign}
+                  disabled={
+                    preassignSelectedEmpIds.size === 0 ||
+                    preassignTargetDates.size === 0 ||
+                    isPreassignSubmitting
+                  }
+                  style={{
+                    background: '#059669',
+                    borderColor: '#059669',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                  }}
+                >
+                  <Check style={{ width: 14, height: 14 }} />
+                  {isPreassignSubmitting
+                    ? 'กำลังจัดกะล่วงหน้า...'
+                    : `ยืนยันจัดกะล่วงหน้า (${preassignSelectedEmpIds.size} คน)`}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm Delete Safety Incident Modal (Themed replacement for browser confirm) */}
+      {deleteIncidentTarget && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 350,
+            background: 'rgba(22, 19, 17, 0.65)',
+            backdropFilter: 'blur(2px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
+          }}
+          onClick={() => !isDeletingIncident && setDeleteIncidentTarget(null)}
+        >
+          <div
+            style={{
+              background: 'var(--vk-paper, #ffffff)',
+              border: '1px solid var(--vk-rule, #e5e7eb)',
+              width: '100%',
+              maxWidth: 420,
+              overflow: 'hidden',
+              borderRadius: 8,
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.25), 0 10px 10px -5px rgba(0, 0, 0, 0.1)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                background: '#dc2626',
+                color: '#fff',
+                padding: '14px 18px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+              }}
+            >
+              <Trash2 style={{ width: 16, height: 16, flexShrink: 0 }} />
+              <div style={{ fontWeight: 700, fontSize: 15 }}>ยืนยันการลบรายการความผิดระเบียบวินัย</div>
+            </div>
+
+            <div style={{ padding: '18px 20px' }}>
+              <p style={{ fontSize: 14, color: 'var(--vk-ink-2, #374151)', lineHeight: 1.6, margin: 0 }}>
+                ต้องการลบรายการหักค่าปรับ {modalEmp ? <>ของ <strong>{modalEmp.first_name} {modalEmp.last_name}</strong></> : 'นี้'} ใช่หรือไม่?
+              </p>
+
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: '10px 14px',
+                  background: '#f9fafb',
+                  border: '1px solid var(--vk-rule, #e5e7eb)',
+                  borderRadius: 6,
+                  fontSize: 13,
+                }}
+              >
+                <div style={{ color: 'var(--vk-ink-muted, #6b7280)', fontSize: 12, marginBottom: 2 }}>
+                  สาเหตุความผิด:
+                </div>
+                <div style={{ fontWeight: 700, color: 'var(--vk-ink, #111827)', marginBottom: 6 }}>
+                  {deleteIncidentTarget.reason}
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--vk-ink-2)', marginBottom: 6 }}>
+                  วันที่เกิดเหตุ: <strong>{deleteIncidentTarget.thDateStr || '-'}</strong>
+                </div>
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    paddingTop: 6,
+                    borderTop: '1px dashed #e5e7eb',
+                  }}
+                >
+                  <span style={{ fontSize: 12, color: 'var(--vk-ink-muted, #6b7280)' }}>
+                    ยอดรวมทั้งหมด ({deleteIncidentTarget.installments.length} งวด):
+                  </span>
+                  <span style={{ fontFamily: 'var(--vk-mono, monospace)', fontWeight: 700, color: '#dc2626', fontSize: 14 }}>
+                    ฿{deleteIncidentTarget.totalAmount.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+              </div>
+
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: '8px 12px',
+                  background: 'var(--vk-persimmon-tint, #fef2f2)',
+                  border: '1px solid var(--vk-persimmon, #fca5a5)',
+                  borderRadius: 6,
+                  fontSize: 12,
+                  color: 'var(--vk-persimmon-ink, #991b1b)',
+                  lineHeight: 1.5,
+                }}
+              >
+                ระบบจะลบรายการหักเงินผ่อนชำระทั้งหมด {deleteIncidentTarget.installments.length} งวดออกจากฐานข้อมูล และการดำเนินการนี้ไม่สามารถเรียกคืนได้
+              </div>
+            </div>
+
+            <div
+              style={{
+                display: 'flex',
+                gap: 8,
+                padding: '0 20px 16px',
+                justifyContent: 'flex-end',
+              }}
+            >
+              <button
+                type="button"
+                className="vk-btn"
+                disabled={isDeletingIncident}
+                onClick={() => setDeleteIncidentTarget(null)}
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                className="vk-btn"
+                disabled={isDeletingIncident}
+                style={{
+                  background: '#dc2626',
+                  color: '#ffffff',
+                  borderColor: '#dc2626',
+                  cursor: isDeletingIncident ? 'not-allowed' : 'pointer',
+                  opacity: isDeletingIncident ? 0.7 : 1,
+                }}
+                onClick={handleConfirmDeleteIncident}
+              >
+                {isDeletingIncident ? 'กำลังลบทั้งรายการ...' : 'ยืนยันลบทั้งรายการ'}
               </button>
             </div>
           </div>

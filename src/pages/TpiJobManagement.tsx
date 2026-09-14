@@ -52,6 +52,9 @@ export default function TpiJobManagement() {
     planned_night: 0,
     normal_rate: 357,
     skilled_rate: null,
+    billing_normal_rate: null,
+    billing_skilled_rate: null,
+    billing_rate: null,
     valid_from: null,
     expires_on: null,
     active: true,
@@ -196,6 +199,9 @@ export default function TpiJobManagement() {
       planned_night: 0,
       normal_rate: 357,
       skilled_rate: null,
+      billing_normal_rate: null,
+      billing_skilled_rate: null,
+      billing_rate: null,
       valid_from: null,
       expires_on: null,
       active: true,
@@ -207,10 +213,15 @@ export default function TpiJobManagement() {
   const handleOpenEdit = (job: Job) => {
     setEditingJob(job)
     const isClerk = job.job_group === 'clerk' || ['692021', '692032', '692041', '692050'].includes(job.code.trim())
+    const bNormal = job.billing_normal_rate ?? job.billing_rate ?? null
+    const bSkilled = job.billing_skilled_rate ?? null
     setFormData({
       ...job,
       job_group: isClerk ? 'clerk' : 'general',
       skilled_rate: isClerk ? (job.skilled_rate ?? 377) : job.skilled_rate,
+      billing_normal_rate: bNormal,
+      billing_skilled_rate: bSkilled,
+      billing_rate: bNormal,
       notes: cleanJobNotes(job.notes),
     })
     setIsModalOpen(true)
@@ -230,15 +241,21 @@ export default function TpiJobManagement() {
       const skilledRate = payload.skilled_rate !== null && payload.skilled_rate !== undefined && payload.skilled_rate !== ''
         ? Number(payload.skilled_rate)
         : (isClerk ? 377 : null)
+      const billingNormalRate = payload.billing_normal_rate !== null && payload.billing_normal_rate !== undefined && payload.billing_normal_rate !== ''
+        ? Number(payload.billing_normal_rate)
+        : (payload.billing_rate !== null && payload.billing_rate !== undefined && payload.billing_rate !== '' ? Number(payload.billing_rate) : null)
+      const billingSkilledRate = payload.billing_skilled_rate !== null && payload.billing_skilled_rate !== undefined && payload.billing_skilled_rate !== ''
+        ? Number(payload.billing_skilled_rate)
+        : null
 
       if (!user?.factory_id) {
         const key = (payload.code || '').trim().toLowerCase()
         const normKey = key.replace(/\/69(vrk)?$/i, '')
         const idx = demoJobs.findIndex((j) => j.id === editingJob?.id || j.code.trim().toLowerCase() === key || j.code.trim().toLowerCase().replace(/\/69(vrk)?$/i, '') === normKey)
         if (idx >= 0) {
-          demoJobs[idx] = { ...demoJobs[idx], ...payload, skilled_rate: skilledRate } as Job
+          demoJobs[idx] = { ...demoJobs[idx], ...payload, skilled_rate: skilledRate, billing_normal_rate: billingNormalRate, billing_skilled_rate: billingSkilledRate, billing_rate: billingNormalRate } as Job
         }
-        return { ...payload, skilled_rate: skilledRate }
+        return { ...payload, skilled_rate: skilledRate, billing_normal_rate: billingNormalRate, billing_skilled_rate: billingSkilledRate, billing_rate: billingNormalRate }
       }
 
       const jobPayload: any = {
@@ -254,6 +271,9 @@ export default function TpiJobManagement() {
         planned_night: isPlanValid ? pn : null,
         normal_rate: Number(payload.normal_rate) || 357,
         skilled_rate: skilledRate,
+        billing_normal_rate: billingNormalRate,
+        billing_skilled_rate: billingSkilledRate,
+        billing_rate: billingNormalRate,
         valid_from: payload.valid_from || null,
         expires_on: payload.expires_on || null,
         active: payload.active ?? true,
@@ -274,6 +294,19 @@ export default function TpiJobManagement() {
 
       let res = await doSave(jobPayload)
       let error = res.error
+      // Graceful fallback if billing_normal_rate / billing_skilled_rate columns are not yet migrated in remote Supabase
+      if (error && (error.message?.includes('billing_normal_rate') || error.message?.includes('billing_skilled_rate'))) {
+        delete jobPayload.billing_normal_rate
+        delete jobPayload.billing_skilled_rate
+        res = await doSave(jobPayload)
+        error = res.error
+      }
+      // Graceful fallback if billing_rate column is not yet migrated in remote Supabase
+      if (error && error.message?.includes('billing_rate')) {
+        delete jobPayload.billing_rate
+        res = await doSave(jobPayload)
+        error = res.error
+      }
       // Graceful fallback if job_group column is not yet migrated in remote Supabase
       if (error && error.message?.includes('job_group')) {
         delete jobPayload.job_group
@@ -621,8 +654,12 @@ export default function TpiJobManagement() {
                   <th style={{ padding: '10px 12px', width: 95, textAlign: 'center', whiteSpace: 'nowrap' }}>ประเภท</th>
                   <th style={{ padding: '10px 12px', width: 95, textAlign: 'center', whiteSpace: 'nowrap' }}>กลุ่มงาน</th>
                   <th style={{ padding: '10px 12px', width: 85, textAlign: 'center', whiteSpace: 'nowrap' }}>ยอดเต็ม</th>
-                  <th style={{ padding: '10px 12px', width: 100, textAlign: 'right', whiteSpace: 'nowrap' }}>ค่าแรงปกติ</th>
-                  <th style={{ padding: '10px 12px', width: 100, textAlign: 'right', whiteSpace: 'nowrap' }}>ค่าแรงฝีมือ</th>
+                  <th style={{ padding: '10px 10px', width: 95, textAlign: 'right', whiteSpace: 'nowrap', color: '#1e40af' }} title="ค่าแรงตั้งเบิก TPI เรทปกติ (บาท/กะ)">ตั้งเบิกปกติ</th>
+                  <th style={{ padding: '10px 10px', width: 95, textAlign: 'right', whiteSpace: 'nowrap', color: '#1e40af' }} title="ค่าแรงตั้งเบิก TPI เรทฝีมือ (บาท/กะ)">ตั้งเบิกฝีมือ</th>
+                  <th style={{ padding: '10px 10px', width: 90, textAlign: 'right', whiteSpace: 'nowrap' }}>จ่ายปกติ</th>
+                  <th style={{ padding: '10px 10px', width: 90, textAlign: 'right', whiteSpace: 'nowrap' }}>จ่ายฝีมือ</th>
+                  <th style={{ padding: '10px 10px', width: 105, textAlign: 'right', whiteSpace: 'nowrap', color: '#15803d' }} title="กำไรส่วนต่างต่อกะเรทปกติ = ตั้งเบิกปกติ - จ่ายปกติ">ส่วนต่างปกติ</th>
+                  <th style={{ padding: '10px 10px', width: 105, textAlign: 'right', whiteSpace: 'nowrap', color: '#15803d' }} title="กำไรส่วนต่างต่อกะเรทฝีมือ = ตั้งเบิกฝีมือ - จ่ายฝีมือ">ส่วนต่างฝีมือ</th>
                   <th style={{ padding: '10px 12px', width: 110, textAlign: 'center', whiteSpace: 'nowrap' }}>วันหมดอายุ</th>
                   <th style={{ padding: '10px 12px', width: 85, textAlign: 'center', whiteSpace: 'nowrap' }}>สถานะ</th>
                   <th style={{ padding: '10px 14px', width: 80, textAlign: 'center', whiteSpace: 'nowrap' }}>จัดการ</th>
@@ -631,13 +668,15 @@ export default function TpiJobManagement() {
               <tbody>
                 {filteredJobs.length === 0 ? (
                   <tr>
-                    <td colSpan={11} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--vk-ink-3)' }}>
+                    <td colSpan={15} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--vk-ink-3)' }}>
                       ไม่พบรหัสงานที่ตรงกับเงื่อนไขการค้นหา
                     </td>
                   </tr>
                 ) : (
                   filteredJobs.map((job) => {
                     const isClerk = job.job_group === 'clerk' || ['692021', '692032', '692041', '692050'].includes(job.code.trim())
+                    const bNormal = job.billing_normal_rate ?? job.billing_rate ?? null
+                    const bSkilled = job.billing_skilled_rate ?? null
                     return (
                       <tr
                         key={job.id}
@@ -723,17 +762,71 @@ export default function TpiJobManagement() {
                           {job.quota} <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--vk-ink-3)' }}>คน</span>
                         </td>
 
-                        {/* ค่าแรงปกติ */}
-                        <td style={{ padding: '12px 12px', textAlign: 'right', fontFamily: 'var(--vk-mono)', fontWeight: 700, color: 'var(--vk-ink)', whiteSpace: 'nowrap' }}>
+                        {/* ตั้งเบิกปกติ */}
+                        <td style={{ padding: '12px 10px', textAlign: 'right', fontFamily: 'var(--vk-mono)', fontWeight: 700, color: '#1e40af', whiteSpace: 'nowrap' }}>
+                          {bNormal ? (
+                            <span>฿{bNormal.toLocaleString()}</span>
+                          ) : (
+                            <span style={{ color: 'var(--vk-ink-3)', fontWeight: 400, fontSize: 12 }}>—</span>
+                          )}
+                        </td>
+
+                        {/* ตั้งเบิกฝีมือ */}
+                        <td style={{ padding: '12px 10px', textAlign: 'right', fontFamily: 'var(--vk-mono)', fontWeight: 700, color: '#1e40af', whiteSpace: 'nowrap' }}>
+                          {bSkilled ? (
+                            <span>฿{bSkilled.toLocaleString()}</span>
+                          ) : (
+                            <span style={{ color: 'var(--vk-ink-3)', fontWeight: 400, fontSize: 12 }}>—</span>
+                          )}
+                        </td>
+
+                        {/* จ่ายปกติ */}
+                        <td style={{ padding: '12px 10px', textAlign: 'right', fontFamily: 'var(--vk-mono)', fontWeight: 700, color: 'var(--vk-ink)', whiteSpace: 'nowrap' }}>
                           ฿{job.normal_rate.toLocaleString()}
                         </td>
 
-                        {/* ค่าแรงฝีมือ */}
-                        <td style={{ padding: '12px 12px', textAlign: 'right', fontFamily: 'var(--vk-mono)', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                        {/* จ่ายฝีมือ */}
+                        <td style={{ padding: '12px 10px', textAlign: 'right', fontFamily: 'var(--vk-mono)', fontWeight: 700, whiteSpace: 'nowrap' }}>
                           {job.skilled_rate ? (
                             <span style={{ color: '#15803d' }}>฿{job.skilled_rate.toLocaleString()}</span>
                           ) : (
                             <span style={{ color: 'var(--vk-ink-3)', fontWeight: 400 }}>—</span>
+                          )}
+                        </td>
+
+                        {/* ส่วนต่างปกติ */}
+                        <td style={{ padding: '12px 10px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                          {bNormal ? (() => {
+                            const diff = bNormal - job.normal_rate
+                            const pct = bNormal > 0 ? (diff / bNormal) * 100 : 0
+                            return (
+                              <div style={{ fontFamily: 'var(--vk-mono)', fontWeight: 700, color: diff >= 0 ? '#15803d' : '#dc2626', fontSize: 12 }}>
+                                {diff >= 0 ? `+฿${diff.toLocaleString()}` : `-฿${Math.abs(diff).toLocaleString()}`}
+                                <span style={{ fontSize: 10, fontWeight: 500, marginLeft: 3, opacity: 0.85 }}>
+                                  ({pct.toFixed(0)}%)
+                                </span>
+                              </div>
+                            )
+                          })() : (
+                            <span style={{ color: 'var(--vk-ink-3)', fontSize: 12 }}>—</span>
+                          )}
+                        </td>
+
+                        {/* ส่วนต่างฝีมือ */}
+                        <td style={{ padding: '12px 10px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                          {bSkilled && job.skilled_rate ? (() => {
+                            const diff = bSkilled - job.skilled_rate
+                            const pct = bSkilled > 0 ? (diff / bSkilled) * 100 : 0
+                            return (
+                              <div style={{ fontFamily: 'var(--vk-mono)', fontWeight: 700, color: diff >= 0 ? '#15803d' : '#dc2626', fontSize: 12 }}>
+                                {diff >= 0 ? `+฿${diff.toLocaleString()}` : `-฿${Math.abs(diff).toLocaleString()}`}
+                                <span style={{ fontSize: 10, fontWeight: 500, marginLeft: 3, opacity: 0.85 }}>
+                                  ({pct.toFixed(0)}%)
+                                </span>
+                              </div>
+                            )
+                          })() : (
+                            <span style={{ color: 'var(--vk-ink-3)', fontSize: 12 }}>—</span>
                           )}
                         </td>
 
@@ -928,46 +1021,170 @@ export default function TpiJobManagement() {
                   />
                 </div>
 
-                {/* Line 5: Wage Rates */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                  <div className="vk-field-group">
-                    <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--vk-ink-2)' }}>
-                      ค่าแรงปกติ (บาท/กะ) <span style={{ color: 'var(--vk-crimson)' }}>*</span>
-                    </label>
-                    <input
-                      type="number"
-                      required
-                      min={0}
-                      step={1}
-                      value={formData.normal_rate || 357}
-                      onChange={(e) => setFormData({ ...formData, normal_rate: Number(e.target.value) })}
-                      className="vk-input"
-                      style={{ background: '#ffffff', borderColor: '#cbd5e1', fontFamily: 'var(--vk-mono)' }}
-                    />
+                {/* Line 5: Wage Rates & Billing Rates */}
+                <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--vk-ink)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span>อัตราค่าจ้างและการตั้งเบิก (บาท/กะ)</span>
+                    <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--vk-ink-3)' }}>1 กะ = 8 ชม.</span>
                   </div>
 
-                  <div className="vk-field-group">
-                    <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--vk-ink-2)' }}>
-                      ค่าแรงฝีมือ (บาท/กะ - ถ้ามี)
-                      {formData.job_group === 'clerk' && <span style={{ color: '#4338ca', marginLeft: 4 }}>(มาตรฐานเสมียน ฿377)</span>}
-                    </label>
-                    <input
-                      type="number"
-                      min={0}
-                      step={1}
-                      placeholder={formData.job_group === 'clerk' ? '377' : 'เว้นว่างได้ (หากไม่มีเรทฝีมือ)'}
-                      value={formData.skilled_rate ?? ''}
-                      onChange={(e) => setFormData({ ...formData, skilled_rate: e.target.value === '' ? null : Number(e.target.value) })}
-                      className="vk-input"
-                      style={{ background: '#ffffff', borderColor: '#cbd5e1', fontFamily: 'var(--vk-mono)' }}
-                    />
+                  {/* Section A: อัตราตั้งเบิกจาก TPI (เงินรับ) */}
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: '#1e40af', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span>🏢 1. อัตราตั้งเบิกจากทีพีไอ (เรียกเก็บ TPI)</span>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                      <div className="vk-field-group">
+                        <label style={{ fontSize: 12, fontWeight: 600, color: '#1e40af' }}>
+                          ตั้งเบิกปกติ (บาท/กะ)
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          step={1}
+                          placeholder="เช่น 420, 450"
+                          value={formData.billing_normal_rate ?? ''}
+                          onChange={(e) => {
+                            const val = e.target.value === '' ? null : Number(e.target.value)
+                            setFormData({ ...formData, billing_normal_rate: val, billing_rate: val })
+                          }}
+                          className="vk-input"
+                          style={{ background: '#ffffff', borderColor: '#93c5fd', fontFamily: 'var(--vk-mono)', fontWeight: 700, color: '#1e40af' }}
+                        />
+                        <span style={{ fontSize: 10, color: 'var(--vk-ink-3)', marginTop: 2 }}>เรทตั้งเบิกสำหรับงานทั่วไป/ปกติ</span>
+                      </div>
+
+                      <div className="vk-field-group">
+                        <label style={{ fontSize: 12, fontWeight: 600, color: '#1e40af' }}>
+                          ตั้งเบิกฝีมือ (บาท/กะ)
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          step={1}
+                          placeholder="เช่น 480, 500 (ถ้ามี)"
+                          value={formData.billing_skilled_rate ?? ''}
+                          onChange={(e) => setFormData({ ...formData, billing_skilled_rate: e.target.value === '' ? null : Number(e.target.value) })}
+                          className="vk-input"
+                          style={{ background: '#ffffff', borderColor: '#93c5fd', fontFamily: 'var(--vk-mono)', fontWeight: 700, color: '#1e40af' }}
+                        />
+                        <span style={{ fontSize: 10, color: 'var(--vk-ink-3)', marginTop: 2 }}>เรทตั้งเบิกสำหรับงานฝีมือ/เสมียน</span>
+                      </div>
+                    </div>
                   </div>
+
+                  {/* Section B: ค่าแรงที่จ่ายคนงาน (ต้นทุน) */}
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span>👷 2. ค่าแรงที่จ่ายพนักงาน (ต้นทุนค่าจ้าง)</span>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                      <div className="vk-field-group">
+                        <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--vk-ink-2)' }}>
+                          จ่ายปกติ (บาท/กะ) <span style={{ color: 'var(--vk-crimson)' }}>*</span>
+                        </label>
+                        <input
+                          type="number"
+                          required
+                          min={0}
+                          step={1}
+                          value={formData.normal_rate || 357}
+                          onChange={(e) => setFormData({ ...formData, normal_rate: Number(e.target.value) })}
+                          className="vk-input"
+                          style={{ background: '#ffffff', borderColor: '#cbd5e1', fontFamily: 'var(--vk-mono)' }}
+                        />
+                        <span style={{ fontSize: 10, color: 'var(--vk-ink-3)', marginTop: 2 }}>เรทมาตรฐานทั่วไป ฿357</span>
+                      </div>
+
+                      <div className="vk-field-group">
+                        <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--vk-ink-2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <span>จ่ายฝีมือ (บาท/กะ)</span>
+                          {formData.job_group === 'clerk' && <span style={{ fontSize: 10, background: '#e0e7ff', color: '#3730a3', padding: '1px 5px', borderRadius: 4 }}>เสมียน ฿377</span>}
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          step={1}
+                          placeholder={formData.job_group === 'clerk' ? '377' : 'เว้นว่างได้'}
+                          value={formData.skilled_rate ?? ''}
+                          onChange={(e) => setFormData({ ...formData, skilled_rate: e.target.value === '' ? null : Number(e.target.value) })}
+                          className="vk-input"
+                          style={{ background: '#ffffff', borderColor: '#cbd5e1', fontFamily: 'var(--vk-mono)' }}
+                        />
+                        <span style={{ fontSize: 10, color: 'var(--vk-ink-3)', marginTop: 2 }}>เรทจ่ายฝีมือ/เสมียน</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Real-time Profit Margin Preview */}
+                  {(formData.billing_normal_rate || formData.billing_skilled_rate) ? (() => {
+                    const bNormal = formData.billing_normal_rate ? Number(formData.billing_normal_rate) : null
+                    const bSkilled = formData.billing_skilled_rate ? Number(formData.billing_skilled_rate) : null
+                    const nRate = Number(formData.normal_rate) || 357
+                    const sRate = formData.skilled_rate ? Number(formData.skilled_rate) : null
+                    
+                    const normalProfit = bNormal !== null ? bNormal - nRate : null
+                    const normalProfitPct = (bNormal !== null && bNormal > 0 && normalProfit !== null) ? (normalProfit / bNormal) * 100 : 0
+                    
+                    const skilledProfit = (bSkilled !== null && sRate !== null) ? bSkilled - sRate : null
+                    const skilledProfitPct = (bSkilled !== null && bSkilled > 0 && skilledProfit !== null) ? (skilledProfit / bSkilled) * 100 : 0
+
+                    const quota = Number(formData.quota) || 0
+                    const estDayProfit = (normalProfit !== null && quota > 0) ? normalProfit * quota : null
+
+                    return (
+                      <div style={{ background: '#ffffff', border: '1px solid #bbf7d0', borderRadius: 6, padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: '#166534', display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span>📊 สรุปส่วนต่างกำไรเบื้องต้น (Margin ต่อกะ)</span>
+                        </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, fontSize: 12 }}>
+                          <div>
+                            <span style={{ color: 'var(--vk-ink-3)' }}>กำไรเรทปกติ: </span>
+                            {normalProfit !== null ? (
+                              <>
+                                <strong style={{ fontFamily: 'var(--vk-mono)', color: normalProfit >= 0 ? '#15803d' : '#dc2626' }}>
+                                  {normalProfit >= 0 ? `+฿${normalProfit.toLocaleString()}` : `-฿${Math.abs(normalProfit).toLocaleString()}`}
+                                </strong>
+                                <span style={{ fontSize: 11, color: '#15803d', marginLeft: 4 }}>({normalProfitPct.toFixed(1)}%)</span>
+                              </>
+                            ) : (
+                              <span style={{ color: 'var(--vk-ink-3)' }}>ยังไม่ได้ระบุ</span>
+                            )}
+                          </div>
+                          <div>
+                            <span style={{ color: 'var(--vk-ink-3)' }}>กำไรเรทฝีมือ: </span>
+                            {skilledProfit !== null ? (
+                              <>
+                                <strong style={{ fontFamily: 'var(--vk-mono)', color: skilledProfit >= 0 ? '#15803d' : '#dc2626' }}>
+                                  {skilledProfit >= 0 ? `+฿${skilledProfit.toLocaleString()}` : `-฿${Math.abs(skilledProfit).toLocaleString()}`}
+                                </strong>
+                                <span style={{ fontSize: 11, color: '#15803d', marginLeft: 4 }}>({skilledProfitPct.toFixed(1)}%)</span>
+                              </>
+                            ) : (
+                              <span style={{ color: 'var(--vk-ink-3)' }}>{bSkilled ? 'ระบุเรทจ่ายฝีมือ' : 'ยังไม่ได้ระบุ'}</span>
+                            )}
+                          </div>
+                          {estDayProfit !== null && (
+                            <div style={{ marginLeft: 'auto', color: '#1e40af' }}>
+                              <span style={{ color: 'var(--vk-ink-3)' }}>กำไรเต็มโควตา ({quota} คน): </span>
+                              <strong style={{ fontFamily: 'var(--vk-mono)' }}>+฿{estDayProfit.toLocaleString()}/วัน</strong>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })() : (
+                    <div style={{ fontSize: 11, color: 'var(--vk-ink-3)', fontStyle: 'italic' }}>
+                      💡 ระบุ "ตั้งเบิกปกติ" หรือ "ตั้งเบิกฝีมือ" เพื่อให้ระบบคำนวณส่วนต่างกำไรของแต่ละอัตราให้อัตโนมัติ
+                    </div>
+                  )}
+
+                  {formData.job_group === 'clerk' && (
+                    <div style={{ fontSize: 11, color: '#3730a3', background: '#eef2ff', padding: '8px 12px', borderRadius: 6, borderLeft: '3px solid #6366f1', lineHeight: 1.5 }}>
+                      <strong>กลุ่มงานเสมียน (Clerk Group):</strong> พนักงานตำแหน่งเสมียนที่ตั้งค่าเรทฝีมือไว้ จะได้รับค่าแรงเรทฝีมือ <strong>฿{formData.skilled_rate || 377}</strong> อัตโนมัติเมื่อหมุนเวียนมาปฏิบัติงานในรหัสนี้ ส่วนพนักงานเรทปกติจะได้รับค่าแรงปกติ <strong>฿{formData.normal_rate || 357}</strong>
+                    </div>
+                  )}
                 </div>
-                {formData.job_group === 'clerk' && (
-                  <div style={{ fontSize: 11, color: '#3730a3', background: '#eef2ff', padding: '8px 12px', borderRadius: 6, borderLeft: '3px solid #6366f1', lineHeight: 1.5 }}>
-                    <strong>กลุ่มงานเสมียน (Clerk Group):</strong> พนักงานตำแหน่งเสมียนที่ตั้งค่าเรทฝีมือไว้ จะได้รับค่าแรงเรทฝีมือ <strong>฿{formData.skilled_rate || 377}</strong> อัตโนมัติเมื่อหมุนเวียนมาปฏิบัติงานในรหัสนี้ ส่วนพนักงานเรทปกติจะได้รับค่าแรงปกติ <strong>฿{formData.normal_rate || 357}</strong>
-                  </div>
-                )}
 
                 {/* Line 5: Dates (Thai Buddhist Era format) */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>

@@ -11,7 +11,7 @@ import { toast } from 'sonner'
 import { Save, CheckCircle2, AlertCircle, Search, X, AlertTriangle, Pencil, Trash2 } from 'lucide-react'
 import { calculatePayroll } from '../lib/payrollCalc'
 import type { PayrollCalculationInput } from '../lib/payrollCalc'
-import { compareEmployeeCode, formatThaiDateDDMMYYYY, formatMonthlyCycleRange } from '../lib/formatters'
+import { compareEmployeeCode, formatThaiDateDDMMYYYY, formatMonthlyCycleRange, filterActivePeriods } from '../lib/formatters'
 import '../styles/tokens.css'
 
 interface Employee {
@@ -59,13 +59,14 @@ export default function PayrollEntry() {
   const [statusFilter, setStatusFilter] = useState<'saved' | 'outdated' | 'unsaved' | null>(null)
 
   // ── data queries ──
-  const { data: periods = [] } = useQuery<any[]>({
+  const { data: rawPeriods = [] } = useQuery<any[]>({
     queryKey: ['periods', user?.factory_id],
     queryFn: async () => {
       const { data, error } = await supabase.from('payroll_periods').select('*').eq('factory_id', user?.factory_id ?? '').order('period_start', { ascending: false })
       if (error) throw error; return data
     }, enabled: !!user?.factory_id,
   })
+  const periods = useMemo(() => filterActivePeriods(rawPeriods), [rawPeriods])
   const currentPeriod = periods[0]
   const monthCycle = formatMonthlyCycleRange(currentPeriod?.period_end)
 

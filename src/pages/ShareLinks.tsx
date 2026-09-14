@@ -6,7 +6,7 @@ import { useAppStore } from '../store/useAppStore'
 import { TopBar } from '../components/layout/TopBar'
 import { toast } from 'sonner'
 import { Copy, Check, RefreshCw, Link2, Search, FileDown, RotateCcw, AlertCircle, Smartphone, Eye, EyeOff } from 'lucide-react'
-import { compareEmployeeCode } from '../lib/formatters'
+import { compareEmployeeCode, filterActivePeriods } from '../lib/formatters'
 import '../styles/tokens.css'
 
 type SlipStatus = 'pending' | 'confirmed' | 'disputed' | 'auto_confirmed'
@@ -64,7 +64,7 @@ export default function ShareLinks() {
   const [sortBy, setSortBy] = useState<'code' | 'name' | 'status'>('code')
   const [showResetConfirm, setShowResetConfirm] = useState<string | null>(null) // tokenId
 
-  const { data: periods = [] } = useQuery<any[]>({
+  const { data: rawPeriods = [] } = useQuery<any[]>({
     queryKey: ['periods', user?.factory_id],
     queryFn: async () => {
       const { data, error } = await supabase.from('payroll_periods').select('*')
@@ -72,6 +72,8 @@ export default function ShareLinks() {
       if (error) throw error; return data
     }, enabled: !!user?.factory_id, staleTime: 0,
   })
+
+  const periods = useMemo(() => filterActivePeriods(rawPeriods), [rawPeriods])
 
   // Auto-select most recent approved period, then latest
   const hasInit = useRef(false)

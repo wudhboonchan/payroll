@@ -11,7 +11,7 @@ import { calculateTpiPayroll, type TpiShiftRow, type TpiPayrollCalculationResult
 import { employeeWageForm } from '../features/tpi/employeeWageForm'
 import { referenceJobs } from '../features/tpi/referenceJobs'
 import { VKSlipDocument } from '../components/VKSlipDocument'
-import { formatEmployeeFullName, compareEmployeeCode, formatThaiDateDDMMYYYY, formatMonthlyCycleRange } from '../lib/formatters'
+import { formatEmployeeFullName, compareEmployeeCode, formatThaiDateDDMMYYYY, formatMonthlyCycleRange, filterActivePeriods } from '../lib/formatters'
 import { isTpiCompany, isTpiJobCode } from '../features/tpi/model'
 import { formatSafetyEquipmentDetail, formatUniformDetail } from '../lib/deductionProducts'
 import '../styles/tokens.css'
@@ -110,7 +110,7 @@ export default function PaySlip() {
     return () => { ro.disconnect(); window.removeEventListener('resize', applyScale) }
   }, [applyScale, selectedEmpId])
 
-  const { data: periods = [] } = useQuery<any[]>({
+  const { data: rawPeriods = [] } = useQuery<any[]>({
     queryKey: ['periods', user?.factory_id],
     queryFn: async () => {
       const { data, error } = await supabase.from('payroll_periods').select('*')
@@ -119,9 +119,12 @@ export default function PaySlip() {
     }, enabled: !!user?.factory_id, staleTime: 0,
   })
 
-  // Auto-select initial period (latest) once periods are loaded
+  // Filter out future placeholder periods that have not yet occurred
+  const periods = useMemo(() => filterActivePeriods(rawPeriods), [rawPeriods])
+
+  // Auto-select initial period (latest active/real) once periods are loaded
   useEffect(() => {
-    if (periods.length > 0 && !selectedPeriodId) {
+    if (periods.length > 0 && (!selectedPeriodId || !periods.some(p => p.id === selectedPeriodId))) {
       setSelectedPeriodId(periods[0].id)
     }
   }, [periods, selectedPeriodId])
