@@ -6,7 +6,7 @@ import { useAppStore } from '../store/useAppStore'
 import { TopBar } from '../components/layout/TopBar'
 import { toast } from 'sonner'
 import { Plus, CheckCircle, XCircle, Pencil, Check, X, Trash2, ArrowUpDown, ArrowUp, ArrowDown, ShieldAlert, ShieldCheck, AlertTriangle, ExternalLink } from 'lucide-react'
-import { filterActivePeriods } from '../lib/formatters'
+import { filterActivePeriods, formatPeriodLabel } from '../lib/formatters'
 import '../styles/tokens.css'
 
 interface PayrollPeriod { id: string; label: string; period_start: string; period_end: string; status: string; social_security_rate: number; approved_by: string | null; approver?: { full_name: string | null } | null }
@@ -15,11 +15,6 @@ function fmt(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
 }
 function parseLocal(s: string) { const [y,m,d]=s.split('-').map(Number); return new Date(y,m-1,d) }
-function formatPeriodLabel(start: string, end: string) {
-  const months = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.']
-  const s = parseLocal(start), e = parseLocal(end)
-  return `${s.getDate()} – ${e.getDate()} ${months[e.getMonth()]} ${e.getFullYear() + 543}`
-}
 
 function formatOverrideSummary(row: any) {
   const parts: string[] = []
@@ -388,6 +383,21 @@ export default function Dashboard() {
       const currentRate = periods[0]?.social_security_rate != null
         ? Number(periods[0].social_security_rate)
         : (activePeriod?.social_security_rate != null ? Number(activePeriod.social_security_rate) : 0.05)
+
+      // Guard: Check if period already exists in DB
+      const { data: existing } = await supabase
+        .from('payroll_periods')
+        .select('id, label')
+        .eq('factory_id', user.factory_id)
+        .eq('period_start', startStr)
+        .eq('period_end', endStr)
+        .maybeSingle()
+
+      if (existing) {
+        setSelectedPeriodId(existing.id)
+        toast.info('งวดนี้มีอยู่ในระบบแล้ว', { description: `เลือกงวด ${existing.label} เรียบร้อยแล้ว` })
+        return
+      }
 
       const { error } = await supabase.from('payroll_periods').insert({
         factory_id: user.factory_id, label: formatPeriodLabel(startStr, endStr),

@@ -216,7 +216,12 @@ function MobileSlipView(p: MobileSlipProps) {
           <div style={{ flex: 1, background: '#fff', border: '1px solid #eee', borderRadius: 8, padding: '8px 12px' }}>
             <div style={{ fontSize: 10, color: '#aaa', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 3 }}>วิธีรับเงิน</div>
             <div style={{ fontSize: 13, fontWeight: 600 }}>{p.paymentMethod === 'bank_transfer' ? 'โอนธนาคาร' : 'เงินสด'}</div>
-            {p.bankName && <div style={{ fontSize: 11, color: '#999', marginTop: 2 }}>{p.bankName}{p.bankAccount ? ` · ${p.bankAccount}` : ''}</div>}
+            {p.paymentMethod === 'bank_transfer' && (
+              <div style={{ marginTop: 2 }}>
+                {p.bankName && <div style={{ fontSize: 11, color: '#666', lineHeight: 1.4 }}>{p.bankName}</div>}
+                {p.bankAccount && <div style={{ fontSize: 11, color: '#888', fontFamily: 'monospace', lineHeight: 1.4 }}>{p.bankAccount}</div>}
+              </div>
+            )}
           </div>
           {p.workingDays ? (
             <div style={{ flex: 1, background: '#fff', border: '1px solid #eee', borderRadius: 8, padding: '8px 12px' }}>
@@ -449,12 +454,9 @@ export default function LiffSlip() {
       ? (shifts || []).reduce((a: number, s: any) => a + Number(s.ot_hours || 0), 0)
       : 0
     const tpiRegularOtHours = tpiOtHours > 0 ? tpiOtHours : (baseNormal > 0 ? Math.round(amtRegularOt / ((baseNormal / 8) * 1.5)) : 0)
-    const tpiClerkOtShifts = baseNormal > 0 ? Math.round(amtRegularOt / (baseNormal * 2)) : 0
 
     const detailRegularOt = isTpiSlip && amtRegularOt > 0
-      ? (isClerk
-          ? `฿${baseNormal} × 2 × ${tpiClerkOtShifts} วัน (กะ 8 ชม.)`
-          : `(฿${baseNormal} ÷ 8) × 1.5 × ${tpiRegularOtHours} ชม.`)
+      ? `(฿${baseNormal} ÷ 8) × 1.5 × ${tpiRegularOtHours} ชม.`
       : null
 
     const detailNormal = dnDays > 0 ? (isClerk ? `฿${Math.round(clerkDaily)} × ${dnDays} วัน` : `฿${baseNormal} × ${dnDays} วัน`) : null
@@ -517,7 +519,7 @@ export default function LiffSlip() {
       { label: isClerk ? 'ค่าจ้างปกติ (วันธรรมดา)' : 'ค่าจ้างปกติ (8 ชม.)', value: amtNormal,    detail: detailNormal,    subs: [] },
       { label: 'ค่ากะ',                                                     value: amtShift,     detail: detailShift,     subs: [] },
       { label: 'OT วันหยุดนักขัตฤกษ์ (×2)',                                 value: amtHolidayOt, detail: detailHolidayOt, subs: [] },
-      { label: isClerk ? 'OT ล่วงเวลา (×2)' : 'OT ล่วงเวลา (×1.5)',         value: amtRegularOt, detail: detailRegularOt, subs: [] },
+      { label: 'OT ล่วงเวลา (×1.5)',                                        value: amtRegularOt, detail: detailRegularOt, subs: [] },
       { label: 'ค่าไม้ส่วนเกิน',  value: amtWood,          detail: null, subs: [] },
       { label: 'ค่าฟิล์ม',        value: amtFilm,          detail: null, subs: [] },
       { label: monthCycle ? `เบี้ยขยัน (${monthCycle})` : 'เบี้ยขยัน',       value: amtDilig,         detail: null, subs: [] },

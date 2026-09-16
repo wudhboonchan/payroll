@@ -270,10 +270,38 @@ export const formatPeriodLabel = (start: string, end: string): string => {
 }
 
 /**
- * Returns active periods (preserves all real created periods).
+ * Returns active periods, deduplicating any identical date ranges and normalizing labels.
  */
-export function filterActivePeriods<T extends { period_start: string }>(periods: T[]): T[] {
-  return periods
+export function filterActivePeriods<T extends { period_start: string; period_end?: string; status?: string; label?: string }>(periods: T[]): T[] {
+  if (!periods || periods.length === 0) return []
+
+  const seen = new Map<string, T>()
+
+  for (const p of periods) {
+    const key = `${p.period_start}_${p.period_end || ''}`
+    const existing = seen.get(key)
+    
+    // Normalize label to standard Thai Buddhist format
+    const normalizedItem = { ...p }
+    if (normalizedItem.period_start && normalizedItem.period_end) {
+      try {
+        normalizedItem.label = formatPeriodLabel(normalizedItem.period_start, normalizedItem.period_end)
+      } catch {
+        // keep existing label if date parsing fails
+      }
+    }
+
+    if (!existing) {
+      seen.set(key, normalizedItem)
+    } else {
+      // If duplicate range exists, prefer 'approved' over 'draft'
+      if (normalizedItem.status === 'approved' && existing.status !== 'approved') {
+        seen.set(key, normalizedItem)
+      }
+    }
+  }
+
+  return Array.from(seen.values())
 }
 
 /**

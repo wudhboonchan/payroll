@@ -578,19 +578,12 @@ export default function PaySlip() {
         }
       }
 
-      // Regular OT detail: 1.5x hourly for worker, 2x full 8h shift for clerk
+      // Regular OT detail: 1.5x hourly for all positions
       let detailRegularOt: string | null = null
       if (!isOutdated && amtRegularOt > 0) {
-        if (empIsClerk) {
-          const clerkOtShifts = tpiNormalRate > 0 ? Math.round(amtRegularOt / (tpiNormalRate * 2)) : 0
-          if (clerkOtShifts > 0) {
-            detailRegularOt = `฿${tpiNormalRate} × 2 × ${clerkOtShifts} วัน (กะ 8 ชม.)`
-          }
-        } else {
-          const otHrs = tpiCalc ? tpiCalc.totalOtHours : (tpiNormalRate > 0 ? Math.round(amtRegularOt / ((tpiNormalRate / 8) * 1.5)) : 0)
-          if (otHrs > 0) {
-            detailRegularOt = `(฿${tpiNormalRate} ÷ 8) × 1.5 × ${otHrs} ชม.`
-          }
+        const otHrs = tpiCalc ? tpiCalc.totalOtHours : (tpiNormalRate > 0 ? Math.round(amtRegularOt / ((tpiNormalRate / 8) * 1.5)) : 0)
+        if (otHrs > 0) {
+          detailRegularOt = `(฿${tpiNormalRate} ÷ 8) × 1.5 × ${otHrs} ชม.`
         }
       }
 
@@ -622,7 +615,7 @@ export default function PaySlip() {
         { label: 'ค่าจ้างปกติ (8 ชม.)',                   value: amtNormal,    detail: detailNormal,    subs: [] as string[] },
         { label: 'ค่ากะ',                                 value: amtShift,     detail: detailShift,     subs: [] },
         { label: 'OT วันหยุดนักขัตฤกษ์ (×2)',              value: amtHolidayOt, detail: detailHolidayOt, subs: [] },
-        { label: empIsClerk ? 'OT ล่วงเวลา (×2)' : 'OT ล่วงเวลา (×1.5)', value: amtRegularOt, detail: detailRegularOt, subs: [] },
+        { label: 'OT ล่วงเวลา (×1.5)',                    value: amtRegularOt, detail: detailRegularOt, subs: [] },
         { label: monthCycle ? `เบี้ยขยัน (${monthCycle})` : 'เบี้ยขยัน', value: Number(entry.amount_diligence || 0),   detail: null, subs: [] },
         { label: 'เงินพิเศษ',                             value: totalSpecial,                          detail: null, subs: specialSubs },
       ].filter(r => r.value > 0 && r.label !== '')

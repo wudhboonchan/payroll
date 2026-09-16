@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Users, CalendarClock, Calculator,
   CreditCard, FileText, Download, LogOut,
   Link2, UserCog, ChevronDown, X, Menu, KeyRound, Eye, EyeOff,
-  ClipboardList, Briefcase, UserX
+  ClipboardList, Briefcase, UserX, TrendingUp, Wallet, ShieldCheck
 } from 'lucide-react'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
@@ -83,8 +83,17 @@ export function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
   const isTpi = (/ทีพีไอ|\btpi\b/i.test(currentFactoryName)) &&
                 !(/ตราเพชร|\bdrt\b|diamond/i.test(currentFactoryName))
 
+  const isSuperUser = String(user?.role || '').toLowerCase() === 'superuser'
+
+  const ceoNavItems = isSuperUser ? [
+    { href: '/ceo-cockpit',    label: 'CEO Cockpit',           icon: ShieldCheck, tag: 'CEO' },
+    { href: '/company-ledger', label: 'บัญชี & กำไร Outsource', icon: TrendingUp },
+    { href: '/admin-payroll',  label: 'ค่าจ้างทีมแอดมิน',      icon: Wallet },
+    { href: '/bank-payout',    label: 'ระบบจ่ายเงินธนาคาร',     icon: CreditCard },
+  ] : []
+
   const navItems = [
-    { href: '/dashboard',        label: 'Dashboard',             icon: LayoutDashboard, roles: ['superUser','admin'] },
+    { href: '/dashboard',        label: 'Dashboard โรงงาน',      icon: LayoutDashboard, roles: ['superUser','admin'] },
     { href: '/employees',        label: 'ฐานข้อมูลพนักงาน',     icon: Users,           roles: ['superUser','admin'] },
     ...(isTpi ? [{ href: '/tpi-jobs', label: 'จัดการรหัสงาน', icon: Briefcase, roles: ['superUser','admin'] }] : []),
     { href: '/shifts',           label: 'กรอกกะรายวัน',          icon: CalendarClock,   roles: ['superUser','admin'] },
@@ -154,6 +163,64 @@ export function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
 
         {/* Nav */}
         <nav style={{ flex: 1, overflowY: 'auto', padding: '8px 10px' }}>
+          {/* CEO Executive Group */}
+          {ceoNavItems.length > 0 && (
+            <div style={{ marginBottom: 12 }}>
+              <div style={{
+                fontSize: 10,
+                fontWeight: 800,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+                color: 'var(--vk-persimmon)',
+                padding: '6px 12px 4px',
+              }}>
+                ศูนย์ควบคุมผู้บริหาร
+              </div>
+              {ceoNavItems.map(item => {
+                const active = location.pathname === item.href || location.pathname.startsWith(item.href + '/')
+                const Icon = item.icon
+                return (
+                  <Link key={item.href} to={item.href} onClick={() => setIsOpen(false)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 10, padding: '7px 12px',
+                      borderRadius: 6, fontSize: 13.5, fontWeight: active ? 700 : 600,
+                      color: active ? '#FFFFFF' : 'var(--vk-ink)',
+                      background: active ? 'var(--vk-persimmon)' : 'transparent',
+                      textDecoration: 'none', transition: 'background 160ms', marginBottom: 2,
+                    }}>
+                    <Icon style={{ width: 16, height: 16, flexShrink: 0, opacity: active ? 1 : 0.7 }} />
+                    <span style={{ flex: 1, minWidth: 0 }}>{item.label}</span>
+                    {item.tag && (
+                      <span style={{
+                        fontSize: 9, fontWeight: 800, padding: '2px 5px', borderRadius: 4,
+                        background: active ? '#FFFFFF' : 'var(--vk-persimmon)',
+                        color: active ? 'var(--vk-persimmon)' : '#FFFFFF',
+                        letterSpacing: '0.04em'
+                      }}>
+                        {item.tag}
+                      </span>
+                    )}
+                  </Link>
+                )
+              })}
+              <div style={{ height: 1, background: 'var(--vk-rule-soft)', margin: '10px 8px 8px' }} />
+            </div>
+          )}
+
+          {/* Factory Level Items */}
+          {ceoNavItems.length > 0 && (
+            <div style={{
+              fontSize: 10,
+              fontWeight: 800,
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+              color: 'var(--vk-ink-3)',
+              padding: '2px 12px 4px',
+            }}>
+              งานประจำไซต์โรงงาน
+            </div>
+          )}
+
           {filtered.map(item => {
             const active = location.pathname === item.href || location.pathname.startsWith(item.href + '/')
             const Icon = item.icon

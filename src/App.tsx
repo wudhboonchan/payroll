@@ -22,6 +22,10 @@ import EmployeeSlipPage from './pages/EmployeeSlip'
 import LiffUnavailable from './pages/LiffUnavailable'
 import UserManagement from './pages/UserManagement'
 import CompanyEmployeeSummary from './pages/CompanyEmployeeSummary'
+import CeoCockpit from './pages/CeoCockpit'
+import CompanyLedger from './pages/CompanyLedger'
+import AdminPayroll from './pages/AdminPayroll'
+import BankPayout from './pages/BankPayout'
 import { AppLayout, RequireAuth } from './components/layout/AppLayout'
 import { ErrorBoundary } from './components/ErrorBoundary'
 
@@ -86,6 +90,13 @@ function App() {
                   </Route>
                   <Route element={<RequireAuth allowedRoles={['superUser', 'admin']} />}>
                     <Route path="/users"      element={<UserManagement />} />
+                  </Route>
+                  {/* ── CEO Exclusive Routes (Phase 3) ───────────────── */}
+                  <Route element={<RequireAuth allowedRoles={['superUser']} />}>
+                    <Route path="/ceo-cockpit"    element={<CeoCockpit />} />
+                    <Route path="/company-ledger" element={<CompanyLedger />} />
+                    <Route path="/admin-payroll"  element={<AdminPayroll />} />
+                    <Route path="/bank-payout"    element={<BankPayout />} />
                   </Route>
                 </Route>
 

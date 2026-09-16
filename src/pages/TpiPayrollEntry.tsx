@@ -1202,7 +1202,7 @@ export default function TpiPayrollEntry() {
                           +฿{monoNum(calc.totalOtPay)}
                         </div>
                         <div style={{ fontSize: 10, color: '#9a3412', marginTop: 1 }}>
-                          {calc.amountHolidayOt > 0 ? `รวมนักขัตฤกษ์ 2x + OT ล่วงเวลา` : (calc.isClerk ? 'เสมียน 2 เท่า' : `OT 1.5x รวม ${calc.totalOtHours} ชม.`)}
+                          {calc.amountHolidayOt > 0 ? `รวมนักขัตฤกษ์ 2x + OT ล่วงเวลา` : `OT 1.5x รวม ${calc.totalOtHours} ชม.`}
                         </div>
                       </div>
 
@@ -1347,11 +1347,9 @@ export default function TpiPayrollEntry() {
                           isOverridden: false,
                         }] : []),
                         {
-                          label: calc.isClerk ? 'OT เสมียนเต็มกะ (×2 เท่า)' : 'OT ล่วงเวลา (1.5 เท่าต่อ ชม. ปัดเศษขึ้น)',
-                          sub: calc.isClerk ? 'ทำเต็มกะ 8 ชม.' : `${calc.totalOtHours} ชั่วโมง`,
-                          detail: calc.isClerk
-                            ? 'จ่าย 2 เท่าของค่าแรงกะ'
-                            : `(ค่าแรงกะ ÷ 8) × 1.5 × ชม. (ปัดเศษขึ้นเป็นจำนวนเต็มบาท)`,
+                          label: 'OT ล่วงเวลา (1.5 เท่าต่อ ชม. ปัดเศษขึ้น)',
+                          sub: `${calc.totalOtHours} ชั่วโมง`,
+                          detail: `(ค่าแรงกะ ÷ 8) × 1.5 × ชม. (ปัดเศษขึ้นเป็นจำนวนเต็มบาท)`,
                           value: calc.regularOtPay,
                           isOverridden: false,
                         },

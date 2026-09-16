@@ -154,7 +154,7 @@ export function isEndOfMonthPeriod(periodEnd: string): boolean {
  *    - First shift of each day: "ค่าจ้างปกติ" (amount_normal) -> ฐานคำนวณ ปกส 5%
  *    - Second shift of each day (ควบกะ): "ค่ากะ" (amount_shift) -> ไม่นำไปคิด ปกส
  * 2. Public Holiday days: paid 2× base wage of every shift worked on that day
- * 3. Regular Overtime: 1.5× hourly for workers, 2× 8h full-shift for clerks
+ * 3. Regular Overtime: 1.5× hourly for all employees (including clerks) ((baseWage / 8) * 1.5 * otHours)
  * 4. Social Security (ปกส 5%):
  *    - Thai employees: 100% deducted unless exempt_social_security is checked
  *    - Foreign employees: deducted ONLY when social_security_number is present AND data_complete is true (and not exempt)
@@ -229,9 +229,6 @@ export function calculateTpiPayroll(input: TpiPayrollInput): TpiPayrollCalculati
       totalOtHours += otHrs
       regularOtPay += otMoney
 
-      // For clerks, Shift 2 with OT is paid 2x entirely as OT, and must NOT be double-counted as shift wage (ค่ากะ)
-      const isClerkOtShift = isClerk && !isFirstShiftOfDay && (otMoney > 0 || otHrs > 0)
-
       let totalShiftWage = baseWage
       if (isHoliday) {
         // Public holiday: Paid 2x base rate of every shift worked on that day
@@ -243,22 +240,20 @@ export function calculateTpiPayroll(input: TpiPayrollInput): TpiPayrollCalculati
         // The base 1x rate is accounted into normal vs shift wage
         if (isFirstShiftOfDay) {
           baseNormalWage += baseWage
-        } else if (!isClerkOtShift) {
+        } else {
           baseShiftWage += baseWage
         }
       } else {
         normalShiftsCount += 1
         if (isFirstShiftOfDay) {
           baseNormalWage += baseWage
-        } else if (!isClerkOtShift) {
+        } else {
           baseShiftWage += baseWage
         }
       }
 
-      if (!isClerkOtShift) {
-        totalBaseShiftWage += baseWage
-      }
-      dayTotalWage += (isClerkOtShift ? 0 : totalShiftWage)
+      totalBaseShiftWage += baseWage
+      dayTotalWage += totalShiftWage
       dayTotalOt += otMoney
 
       const shiftName = SHIFTS[s.shift_index]?.name || `กะ ${s.shift_index + 1}`
@@ -271,10 +266,10 @@ export function calculateTpiPayroll(input: TpiPayrollInput): TpiPayrollCalculati
         isHalf,
         isHoliday,
         hours: Number(s.actual_hours) || (isHalf ? 4 : 8),
-        wage: isClerkOtShift ? 0 : baseWage,
+        wage: baseWage,
         isFirstShiftOfDay,
         holidayWageMultiplier: isHoliday ? 2 : 1,
-        totalShiftWage: isClerkOtShift ? 0 : totalShiftWage,
+        totalShiftWage,
         otHours: otHrs,
         otPay: otMoney,
       }

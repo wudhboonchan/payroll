@@ -142,9 +142,18 @@ export function VKSlipDocument({
             <div style={{ fontWeight: 600, fontSize: 13, color: '#1a1a1a' }}>
               {paymentMethod === 'bank_transfer' ? 'โอนธนาคาร' : 'เงินสด'}
             </div>
-            {paymentMethod === 'bank_transfer' && bankName && (
-              <div style={{ fontSize: 11, color: '#888', fontFamily: 'monospace', marginTop: 2 }}>
-                {bankName}{bankAccount ? ` · ${bankAccount}` : ''}
+            {paymentMethod === 'bank_transfer' && (
+              <div style={{ marginTop: 2 }}>
+                {bankName && (
+                  <div style={{ fontSize: 11, color: '#555', lineHeight: 1.4 }}>
+                    {bankName}
+                  </div>
+                )}
+                {bankAccount && (
+                  <div style={{ fontSize: 11, color: '#777', fontFamily: 'monospace', lineHeight: 1.4 }}>
+                    {bankAccount}
+                  </div>
+                )}
               </div>
             )}
           </div>

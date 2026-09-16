@@ -338,12 +338,9 @@ export default function EmployeeSlip() {
       ? (slipShifts || []).reduce((a: number, s: any) => a + Number(s.ot_hours || 0), 0)
       : 0
     const tpiRegularOtHours = tpiOtHours > 0 ? tpiOtHours : (baseNormal > 0 ? Math.round(amtRegularOt / ((baseNormal / 8) * 1.5)) : 0)
-    const tpiClerkOtShifts = baseNormal > 0 ? Math.round(amtRegularOt / (baseNormal * 2)) : 0
 
     const detailRegularOt = isTpiSlip && amtRegularOt > 0
-      ? (isClerkSlip
-          ? `฿${baseNormal} × 2 × ${tpiClerkOtShifts} วัน (กะ 8 ชม.)`
-          : `(฿${baseNormal} ÷ 8) × 1.5 × ${tpiRegularOtHours} ชม.`)
+      ? `(฿${baseNormal} ÷ 8) × 1.5 × ${tpiRegularOtHours} ชม.`
       : null
 
     const detailOt = isClerkSlip && otHrs > 0
@@ -393,7 +390,7 @@ export default function EmployeeSlip() {
       { label: isClerkSlip ? 'ค่าจ้างปกติ (วันธรรมดา)' : 'ค่าจ้างปกติ (8 ชม.)', value: amtNormal,    detail: detailNormal,    subs: [] },
       { label: 'ค่ากะ',                                                         value: amtShift,     detail: detailShift,     subs: [] },
       { label: 'OT วันหยุดนักขัตฤกษ์ (×2)',                                     value: amtHolidayOt, detail: detailHolidayOt, subs: [] },
-      { label: isClerkSlip ? 'OT ล่วงเวลา (×2)' : 'OT ล่วงเวลา (×1.5)',         value: amtRegularOt, detail: detailRegularOt, subs: [] },
+      { label: 'OT ล่วงเวลา (×1.5)',                                            value: amtRegularOt, detail: detailRegularOt, subs: [] },
       { label: 'ค่าไม้ส่วนเกิน',  value: slipData.amount_wood_excess, detail: null, subs: [] },
       { label: 'ค่าฟิล์ม',        value: slipData.amount_film,        detail: null, subs: [] },
       { label: monthCycle ? `เบี้ยขยัน (${monthCycle})` : 'เบี้ยขยัน',       value: slipData.amount_diligence,   detail: null, subs: [] },
