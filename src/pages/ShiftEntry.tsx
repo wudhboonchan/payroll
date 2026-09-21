@@ -87,6 +87,7 @@ export default function ShiftEntry() {
   }, [selectedIds.size > 0]) // re-measure when selection bar appears/disappears
 
   // ── periods ──
+  const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(null)
   const { data: rawPeriods = [] } = useQuery<Period[]>({
     queryKey: ['periods', user?.factory_id],
     queryFn: async () => {
@@ -95,7 +96,24 @@ export default function ShiftEntry() {
     }, enabled: !!user?.factory_id,
   })
   const periods = useMemo(() => filterActivePeriods(rawPeriods), [rawPeriods])
-  const currentPeriod = periods[0]
+
+  // งวดฉบับร่างที่ยังไม่ได้รับการอนุมัติ
+  const draftPeriods = useMemo(() => periods.filter(p => p.status === 'draft'), [periods])
+
+  // หากมีงวดฉบับร่างค้างอยู่มากกว่า 1 งวด (กรณีฉุกเฉิน/กู้คืนข้อมูล) ให้เลือกระบุงวดที่เก่าที่สุดก่อนโดยอัตโนมัติ (เช่น 16 - 31 ส.ค. ก่อน 1 - 15 ก.ย.)
+  const defaultPeriod = useMemo(() => {
+    if (draftPeriods.length > 1) {
+      return [...draftPeriods].sort((a, b) => a.period_start.localeCompare(b.period_start))[0]
+    }
+    return periods[0]
+  }, [periods, draftPeriods])
+
+  const currentPeriod = useMemo(() => {
+    if (selectedPeriodId) {
+      return periods.find(p => p.id === selectedPeriodId) ?? defaultPeriod
+    }
+    return defaultPeriod
+  }, [periods, selectedPeriodId, defaultPeriod])
   const periodStart = currentPeriod ? parseLocal(currentPeriod.period_start) : new Date()
   const periodEnd   = currentPeriod ? parseLocal(currentPeriod.period_end)   : new Date()
 
@@ -389,6 +407,51 @@ export default function ShiftEntry() {
         top: 'var(--vk-topbar-h)',
         zIndex: 20,
       }}>
+        {/* แสดงเฉพาะกรณีพิเศษที่มีงวดฉบับร่างค้างมากกว่า 1 งวด เพื่อให้สลับไปกรอกงวดก่อนหน้าได้ (เมื่ออนุมัติงวดแล้วแถบนี้จะไม่แสดงในการใช้งานปกติ) */}
+        {draftPeriods.length > 1 && (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 8,
+            padding: '4px 10px',
+            background: 'var(--vk-paper)',
+            borderRadius: 6,
+            border: '1px solid var(--vk-rule)',
+            alignSelf: 'center',
+          }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--vk-ink-2)' }}>
+              งวดที่เลือก:
+            </span>
+            <select
+              value={currentPeriod.id}
+              onChange={e => {
+                setSelectedPeriodId(e.target.value)
+                setCurrentDate(null)
+                clearSelection()
+              }}
+              style={{
+                fontFamily: 'var(--vk-sans)',
+                fontWeight: 600,
+                fontSize: 12,
+                color: 'var(--vk-ink)',
+                background: 'var(--vk-bone)',
+                border: '1px solid var(--vk-rule-soft)',
+                borderRadius: 4,
+                padding: '2px 8px',
+                cursor: 'pointer',
+                outline: 'none',
+              }}
+            >
+              {draftPeriods.map(p => (
+                <option key={p.id} value={p.id}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
         {/* Row 1: prev / date / next */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, position: 'relative' }}>

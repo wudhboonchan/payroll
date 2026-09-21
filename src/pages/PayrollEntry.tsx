@@ -66,8 +66,26 @@ export default function PayrollEntry() {
       if (error) throw error; return data
     }, enabled: !!user?.factory_id,
   })
+  const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(null)
   const periods = useMemo(() => filterActivePeriods(rawPeriods), [rawPeriods])
-  const currentPeriod = periods[0]
+
+  // งวดฉบับร่างที่ยังไม่ได้รับการอนุมัติ
+  const draftPeriods = useMemo(() => periods.filter(p => p.status === 'draft'), [periods])
+
+  // หากมีงวดฉบับร่างค้างอยู่มากกว่า 1 งวด ให้เลือกงวดที่เก่าที่สุดก่อนโดยอัตโนมัติ (เช่น 16 - 31 ส.ค. ก่อน 1 - 15 ก.ย.)
+  const defaultPeriod = useMemo(() => {
+    if (draftPeriods.length > 1) {
+      return [...draftPeriods].sort((a, b) => a.period_start.localeCompare(b.period_start))[0]
+    }
+    return periods[0]
+  }, [periods, draftPeriods])
+
+  const currentPeriod = useMemo(() => {
+    if (selectedPeriodId) {
+      return periods.find(p => p.id === selectedPeriodId) ?? defaultPeriod
+    }
+    return defaultPeriod
+  }, [periods, selectedPeriodId, defaultPeriod])
   const monthCycle = formatMonthlyCycleRange(currentPeriod?.period_end)
 
   const { data: employees = [] } = useQuery<Employee[]>({
@@ -387,6 +405,39 @@ export default function PayrollEntry() {
 
           {/* Sticky header — does not scroll */}
           <div style={{ flexShrink: 0, padding: '16px 12px 0' }}>
+            {/* แสดงเฉพาะกรณีพิเศษที่มีงวดฉบับร่างค้างมากกว่า 1 งวด (เมื่ออนุมัติงวดแล้วแถบนี้จะไม่แสดงในการใช้งานปกติ) */}
+            {draftPeriods.length > 1 && (
+              <div style={{ marginBottom: 10, padding: '8px 10px', background: 'var(--vk-bone)', border: '1px solid var(--vk-rule-soft)', borderRadius: 6 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--vk-ink-2)', marginBottom: 4 }}>
+                  งวดที่เลือก (ฉุกเฉิน/กู้คืน):
+                </div>
+                <select
+                  value={currentPeriod?.id ?? ''}
+                  onChange={e => setSelectedPeriodId(e.target.value)}
+                  style={{
+                    width: '100%',
+                    height: 28,
+                    fontFamily: 'var(--vk-sans)',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    border: '1px solid var(--vk-rule)',
+                    borderRadius: 4,
+                    padding: '0 6px',
+                    background: 'var(--vk-paper)',
+                    color: 'var(--vk-ink)',
+                    outline: 'none',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {draftPeriods.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
               <div className="vk-eyebrow">พนักงาน ({employees.length})</div>
             </div>
