@@ -488,6 +488,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
   const [preassignSelectedEmpIds, setPreassignSelectedEmpIds] = useState<Set<string>>(new Set())
   const [preassignTargetDates, setPreassignTargetDates] = useState<Set<string>>(new Set())
   const [isPreassignSubmitting, setIsPreassignSubmitting] = useState(false)
+  const [preassignEmpSearch, setPreassignEmpSearch] = useState('')
 
   const { data: dailyAttendance = [], refetch: refetchAttendance } = useQuery({
     queryKey: ['tpi-daily-attendance', user?.factory_id, activeDateStr],
@@ -711,6 +712,43 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
       }))
       .sort((a, b) => compareEmployeeCode(a.emp?.employee_code, b.emp?.employee_code))
   }, [entries, empMap])
+
+  const filteredPreassignEmployees = useMemo(() => {
+    const term = preassignEmpSearch.toLowerCase().trim()
+    if (!term) return preassignUniqueEmployees
+    return preassignUniqueEmployees.filter(({ empId, emp, entries: empEntries }) => {
+      const code = (emp?.employee_code || '').toLowerCase()
+      const firstName = (emp?.first_name || '').toLowerCase()
+      const lastName = (emp?.last_name || '').toLowerCase()
+      const fullName = `${firstName} ${lastName}`.trim()
+      const altFullName = `${firstName}${lastName}`.trim()
+      const nationality = (emp?.nationality || '').toLowerCase()
+      const id = empId.toLowerCase()
+      const jobCodes = empEntries
+        .map((e) => {
+          const j = jobs.find((x) => x.id === e.job_id) || demoJobs.find((x) => x.id === e.job_id)
+          return j?.code || e.job_code_snapshot || ''
+        })
+        .join(' ')
+        .toLowerCase()
+
+      return (
+        code.includes(term) ||
+        firstName.includes(term) ||
+        lastName.includes(term) ||
+        fullName.includes(term) ||
+        altFullName.includes(term) ||
+        nationality.includes(term) ||
+        id.includes(term) ||
+        jobCodes.includes(term)
+      )
+    })
+  }, [preassignUniqueEmployees, preassignEmpSearch, jobs])
+
+  const isAllFilteredPreassignSelected = useMemo(() => {
+    if (filteredPreassignEmployees.length === 0) return false
+    return filteredPreassignEmployees.every((u) => preassignSelectedEmpIds.has(u.empId))
+  }, [filteredPreassignEmployees, preassignSelectedEmpIds])
 
   const availableJobs = useMemo(() => {
     return jobs.filter((j) => isJobAvailable(j, activeDateStr))
@@ -1399,6 +1437,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
     }
     setPreassignSelectedEmpIds(new Set())
     setPreassignTargetDates(new Set())
+    setPreassignEmpSearch('')
     setIsPreassignModalOpen(true)
   }
 
@@ -4471,25 +4510,106 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                       1. เลือกพนักงานที่ต้องการจัดกะล่วงหน้า
                     </span>
                     <span style={{ fontSize: 12, color: 'var(--vk-ink-3)', marginLeft: 8 }}>
-                      (เลือกแล้ว {preassignSelectedEmpIds.size} จาก {preassignUniqueEmployees.length} คน)
+                      (เลือกแล้ว {preassignSelectedEmpIds.size} จาก {preassignUniqueEmployees.length} คน
+                      {preassignEmpSearch.trim() && (
+                        <span style={{ color: '#059669', fontWeight: 600, marginLeft: 6 }}>
+                          • พบ {filteredPreassignEmployees.length} คน
+                        </span>
+                      )})
                     </span>
                   </div>
-                  <div style={{ display: 'flex', gap: 6 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    {/* Search Input Box */}
+                    <div style={{ position: 'relative', width: 220 }}>
+                      <Search style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', width: 13, height: 13, color: 'var(--vk-ink-3)', pointerEvents: 'none' }} />
+                      <input
+                        type="text"
+                        placeholder="ค้นหาชื่อ หรือ รหัสพนักงาน..."
+                        value={preassignEmpSearch}
+                        onChange={(e) => setPreassignEmpSearch(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Escape') {
+                            e.stopPropagation()
+                            setPreassignEmpSearch('')
+                          }
+                        }}
+                        disabled={isPreassignSubmitting}
+                        className="vk-input"
+                        style={{
+                          height: 28,
+                          fontSize: 12,
+                          paddingLeft: 26,
+                          paddingRight: preassignEmpSearch ? 24 : 8,
+                          width: '100%',
+                          borderRadius: 6,
+                          background: '#ffffff',
+                          border: '1px solid #cbd5e1',
+                          boxSizing: 'border-box',
+                        }}
+                      />
+                      {preassignEmpSearch && (
+                        <button
+                          type="button"
+                          onClick={() => setPreassignEmpSearch('')}
+                          disabled={isPreassignSubmitting}
+                          style={{
+                            position: 'absolute',
+                            right: 6,
+                            top: '50%',
+                            transform: 'translateY(-50%)',
+                            background: 'none',
+                            border: 'none',
+                            cursor: 'pointer',
+                            padding: 2,
+                            color: 'var(--vk-ink-3)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}
+                          title="ล้างคำค้นหา"
+                        >
+                          <X style={{ width: 12, height: 12 }} />
+                        </button>
+                      )}
+                    </div>
+
                     <button
                       type="button"
                       className="vk-btn vk-btn--ghost"
-                      style={{ fontSize: 11, padding: '2px 8px', height: 26 }}
+                      style={{ fontSize: 11, padding: '2px 8px', height: 28 }}
+                      disabled={isPreassignSubmitting || filteredPreassignEmployees.length === 0}
                       onClick={() => {
-                        const allIds = new Set(preassignUniqueEmployees.map((u) => u.empId))
-                        setPreassignSelectedEmpIds(allIds)
+                        if (preassignEmpSearch.trim()) {
+                          const next = new Set(preassignSelectedEmpIds)
+                          if (isAllFilteredPreassignSelected) {
+                            filteredPreassignEmployees.forEach((u) => next.delete(u.empId))
+                          } else {
+                            filteredPreassignEmployees.forEach((u) => next.add(u.empId))
+                          }
+                          setPreassignSelectedEmpIds(next)
+                        } else {
+                          if (isAllFilteredPreassignSelected) {
+                            setPreassignSelectedEmpIds(new Set())
+                          } else {
+                            const allIds = new Set(preassignUniqueEmployees.map((u) => u.empId))
+                            setPreassignSelectedEmpIds(allIds)
+                          }
+                        }
                       }}
                     >
-                      เลือกทั้งหมด
+                      {preassignEmpSearch.trim()
+                        ? isAllFilteredPreassignSelected
+                          ? `ยกเลิกที่ค้นหา (${filteredPreassignEmployees.length})`
+                          : `เลือกที่ค้นหา (${filteredPreassignEmployees.length})`
+                        : isAllFilteredPreassignSelected
+                        ? 'ยกเลิกทั้งหมด'
+                        : 'เลือกทั้งหมด'}
                     </button>
                     <button
                       type="button"
                       className="vk-btn vk-btn--ghost"
-                      style={{ fontSize: 11, padding: '2px 8px', height: 26 }}
+                      style={{ fontSize: 11, padding: '2px 8px', height: 28 }}
+                      disabled={isPreassignSubmitting || preassignSelectedEmpIds.size === 0}
                       onClick={() => setPreassignSelectedEmpIds(new Set())}
                     >
                       ล้างการเลือก
@@ -4498,80 +4618,109 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 8, maxHeight: 190, overflowY: 'auto', paddingRight: 4 }}>
-                  {preassignUniqueEmployees.map(({ empId, emp, entries: empEntries }) => {
-                    const isChecked = preassignSelectedEmpIds.has(empId)
-                    const shiftLabels = empEntries.map((e) => `กะ ${e.shift_index + 1}`).join(', ')
-                    const jobCodes = Array.from(
-                      new Set(
-                        empEntries.map((e) => {
-                          const j = jobs.find((x) => x.id === e.job_id) || demoJobs.find((x) => x.id === e.job_id)
-                          return j?.code || e.job_code_snapshot || '-'
-                        })
-                      )
-                    ).join(', ')
-                    const totalOt = empEntries.reduce((sum, e) => sum + (Number(e.ot_hours) || 0), 0)
-
-                    return (
-                      <label
-                        key={empId}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 10,
-                          padding: '8px 12px',
-                          borderRadius: 6,
-                          background: isChecked ? '#f0fdf4' : '#ffffff',
-                          border: `1px solid ${isChecked ? '#86efac' : '#e2e8f0'}`,
-                          cursor: 'pointer',
-                          userSelect: 'none',
-                          fontSize: 12,
-                          transition: 'all 0.15s ease',
-                        }}
+                  {filteredPreassignEmployees.length === 0 ? (
+                    <div
+                      style={{
+                        gridColumn: '1 / -1',
+                        textAlign: 'center',
+                        padding: '24px 16px',
+                        color: 'var(--vk-ink-3)',
+                        fontSize: 12,
+                        background: '#ffffff',
+                        borderRadius: 6,
+                        border: '1px dashed #cbd5e1',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        gap: 6,
+                      }}
+                    >
+                      <span>ไม่พบพนักงานที่ตรงกับ <strong>"{preassignEmpSearch}"</strong></span>
+                      <button
+                        type="button"
+                        className="vk-btn vk-btn--ghost"
+                        style={{ fontSize: 11, padding: '2px 8px', height: 24, color: '#059669' }}
+                        onClick={() => setPreassignEmpSearch('')}
                       >
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={(e) => {
-                            const next = new Set(preassignSelectedEmpIds)
-                            if (e.target.checked) next.add(empId)
-                            else next.delete(empId)
-                            setPreassignSelectedEmpIds(next)
+                        ล้างคำค้นหา
+                      </button>
+                    </div>
+                  ) : (
+                    filteredPreassignEmployees.map(({ empId, emp, entries: empEntries }) => {
+                      const isChecked = preassignSelectedEmpIds.has(empId)
+                      const shiftLabels = empEntries.map((e) => `กะ ${e.shift_index + 1}`).join(', ')
+                      const jobCodes = Array.from(
+                        new Set(
+                          empEntries.map((e) => {
+                            const j = jobs.find((x) => x.id === e.job_id) || demoJobs.find((x) => x.id === e.job_id)
+                            return j?.code || e.job_code_snapshot || '-'
+                          })
+                        )
+                      ).join(', ')
+                      const totalOt = empEntries.reduce((sum, e) => sum + (Number(e.ot_hours) || 0), 0)
+
+                      return (
+                        <label
+                          key={empId}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 10,
+                            padding: '8px 12px',
+                            borderRadius: 6,
+                            background: isChecked ? '#f0fdf4' : '#ffffff',
+                            border: `1px solid ${isChecked ? '#86efac' : '#e2e8f0'}`,
+                            cursor: 'pointer',
+                            userSelect: 'none',
+                            fontSize: 12,
+                            transition: 'all 0.15s ease',
                           }}
-                          style={{ accentColor: '#059669', width: 16, height: 16, cursor: 'pointer' }}
-                        />
-                        <div style={{ minWidth: 0, flex: 1 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                            <span style={{ fontWeight: 700, color: 'var(--vk-ink)', fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                              {emp ? `${emp.first_name} ${emp.last_name}` : empId}
-                            </span>
-                            {isSkilledWorker(empId) && (
-                              <span title="พนักงานค่าแรงฝีมือ" style={{ fontSize: 11, flexShrink: 0 }}>⭐</span>
-                            )}
-                            {empEntries.length > 1 && (
-                              <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 4, background: 'rgba(91,33,182,0.1)', color: '#5b21b6', flexShrink: 0 }}>
-                                2 กะ
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => {
+                              const next = new Set(preassignSelectedEmpIds)
+                              if (e.target.checked) next.add(empId)
+                              else next.delete(empId)
+                              setPreassignSelectedEmpIds(next)
+                            }}
+                            style={{ accentColor: '#059669', width: 16, height: 16, cursor: 'pointer' }}
+                          />
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                              <span style={{ fontWeight: 700, color: 'var(--vk-ink)', fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {emp ? `${emp.first_name} ${emp.last_name}` : empId}
                               </span>
-                            )}
+                              {isSkilledWorker(empId) && (
+                                <span title="พนักงานค่าแรงฝีมือ" style={{ fontSize: 11, flexShrink: 0 }}>⭐</span>
+                              )}
+                              {empEntries.length > 1 && (
+                                <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 4, background: 'rgba(91,33,182,0.1)', color: '#5b21b6', flexShrink: 0 }}>
+                                  2 กะ
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--vk-ink-3)', marginTop: 2, flexWrap: 'wrap' }}>
+                              <span style={{ fontFamily: 'var(--vk-mono)', fontWeight: 600 }}>{emp?.employee_code}</span>
+                              <span>•</span>
+                              <span style={{ color: '#047857', fontWeight: 600 }}>{shiftLabels}</span>
+                              <span>•</span>
+                              <span style={{ maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={jobCodes}>
+                                {jobCodes}
+                              </span>
+                              {totalOt > 0 && (
+                                <>
+                                  <span>•</span>
+                                  <span style={{ color: '#b45309', fontWeight: 600 }}>OT {totalOt} ชม.</span>
+                                </>
+                              )}
+                            </div>
                           </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--vk-ink-3)', marginTop: 2, flexWrap: 'wrap' }}>
-                            <span style={{ fontFamily: 'var(--vk-mono)', fontWeight: 600 }}>{emp?.employee_code}</span>
-                            <span>•</span>
-                            <span style={{ color: '#047857', fontWeight: 600 }}>{shiftLabels}</span>
-                            <span>•</span>
-                            <span style={{ maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={jobCodes}>
-                              {jobCodes}
-                            </span>
-                            {totalOt > 0 && (
-                              <>
-                                <span>•</span>
-                                <span style={{ color: '#b45309', fontWeight: 600 }}>OT {totalOt} ชม.</span>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                      </label>
-                    )
-                  })}
+                        </label>
+                      )
+                    })
+                  )}
                 </div>
               </div>
 
