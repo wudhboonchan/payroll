@@ -415,12 +415,12 @@ export default function EmployeeSlip() {
           {
             label: 'ค่าอุปกรณ์ความปลอดภัย',
             value: slipData.deduct_safety_equipment,
-            detail: formatSafetyEquipmentDetail(slipData.deduct_safety_equipment),
+            detail: formatSafetyEquipmentDetail(slipData.deduct_safety_equipment, undefined, isTpiSlip),
           },
           {
             label: 'ค่าเสื้อพนักงาน',
             value: slipData.deduct_uniform,
-            detail: formatUniformDetail(slipData.deduct_uniform),
+            detail: formatUniformDetail(slipData.deduct_uniform, undefined, isTpiSlip),
           },
         ].filter(r => r.value > 0)
 

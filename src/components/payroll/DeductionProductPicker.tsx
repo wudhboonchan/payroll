@@ -1,10 +1,13 @@
 import { useId, useState } from 'react'
-import { deductionProducts, deductionProductGroups, productDeduction } from '../../lib/deductionProducts'
+import { getDeductionProducts, getDeductionProductGroups, productDeduction } from '../../lib/deductionProducts'
 import type { DeductionField } from '../../lib/deductionProducts'
 
-type Props = { onAdd: (field: DeductionField, amount: number) => void }
+type Props = {
+  onAdd: (field: DeductionField, amount: number) => void
+  factory?: 'tpi' | 'diamond'
+}
 type Purchase = { id: string; productId: string; quantity: number }
-export function DeductionProductPicker({ onAdd }: Props) {
+export function DeductionProductPicker({ onAdd, factory = 'tpi' }: Props) {
   const id = useId()
   const [productId, setProductId] = useState('')
   const [quantity, setQuantity] = useState('1')
@@ -16,14 +19,25 @@ export function DeductionProductPicker({ onAdd }: Props) {
     setQuantity('1')
     setEditingId(null)
   }
-  const deduction = productDeduction(productId, Number(quantity))
+  const deduction = productDeduction(productId, Number(quantity), factory)
+  const products = getDeductionProducts(factory)
+  const productGroups = getDeductionProductGroups(factory)
+
+  const pickerTitle = factory === 'diamond'
+    ? 'ซื้ออุปกรณ์ความปลอดภัย / เสื้อพนักงาน (ตราเพชร)'
+    : 'ซื้อเสื้อ / รองเท้าเซฟตี้เพิ่ม'
+
+  const selectPlaceholder = factory === 'diamond'
+    ? 'เลือกรายการอุปกรณ์ หรือเสื้อพนักงาน'
+    : 'เลือกสินค้า ขนาด และแบบ'
+
   return (
     <div style={{ display: 'grid', gap: 8, padding: 12, border: '1px solid var(--vk-rule-soft)', borderRadius: 6, background: 'var(--vk-paper)' }}>
-      <label htmlFor={`${id}-product`} style={{ fontSize: 12, fontWeight: 600 }}>ซื้อเสื้อ / รองเท้าเซฟตี้เพิ่ม</label>
+      <label htmlFor={`${id}-product`} style={{ fontSize: 12, fontWeight: 600 }}>{pickerTitle}</label>
       <select id={`${id}-product`} className="vk-input" value={productId}
         onChange={event => { setProductId(event.target.value); setMessage('') }}>
-        <option value="">เลือกสินค้า ขนาด และแบบ</option>
-        {deductionProductGroups.map(group => (
+        <option value="">{selectPlaceholder}</option>
+        {productGroups.map(group => (
           <optgroup key={group.label} label={group.label}>
             {group.products.map(item => (
               <option key={item.id} value={item.id}>
@@ -58,7 +72,8 @@ export function DeductionProductPicker({ onAdd }: Props) {
       {purchases.length > 0 && (
         <ul aria-label="รายการสินค้าที่เพิ่ม" style={{ listStyle: 'none', padding: 0, margin: 0 }}>
           {purchases.map(item => {
-            const product = deductionProducts.find(product => product.id === item.productId)!
+            const product = products.find(p => p.id === item.productId)!
+            if (!product) return null
             return (
               <li key={item.id} style={{ padding: '10px 0', borderTop: '1px solid var(--vk-rule-soft)', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
                 <div style={{ flex: '1 1 170px', fontSize: 12 }}>

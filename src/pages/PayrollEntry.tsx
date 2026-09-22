@@ -831,12 +831,12 @@ export default function PayrollEntry() {
                                 whiteSpace: 'normal',
                                 fontWeight: 500,
                               }}>
-                                {formatUniformDetail(extraEntries.deduct_uniform)}
+                                {formatUniformDetail(extraEntries.deduct_uniform, undefined, false)}
                               </div>
                             )}
                             {editingUniform && (
                               <div style={{ fontSize: 11, color: 'var(--vk-ink-3)', marginTop: 2 }}>
-                                กำหนดจำนวนเงิน หรือกดไอคอนถังขยะเพื่อยกเลิกยอดหัก (อย่าลืมกด "บันทึกค่าจ้าง")
+                                กำหนดจำนวนเงิน หรือกดปุ่มลัด / ถังขยะเพื่อยกเลิกยอดหัก (อย่าลืมกด "บันทึกค่าจ้าง")
                               </div>
                             )}
                           </div>
@@ -892,82 +892,120 @@ export default function PayrollEntry() {
                               </button>
                             </div>
                           ) : (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                              <input
-                                type="number"
-                                min="0"
-                                autoFocus
-                                value={extraEntries.deduct_uniform || ''}
-                                onChange={e => {
-                                  const val = Math.max(0, Number(e.target.value) || 0)
-                                  setExtraEntries(prev => ({ ...prev, deduct_uniform: val }))
-                                }}
-                                style={{
-                                  width: 85,
-                                  fontFamily: 'var(--vk-mono)',
-                                  fontSize: 13,
-                                  textAlign: 'right',
-                                  border: '1px solid var(--vk-persimmon)',
-                                  background: '#fff',
-                                  padding: '4px 6px',
-                                  outline: 'none',
-                                  borderRadius: 4
-                                }}
-                                placeholder="0"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => setEditingUniform(false)}
-                                title="ตกลง"
-                                style={{
-                                  background: 'var(--vk-jade)',
-                                  color: '#fff',
-                                  border: 'none',
-                                  borderRadius: 4,
-                                  padding: '4px 8px',
-                                  cursor: 'pointer',
-                                  fontSize: 11,
-                                  fontWeight: 600,
-                                }}
-                              >
-                                ตกลง
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setExtraEntries(prev => ({ ...prev, deduct_uniform: 0 }))
-                                  setEditingUniform(false)
-                                  toast.info('ลบรายการหักเครื่องแบบแล้ว กรุณากด "บันทึกค่าจ้าง"')
-                                }}
-                                title="ลบรายการ (ตั้งเป็น 0 บาท)"
-                                style={{
-                                  background: '#fef2f2',
-                                  color: 'var(--vk-crimson)',
-                                  border: '1px solid #fecaca',
-                                  borderRadius: 4,
-                                  padding: '4px 6px',
-                                  cursor: 'pointer',
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  fontSize: 11,
-                                }}
-                              >
-                                <Trash2 style={{ width: 12, height: 12 }} />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setEditingUniform(false)}
-                                title="ปิด"
-                                style={{
-                                  background: 'none',
-                                  border: 'none',
-                                  cursor: 'pointer',
-                                  color: 'var(--vk-ink-3)',
-                                  padding: 3,
-                                }}
-                              >
-                                <X style={{ width: 14, height: 14 }} />
-                              </button>
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  autoFocus
+                                  value={extraEntries.deduct_uniform || ''}
+                                  onChange={e => {
+                                    const val = Math.max(0, Number(e.target.value) || 0)
+                                    setExtraEntries(prev => ({ ...prev, deduct_uniform: val }))
+                                  }}
+                                  style={{
+                                    width: 85,
+                                    fontFamily: 'var(--vk-mono)',
+                                    fontSize: 13,
+                                    textAlign: 'right',
+                                    border: '1px solid var(--vk-persimmon)',
+                                    background: '#fff',
+                                    padding: '4px 6px',
+                                    outline: 'none',
+                                    borderRadius: 4
+                                  }}
+                                  placeholder="0"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingUniform(false)}
+                                  title="ตกลง"
+                                  style={{
+                                    background: 'var(--vk-jade)',
+                                    color: '#fff',
+                                    border: 'none',
+                                    borderRadius: 4,
+                                    padding: '4px 8px',
+                                    cursor: 'pointer',
+                                    fontSize: 11,
+                                    fontWeight: 600,
+                                  }}
+                                >
+                                  ตกลง
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setExtraEntries(prev => ({ ...prev, deduct_uniform: 0 }))
+                                    setEditingUniform(false)
+                                    toast.info('ลบรายการหักเครื่องแบบแล้ว กรุณากด "บันทึกค่าจ้าง"')
+                                  }}
+                                  title="ลบรายการ (ตั้งเป็น 0 บาท)"
+                                  style={{
+                                    background: '#fef2f2',
+                                    color: 'var(--vk-crimson)',
+                                    border: '1px solid #fecaca',
+                                    borderRadius: 4,
+                                    padding: '4px 6px',
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    fontSize: 11,
+                                  }}
+                                >
+                                  <Trash2 style={{ width: 12, height: 12 }} />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingUniform(false)}
+                                  title="ปิด"
+                                  style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    color: 'var(--vk-ink-3)',
+                                    padding: 3,
+                                  }}
+                                >
+                                  <X style={{ width: 14, height: 14 }} />
+                                </button>
+                              </div>
+                              <div style={{ display: 'flex', gap: 4, marginTop: 2 }}>
+                                <button
+                                  type="button"
+                                  onClick={() => setExtraEntries(prev => ({ ...prev, deduct_uniform: 250 }))}
+                                  style={{
+                                    fontSize: 10,
+                                    padding: '2px 6px',
+                                    borderRadius: 3,
+                                    border: '1px solid #bfdbfe',
+                                    background: '#eff6ff',
+                                    color: '#1d4ed8',
+                                    cursor: 'pointer',
+                                    whiteSpace: 'nowrap'
+                                  }}
+                                  title="ระบุ เสื้อแขนสั้น 1 ตัว (250 บาท)"
+                                >
+                                  แขนสั้น (250 บ.)
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setExtraEntries(prev => ({ ...prev, deduct_uniform: 280 }))}
+                                  style={{
+                                    fontSize: 10,
+                                    padding: '2px 6px',
+                                    borderRadius: 3,
+                                    border: '1px solid #bfdbfe',
+                                    background: '#eff6ff',
+                                    color: '#1d4ed8',
+                                    cursor: 'pointer',
+                                    whiteSpace: 'nowrap'
+                                  }}
+                                  title="ระบุ เสื้อแขนยาว 1 ตัว (280 บาท)"
+                                >
+                                  แขนยาว (280 บ.)
+                                </button>
+                              </div>
                             </div>
                           )}
                         </div>
@@ -997,12 +1035,12 @@ export default function PayrollEntry() {
                                 whiteSpace: 'normal',
                                 fontWeight: 500,
                               }}>
-                                {formatSafetyEquipmentDetail(extraEntries.deduct_safety_equipment)}
+                                {formatSafetyEquipmentDetail(extraEntries.deduct_safety_equipment, undefined, false)}
                               </div>
                             )}
                             {editingSafetyEquip && (
                               <div style={{ fontSize: 11, color: 'var(--vk-ink-3)', marginTop: 2 }}>
-                                กำหนดจำนวนเงิน หรือกดปุ่มลัด / ถังขยะเพื่อยกเลิกยอดหัก (อย่าลืมกด "บันทึกค่าจ้าง")
+                                กำหนดจำนวนเงิน หรือกดถังขยะเพื่อยกเลิกยอดหัก (อย่าลืมกด "บันทึกค่าจ้าง")
                               </div>
                             )}
                           </div>
@@ -1139,7 +1177,7 @@ export default function PayrollEntry() {
                               <div style={{ display: 'flex', gap: 4, marginTop: 2 }}>
                                 <button
                                   type="button"
-                                  onClick={() => setExtraEntries(prev => ({ ...prev, deduct_safety_equipment: 550 }))}
+                                  onClick={() => setExtraEntries(prev => ({ ...prev, deduct_safety_equipment: 100 }))}
                                   style={{
                                     fontSize: 10,
                                     padding: '2px 6px',
@@ -1150,13 +1188,13 @@ export default function PayrollEntry() {
                                     cursor: 'pointer',
                                     whiteSpace: 'nowrap'
                                   }}
-                                  title="ระบุ รองเท้าเซฟตี้ 1 คู่ (550 บาท)"
+                                  title="ระบุ หมวก 1 ใบ (100 บาท)"
                                 >
-                                  รองเท้า 1 คู่ (550 บ.)
+                                  หมวก (100 บ.)
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => setExtraEntries(prev => ({ ...prev, deduct_safety_equipment: 1100 }))}
+                                  onClick={() => setExtraEntries(prev => ({ ...prev, deduct_safety_equipment: 500 }))}
                                   style={{
                                     fontSize: 10,
                                     padding: '2px 6px',
@@ -1167,9 +1205,26 @@ export default function PayrollEntry() {
                                     cursor: 'pointer',
                                     whiteSpace: 'nowrap'
                                   }}
-                                  title="ระบุ รองเท้าเซฟตี้ 2 คู่ (1,100 บาท)"
+                                  title="ระบุ รองเท้าเซฟตี้ 1 คู่ (500 บาท)"
                                 >
-                                  2 คู่ (1,100 บ.)
+                                  รองเท้า 1 คู่ (500 บ.)
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setExtraEntries(prev => ({ ...prev, deduct_safety_equipment: 1000 }))}
+                                  style={{
+                                    fontSize: 10,
+                                    padding: '2px 6px',
+                                    borderRadius: 3,
+                                    border: '1px solid #fed7aa',
+                                    background: '#fff7ed',
+                                    color: '#c2410c',
+                                    cursor: 'pointer',
+                                    whiteSpace: 'nowrap'
+                                  }}
+                                  title="ระบุ รองเท้าเซฟตี้ 2 คู่ (1,000 บาท)"
+                                >
+                                  2 คู่ (1,000 บ.)
                                 </button>
                               </div>
                             </div>
@@ -1331,9 +1386,9 @@ export default function PayrollEntry() {
                         <div className="vk-eyebrow" style={{ marginBottom: 2 }}>รายการหักเพิ่มเติม</div>
                         <DeductionProductPicker
                           key={`${selectedEmpId}:${currentPeriod?.id}`}
+                          factory="diamond"
                           onAdd={(field, amount) => setExtraEntries(prev => ({ ...prev, [field]: Math.max(0, prev[field] + amount) }))}
                         />
-
                       </div>
 
                       <div style={{ display: 'flex', justifyContent: 'space-between', padding: '14px 0 0', marginTop: 'auto', borderTop: '2px solid var(--vk-rule)' }}>

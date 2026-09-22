@@ -794,14 +794,14 @@ export default function PaySlip() {
       list.push({
         label: 'ค่าอุปกรณ์ความปลอดภัย',
         value: Number(entry.deduct_safety_equipment),
-        detail: formatSafetyEquipmentDetail(Number(entry.deduct_safety_equipment)),
+        detail: formatSafetyEquipmentDetail(Number(entry.deduct_safety_equipment), undefined, isTpi),
       })
     }
     if (Number(entry.deduct_uniform || 0) > 0) {
       list.push({
         label: 'ค่าเสื้อพนักงาน',
         value: Number(entry.deduct_uniform),
-        detail: formatUniformDetail(Number(entry.deduct_uniform)),
+        detail: formatUniformDetail(Number(entry.deduct_uniform), undefined, isTpi),
       })
     }
     return list
