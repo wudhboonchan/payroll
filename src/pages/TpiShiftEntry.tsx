@@ -2024,6 +2024,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
       queryClient.invalidateQueries({ queryKey: ['tpi-jobs', user?.factory_id] })
       queryClient.invalidateQueries({ queryKey: ['tpi-shift-day', user?.factory_id, activeDateStr] })
       queryClient.invalidateQueries({ queryKey: ['all-tpi-period-shifts'] })
+      queryClient.invalidateQueries({ queryKey: ['tpi-shift-days-period'] })
       queryClient.invalidateQueries({ queryKey: ['summary-all-shifts'] })
       queryClient.invalidateQueries({ queryKey: ['payslip-all-shifts'] })
       toast.success(`✓ บันทึกข้อมูลการจัดกะ ${fmtDisplay(activeDateStr)} สำเร็จ`)

@@ -254,17 +254,55 @@ export default function TpiPayrollEntry() {
     staleTime: 0,
   })
 
-  // Active shifts: database shifts with factory holiday detection
+  // 3.1. Fetch shift days from DB to detect factory holidays across all devices
+  const { data: dbShiftDays = [] } = useQuery<{ work_date: string; is_holiday: boolean }[]>({
+    queryKey: ['tpi-shift-days-period', currentPeriod?.id, user?.factory_id],
+    queryFn: async () => {
+      if (!currentPeriod?.period_start || !currentPeriod?.period_end || !user?.factory_id) return []
+      try {
+        const { data, error } = await supabase
+          .from('tpi_shift_days')
+          .select('work_date, is_holiday')
+          .eq('factory_id', user.factory_id)
+          .gte('work_date', currentPeriod.period_start)
+          .lte('work_date', currentPeriod.period_end)
+        if (error) {
+          console.warn('Querying tpi_shift_days failed:', error)
+          return []
+        }
+        return (data || []) as { work_date: string; is_holiday: boolean }[]
+      } catch (err) {
+        console.warn('Error fetching tpi_shift_days:', err)
+        return []
+      }
+    },
+    enabled: !!currentPeriod?.id && !!user?.factory_id,
+    staleTime: 0,
+  })
+
+  // Active shifts: database shifts with factory holiday detection (DB days + DB shifts + local fallback)
   const allTpiShifts = useMemo(() => {
+    const holidayDates = new Set<string>()
+    // 1. From database tpi_shift_days
+    dbShiftDays.forEach(d => {
+      if (d.is_holiday) holidayDates.add(d.work_date)
+    })
+    // 2. From database tpi_shift_entries that already have is_holiday_ot: true
+    dbShifts.forEach(s => {
+      if (s.is_holiday_ot) holidayDates.add(s.work_date)
+    })
+    // 3. Fallback to localStorage on this device
     const storedHolidays = getStoredHolidaysForFactory(user?.factory_id)
-    if (storedHolidays.size === 0) return dbShifts
+    storedHolidays.forEach(d => holidayDates.add(d))
+
+    if (holidayDates.size === 0) return dbShifts
     return dbShifts.map((s) => {
-      if (storedHolidays.has(s.work_date)) {
+      if (holidayDates.has(s.work_date)) {
         return { ...s, is_holiday_ot: true }
       }
       return s
     })
-  }, [dbShifts, user?.factory_id])
+  }, [dbShifts, dbShiftDays, user?.factory_id])
 
   // ── 4. Existing Payroll Entries in Current Period ──
   const { data: allEntries = [] } = useQuery<PayrollRow[]>({
@@ -575,9 +613,10 @@ export default function TpiPayrollEntry() {
   }, [selectedEmp, empShifts, empAdvances, currentPeriod, overrideNormal, overrideShift, extraEntries, specialNote])
 
   // ── Outdated Detection across all employees ──
-  const outdatedSet = useMemo(() => {
+  const [outdatedSet, outdatedReasonsMap] = useMemo(() => {
     const set = new Set<string>()
-    if (!currentPeriod) return set
+    const reasonsMap = new Map<string, string[]>()
+    if (!currentPeriod) return [set, reasonsMap]
     const eps = 0.5
 
     for (const entry of allEntries) {
@@ -605,21 +644,35 @@ export default function TpiPayrollEntry() {
         },
       })
 
-      const checks: [number, number][] = [
-        [result.effectiveNormal, Number(entry.amount_normal)],
-        [result.effectiveShift, Number(entry.amount_shift)],
-        [result.totalOtPay, Number(entry.amount_ot)],
-        [result.deductAdvance, Number(entry.deduct_advance)],
-        [result.deductSocialSecurity, Number(entry.deduct_social_security)],
-        [result.amountPosition, Number(entry.amount_position || 0)],
-        [result.amountSpecial, Number(entry.amount_special || 0)],
-      ]
+      const diffs: string[] = []
+      if (Math.abs(result.effectiveNormal - Number(entry.amount_normal)) > eps) {
+        diffs.push(`ค่าจ้างปกติ (คำนวณ ฿${result.effectiveNormal.toLocaleString()} ≠ บันทึก ฿${Number(entry.amount_normal).toLocaleString()})`)
+      }
+      if (Math.abs(result.effectiveShift - Number(entry.amount_shift)) > eps) {
+        diffs.push(`ค่ากะ (คำนวณ ฿${result.effectiveShift.toLocaleString()} ≠ บันทึก ฿${Number(entry.amount_shift).toLocaleString()})`)
+      }
+      if (Math.abs(result.totalOtPay - Number(entry.amount_ot)) > eps) {
+        diffs.push(`ค่า OT/วันหยุด (คำนวณ ฿${result.totalOtPay.toLocaleString()} ≠ บันทึก ฿${Number(entry.amount_ot).toLocaleString()})`)
+      }
+      if (Math.abs(result.deductAdvance - Number(entry.deduct_advance)) > eps) {
+        diffs.push(`เบิกล่วงหน้า (คำนวณ ฿${result.deductAdvance.toLocaleString()} ≠ บันทึก ฿${Number(entry.deduct_advance).toLocaleString()})`)
+      }
+      if (Math.abs(result.deductSocialSecurity - Number(entry.deduct_social_security)) > eps) {
+        diffs.push(`ปกส. (คำนวณ ฿${result.deductSocialSecurity.toLocaleString()} ≠ บันทึก ฿${Number(entry.deduct_social_security).toLocaleString()})`)
+      }
+      if (Math.abs((result.amountPosition || 0) - Number(entry.amount_position || 0)) > eps) {
+        diffs.push(`ค่าตำแหน่ง (คำนวณ ฿${result.amountPosition} ≠ บันทึก ฿${Number(entry.amount_position || 0)})`)
+      }
+      if (Math.abs((result.amountSpecial || 0) - Number(entry.amount_special || 0)) > eps) {
+        diffs.push(`เงินพิเศษ (คำนวณ ฿${result.amountSpecial} ≠ บันทึก ฿${Number(entry.amount_special || 0)})`)
+      }
 
-      if (checks.some(([a, b]) => Math.abs(a - b) > eps)) {
+      if (diffs.length > 0) {
         set.add(emp.id)
+        reasonsMap.set(emp.id, diffs)
       }
     }
-    return set
+    return [set, reasonsMap]
   }, [allEntries, allTpiShifts, allAdvances, employees, currentPeriod])
 
   const isOutdated = outdatedSet.has(selectedEmpId ?? '')
@@ -631,6 +684,19 @@ export default function TpiPayrollEntry() {
     if (!hasEntry) return 'unsaved'
     return outdatedSet.has(empId) ? 'outdated' : 'saved'
   }
+
+  const statusCounts = useMemo(() => {
+    let saved = 0
+    let outdated = 0
+    let unsaved = 0
+    for (const emp of employees) {
+      const st = empStatus(emp.id)
+      if (st === 'saved') saved++
+      else if (st === 'outdated') outdated++
+      else if (st === 'unsaved') unsaved++
+    }
+    return { saved, outdated, unsaved }
+  }, [employees, allTpiShifts, allEntries, outdatedSet])
 
   // ── Save Mutation ──
   const saveMutation = useMutation({
@@ -787,9 +853,9 @@ export default function TpiPayrollEntry() {
             {/* Filter Chips */}
             <div style={{ display: 'flex', gap: 6, fontSize: 10, marginBottom: 10, flexWrap: 'wrap' }}>
               {([
-                { key: 'saved', color: 'var(--vk-jade)', label: 'บันทึกแล้ว' },
-                { key: 'outdated', color: 'var(--vk-persimmon)', label: 'มีการเปลี่ยนแปลง' },
-                { key: 'unsaved', color: '#d4cfc9', label: 'ยังไม่บันทึก' },
+                { key: 'saved', color: 'var(--vk-jade)', label: `บันทึกแล้ว (${statusCounts.saved})` },
+                { key: 'outdated', color: 'var(--vk-persimmon)', label: `มีการเปลี่ยนแปลง (${statusCounts.outdated})` },
+                { key: 'unsaved', color: '#d4cfc9', label: `ยังไม่บันทึก (${statusCounts.unsaved})` },
               ] as const).map(s => {
                 const active = statusFilter === s.key
                 return (
@@ -809,6 +875,7 @@ export default function TpiPayrollEntry() {
                       fontFamily: 'var(--vk-sans)',
                       fontWeight: active ? 700 : 400,
                       fontSize: 10,
+                      whiteSpace: 'nowrap',
                       transition: 'all 120ms',
                     }}
                   >
@@ -818,6 +885,28 @@ export default function TpiPayrollEntry() {
                 )
               })}
             </div>
+
+            {/* Unready / Outdated notice for period approval */}
+            {currentPeriod?.status !== 'approved' && (statusCounts.outdated > 0 || statusCounts.unsaved > 0) && (
+              <div style={{
+                background: '#fffbeb',
+                border: '1px solid #fde68a',
+                borderRadius: 6,
+                padding: '6px 8px',
+                marginBottom: 10,
+                fontSize: 10.5,
+                color: '#92400e',
+                lineHeight: 1.4,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+              }}>
+                <AlertTriangle style={{ width: 14, height: 14, color: '#d97706', flexShrink: 0 }} />
+                <span>
+                  <strong>ยังส่งอนุมัติงวดไม่ได้:</strong> ต้องบันทึกให้เป็นสถานะสีเขียวครบทุกคนก่อน
+                </span>
+              </div>
+            )}
 
             {/* Search */}
             <div style={{ position: 'relative', marginBottom: 8 }}>
@@ -1089,10 +1178,17 @@ export default function TpiPayrollEntry() {
                     </span>
                   )}
                   {existingEntry && isOutdated && (
-                    <span className="vk-pill" style={{ background: 'rgba(177,71,41,0.10)', color: 'var(--vk-persimmon)', border: '1px solid var(--vk-persimmon)', display: 'inline-flex', alignItems: 'center', gap: 4, fontWeight: 700, letterSpacing: '0.04em' }}>
-                      <AlertCircle style={{ width: 11, height: 11, flexShrink: 0 }} />
-                      OUTDATED · มีการแก้ไขกะหรือยอดเบิก กรุณาบันทึกใหม่
-                    </span>
+                    <div style={{ display: 'inline-flex', flexDirection: 'column', gap: 4 }}>
+                      <span className="vk-pill" style={{ background: 'rgba(177,71,41,0.10)', color: 'var(--vk-persimmon)', border: '1px solid var(--vk-persimmon)', display: 'inline-flex', alignItems: 'center', gap: 4, fontWeight: 700, letterSpacing: '0.04em' }}>
+                        <AlertCircle style={{ width: 11, height: 11, flexShrink: 0 }} />
+                        OUTDATED · มีการแก้ไขกะหรือยอดเบิก กรุณาบันทึกใหม่
+                      </span>
+                      {selectedEmpId && outdatedReasonsMap.get(selectedEmpId) && (
+                        <div style={{ fontSize: 11, color: 'var(--vk-persimmon)', fontWeight: 600, lineHeight: 1.4 }}>
+                          จุดที่ต่าง: {outdatedReasonsMap.get(selectedEmpId)!.join(' · ')}
+                        </div>
+                      )}
+                    </div>
                   )}
                   <button
                     className="vk-btn vk-btn--primary"

@@ -1696,10 +1696,26 @@ body>div>div{border:none!important;box-shadow:none!important;border-bottom:1px s
           }
         }
 
-        // Apply stored factory holidays
+        // Fetch DB shift days to detect holidays across all devices
+        const { data: dbShiftDays = [] } = await supabase
+          .from('tpi_shift_days')
+          .select('work_date, is_holiday')
+          .eq('factory_id', user?.factory_id ?? '')
+          .gte('work_date', minStart)
+          .lte('work_date', maxEnd)
+
+        const holidayDates = new Set<string>()
+        ;(dbShiftDays || []).forEach((d: any) => {
+          if (d.is_holiday) holidayDates.add(d.work_date)
+        })
+        allTpiShifts.forEach(s => {
+          if (s.is_holiday_ot) holidayDates.add(s.work_date)
+        })
         const storedHolidays = getStoredHolidaysForFactory(user?.factory_id)
-        if (storedHolidays.size > 0) {
-          allTpiShifts = allTpiShifts.map(s => storedHolidays.has(s.work_date) ? { ...s, is_holiday_ot: true } : s)
+        storedHolidays.forEach(d => holidayDates.add(d))
+
+        if (holidayDates.size > 0) {
+          allTpiShifts = allTpiShifts.map(s => holidayDates.has(s.work_date) ? { ...s, is_holiday_ot: true } : s)
         }
 
         // 2. Fetch payroll entries for target periods (for overrides/extras)

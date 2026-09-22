@@ -237,10 +237,26 @@ export function FactoryBillingModal({
         from += PAGE_SIZE
       }
 
-      // Apply stored factory holidays
+      // Fetch DB shift days to detect holidays across all devices
+      const { data: dbShiftDays = [] } = await supabase
+        .from('tpi_shift_days')
+        .select('work_date, is_holiday')
+        .eq('factory_id', factoryId)
+        .gte('work_date', effectiveRange.start)
+        .lte('work_date', effectiveRange.end)
+
+      const holidayDates = new Set<string>()
+      ;(dbShiftDays || []).forEach((d: any) => {
+        if (d.is_holiday) holidayDates.add(d.work_date)
+      })
+      allShifts.forEach(s => {
+        if (s.is_holiday_ot) holidayDates.add(s.work_date)
+      })
       const storedHolidays = getStoredHolidaysForFactory(factoryId)
-      if (storedHolidays.size > 0) {
-        allShifts = allShifts.map(s => storedHolidays.has(s.work_date) ? { ...s, is_holiday_ot: true } : s)
+      storedHolidays.forEach(d => holidayDates.add(d))
+
+      if (holidayDates.size > 0) {
+        allShifts = allShifts.map(s => holidayDates.has(s.work_date) ? { ...s, is_holiday_ot: true } : s)
       }
 
       return allShifts

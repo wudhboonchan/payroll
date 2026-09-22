@@ -371,6 +371,23 @@ export default function PaySlip() {
     return set
   }, [allEntries])
 
+  const statusCounts = useMemo(() => {
+    let hasSlip = 0
+    let override = 0
+    let noSlip = 0
+    for (const emp of employees) {
+      if (savedIds.has(emp.id)) {
+        hasSlip++
+      } else {
+        noSlip++
+      }
+      if (overriddenIds.has(emp.id)) {
+        override++
+      }
+    }
+    return { hasSlip, override, noSlip }
+  }, [employees, savedIds, overriddenIds])
+
   const overrideInfo = useMemo(() => {
     if (!entry) return { isOverridden: false, details: [] as string[] }
     const details: string[] = []
@@ -847,9 +864,9 @@ export default function PaySlip() {
             <div className="vk-eyebrow" style={{ marginBottom: 8 }}>พนักงาน ({employees.length})</div>
             <div style={{ display: 'flex', gap: 6, fontSize: 10, marginBottom: 10, flexWrap: 'wrap' }}>
               {([
-                { key: 'has_slip', color: 'var(--vk-jade)', label: 'มีสลิป' },
-                { key: 'override', color: '#d97706',        label: `มี Override (${overriddenIds.size})` },
-                { key: 'no_slip',  color: '#d4cfc9',        label: 'ยังไม่มี' },
+                { key: 'has_slip', color: 'var(--vk-jade)', label: `มีสลิป (${statusCounts.hasSlip})` },
+                { key: 'override', color: '#d97706',        label: `มี Override (${statusCounts.override})` },
+                { key: 'no_slip',  color: '#d4cfc9',        label: `ยังไม่มี (${statusCounts.noSlip})` },
               ] as const).map(s => {
                 const active = statusFilter === s.key
                 return (

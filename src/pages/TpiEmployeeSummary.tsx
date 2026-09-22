@@ -206,17 +206,52 @@ export default function TpiEmployeeSummary() {
     staleTime: 0,
   })
 
-  // Apply stored factory holidays
-  const allTpiShifts = useMemo(() => {
+  // 5.1. Fetch shift days from DB to detect factory holidays across all devices
+  const { data: dbShiftDays = [] } = useQuery<{ work_date: string; is_holiday: boolean }[]>({
+    queryKey: ['tpi-shift-days-period', currentPeriod?.id, user?.factory_id],
+    queryFn: async () => {
+      if (!currentPeriod?.period_start || !currentPeriod?.period_end || !user?.factory_id) return []
+      try {
+        const { data, error } = await supabase
+          .from('tpi_shift_days')
+          .select('work_date, is_holiday')
+          .eq('factory_id', user.factory_id)
+          .gte('work_date', currentPeriod.period_start)
+          .lte('work_date', currentPeriod.period_end)
+        if (error) return []
+        return (data || []) as { work_date: string; is_holiday: boolean }[]
+      } catch {
+        return []
+      }
+    },
+    enabled: !!currentPeriod?.id && !!user?.factory_id,
+    staleTime: 0,
+  })
+
+  // Factory holiday dates resolved from DB days + DB shift entries + localStorage
+  const factoryHolidayDates = useMemo(() => {
+    const set = new Set<string>()
+    dbShiftDays.forEach(d => {
+      if (d.is_holiday) set.add(d.work_date)
+    })
+    rawShifts.forEach(s => {
+      if (s.is_holiday_ot) set.add(s.work_date)
+    })
     const storedHolidays = getStoredHolidaysForFactory(user?.factory_id)
-    if (storedHolidays.size === 0) return rawShifts
+    storedHolidays.forEach(d => set.add(d))
+    return set
+  }, [dbShiftDays, rawShifts, user?.factory_id])
+
+  // Apply factory holidays
+  const allTpiShifts = useMemo(() => {
+    if (factoryHolidayDates.size === 0) return rawShifts
     return rawShifts.map(s => {
-      if (storedHolidays.has(s.work_date)) {
+      if (factoryHolidayDates.has(s.work_date)) {
         return { ...s, is_holiday_ot: true }
       }
       return s
     })
-  }, [rawShifts, user?.factory_id])
+  }, [rawShifts, factoryHolidayDates])
 
   // ── 6. Fetch Payroll Entries for Period ──
   const { data: allEntries = [] } = useQuery<any[]>({
@@ -285,13 +320,11 @@ export default function TpiEmployeeSummary() {
     const auditMap = new Map<string, any>()
     payrollResult?.dailyAudit.forEach(a => auditMap.set(a.date, a))
 
-    const storedHolidays = getStoredHolidaysForFactory(user?.factory_id)
-
     return dates.map(dStr => {
       const existing = auditMap.get(dStr)
       if (existing) return existing
 
-      const isHoliday = storedHolidays.has(dStr)
+      const isHoliday = factoryHolidayDates.has(dStr)
       return {
         date: dStr,
         isHoliday,
@@ -300,7 +333,7 @@ export default function TpiEmployeeSummary() {
         dayTotalOt: 0,
       }
     })
-  }, [currentPeriod, payrollResult, user?.factory_id])
+  }, [currentPeriod, payrollResult, factoryHolidayDates])
 
   // Filtered employees for left pane search
   const filteredEmployees = useMemo(() => {
@@ -453,7 +486,7 @@ export default function TpiEmployeeSummary() {
             <div style={{ display: 'flex', gap: 6, fontSize: 10, marginBottom: 10, flexWrap: 'wrap' }}>
               {([
                 { key: 'worked',     color: 'var(--vk-jade)', label: `มีกะทำงาน (${allTpiShifts.length > 0 ? activeIdsThisPeriod.size : 0})` },
-                { key: 'not_worked', color: '#d4cfc9',        label: 'ไม่มีกะ' },
+                { key: 'not_worked', color: '#d4cfc9',        label: `ไม่มีกะ (${Math.max(0, employees.length - (allTpiShifts.length > 0 ? activeIdsThisPeriod.size : 0))})` },
               ] as const).map(s => {
                 const active = statusFilter === s.key
                 return (

@@ -351,6 +351,19 @@ export default function PayrollEntry() {
     return outdatedSet.has(empId) ? 'outdated' : 'saved'
   }
 
+  const statusCounts = useMemo(() => {
+    let saved = 0
+    let outdated = 0
+    let unsaved = 0
+    for (const emp of employees) {
+      const st = empStatus(emp.id)
+      if (st === 'saved') saved++
+      else if (st === 'outdated') outdated++
+      else if (st === 'unsaved') unsaved++
+    }
+    return { saved, outdated, unsaved }
+  }, [employees, allShifts, allEntries, outdatedSet])
+
   // ── save mutation ──
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -443,20 +456,42 @@ export default function PayrollEntry() {
             </div>
             <div style={{ display: 'flex', gap: 6, fontSize: 10, marginBottom: 10, flexWrap: 'wrap' }}>
               {([
-                { key: 'saved',    color: 'var(--vk-jade)',      label: 'บันทึกแล้ว' },
-                { key: 'outdated', color: 'var(--vk-persimmon)', label: 'มีการเปลี่ยนแปลง' },
-                { key: 'unsaved',  color: '#d4cfc9',             label: 'ยังไม่บันทึก' },
+                { key: 'saved',    color: 'var(--vk-jade)',      label: `บันทึกแล้ว (${statusCounts.saved})` },
+                { key: 'outdated', color: 'var(--vk-persimmon)', label: `มีการเปลี่ยนแปลง (${statusCounts.outdated})` },
+                { key: 'unsaved',  color: '#d4cfc9',             label: `ยังไม่บันทึก (${statusCounts.unsaved})` },
               ] as const).map(s => {
                 const active = statusFilter === s.key
                 return (
                   <button key={s.key} onClick={() => setStatusFilter(active ? null : s.key)}
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', border: `1px solid ${active ? s.color : 'var(--vk-rule-soft)'}`, borderRadius: 999, cursor: 'pointer', background: active ? `${s.color}22` : 'transparent', color: active ? 'var(--vk-ink)' : 'var(--vk-ink-3)', fontFamily: 'var(--vk-sans)', fontWeight: active ? 700 : 400, fontSize: 10, transition: 'all 120ms' }}>
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', border: `1px solid ${active ? s.color : 'var(--vk-rule-soft)'}`, borderRadius: 999, cursor: 'pointer', background: active ? `${s.color}22` : 'transparent', color: active ? 'var(--vk-ink)' : 'var(--vk-ink-3)', fontFamily: 'var(--vk-sans)', fontWeight: active ? 700 : 400, fontSize: 10, whiteSpace: 'nowrap', transition: 'all 120ms' }}>
                     <span style={{ width: 6, height: 6, borderRadius: '50%', background: s.color, display: 'inline-block', flexShrink: 0 }} />
                     {s.label}
                   </button>
                 )
               })}
             </div>
+
+            {/* Unready / Outdated notice for period approval */}
+            {currentPeriod?.status !== 'approved' && (statusCounts.outdated > 0 || statusCounts.unsaved > 0) && (
+              <div style={{
+                background: '#fffbeb',
+                border: '1px solid #fde68a',
+                borderRadius: 6,
+                padding: '6px 8px',
+                marginBottom: 10,
+                fontSize: 10.5,
+                color: '#92400e',
+                lineHeight: 1.4,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+              }}>
+                <AlertTriangle style={{ width: 14, height: 14, color: '#d97706', flexShrink: 0 }} />
+                <span>
+                  <strong>ยังส่งอนุมัติงวดไม่ได้:</strong> ต้องบันทึกให้เป็นสถานะสีเขียวครบทุกคนก่อน
+                </span>
+              </div>
+            )}
             {/* Search */}
             <div style={{ position: 'relative', marginBottom: 8 }}>
               <Search style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', width: 12, height: 12, color: 'var(--vk-ink-3)', pointerEvents: 'none' }} />

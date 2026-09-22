@@ -7,6 +7,7 @@ import { TopBar } from '../components/layout/TopBar'
 import { toast } from 'sonner'
 import { Plus, CheckCircle, XCircle, Pencil, Check, X, Trash2, ArrowUpDown, ArrowUp, ArrowDown, ShieldAlert, ShieldCheck, AlertTriangle, ExternalLink } from 'lucide-react'
 import { filterActivePeriods, formatPeriodLabel } from '../lib/formatters'
+import { checkPeriodApprovalStatus } from '../lib/periodApprovalCheck'
 import '../styles/tokens.css'
 
 interface PayrollPeriod { id: string; label: string; period_start: string; period_end: string; status: string; social_security_rate: number; approved_by: string | null; approver?: { full_name: string | null } | null }
@@ -67,6 +68,7 @@ export default function Dashboard() {
   const [showCancelConfirm, setShowCancelConfirm] = useState(false)
   const [showDeletePeriodConfirm, setShowDeletePeriodConfirm] = useState(false)
   const [showCarryOverModal, setShowCarryOverModal] = useState(false)
+  const [showBlockApprovalModal, setShowBlockApprovalModal] = useState(false)
   const [editingSSRate, setEditingSSRate] = useState(false)
   const [ssRateDraft, setSSRateDraft] = useState('')
   const [channelSort, setChannelSort] = useState<{ key: 'channel' | 'count' | 'total'; dir: 'asc' | 'desc' }>({ key: 'total', dir: 'desc' })
@@ -286,13 +288,39 @@ export default function Dashboard() {
     refetchInterval: 30_000,
   })
 
+  // ── Period Approval Readiness Validation (Outdated & Unsaved Guard) ──
+  const { data: approvalReadiness } = useQuery({
+    queryKey: ['period-approval-readiness', activePeriod?.id, user?.factory_id, isTpi],
+    queryFn: async () => {
+      if (!activePeriod || !user?.factory_id) return null
+      return await checkPeriodApprovalStatus(user.factory_id, activePeriod, isTpi)
+    },
+    enabled: !!activePeriod && !isApproved && !!user?.factory_id,
+    staleTime: 10_000,
+    refetchInterval: 30_000,
+  })
+
   const approveMutation = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase.from('payroll_periods').update({ status: 'approved', approved_by: user?.id ?? null }).eq('id', activePeriod!.id)
+      if (!activePeriod || !user?.factory_id) return
+
+      // Strict validation before allowing approval
+      const readiness = await checkPeriodApprovalStatus(user.factory_id, activePeriod, isTpi)
+      if (!readiness.canApprove) {
+        throw new Error(readiness.errorMessage || 'หน้ากรอกค่าจ้างยังไม่เป็นสถานะบันทึกแล้วทุกคน กรุณากลับไปบันทึกให้ครบทุกคนก่อน')
+      }
+
+      const { error } = await supabase.from('payroll_periods').update({ status: 'approved', approved_by: user?.id ?? null }).eq('id', activePeriod.id)
       if (error) throw error
     },
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['periods'] }); toast.success('อนุมัติงวดเรียบร้อยแล้ว') },
-    onError: (e: Error) => toast.error('อนุมัติไม่สำเร็จ', { description: e.message }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['periods'] })
+      queryClient.invalidateQueries({ queryKey: ['period-approval-readiness'] })
+      toast.success('อนุมัติงวดเรียบร้อยแล้ว')
+    },
+    onError: (e: Error) => {
+      toast.error('อนุมัติไม่สำเร็จ', { description: e.message, duration: 8000 })
+    },
   })
 
   const cancelApproveMutation = useMutation({
@@ -450,7 +478,19 @@ export default function Dashboard() {
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {activePeriod && !isApproved && (activeEmployeeCount > 0 || (stats?.gross ?? 0) > 0) && (
-              <button className="vk-btn vk-btn--primary" onClick={() => approveMutation.mutate()} disabled={approveMutation.isPending}>
+              <button
+                className="vk-btn vk-btn--primary"
+                onClick={() => {
+                  if (approvalReadiness && !approvalReadiness.canApprove) {
+                    setShowBlockApprovalModal(true)
+                  } else {
+                    approveMutation.mutate()
+                  }
+                }}
+                disabled={approveMutation.isPending}
+                style={approvalReadiness && !approvalReadiness.canApprove ? { background: '#d97706', borderColor: '#b45309' } : undefined}
+                title={approvalReadiness && !approvalReadiness.canApprove ? approvalReadiness.errorMessage : 'อนุมัติงวดนี้'}
+              >
                 <CheckCircle style={{ width: 15, height: 15 }} />
                 {approveMutation.isPending ? 'กำลังอนุมัติ...' : 'อนุมัติงวดนี้'}
               </button>
@@ -478,6 +518,45 @@ export default function Dashboard() {
             )}
           </div>
         </div>
+
+        {/* Unready / Outdated Warning Banner */}
+        {!isApproved && activePeriod && approvalReadiness && !approvalReadiness.canApprove && (
+          <div style={{
+            background: '#fffbeb',
+            border: '1px solid #fde68a',
+            borderRadius: 8,
+            padding: '12px 16px',
+            marginBottom: 24,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 16,
+            flexWrap: 'wrap',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <AlertTriangle style={{ width: 22, height: 22, color: '#d97706', flexShrink: 0 }} />
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 13, color: '#92400e' }}>
+                  ยังไม่สามารถอนุมัติงวดนี้ได้ (หน้ากรอกค่าจ้างยังไม่เขียวทุกคน)
+                </div>
+                <div style={{ fontSize: 12, color: '#b45309', marginTop: 2 }}>
+                  {approvalReadiness.outdatedCount > 0 && <span>🟠 ข้อมูลเปลี่ยนแปลง (Outdated): <strong>{approvalReadiness.outdatedCount}</strong> คน </span>}
+                  {approvalReadiness.outdatedCount > 0 && approvalReadiness.unsavedCount > 0 && <span>• </span>}
+                  {approvalReadiness.unsavedCount > 0 && <span>⚪ ยังไม่บันทึกค่าจ้าง: <strong>{approvalReadiness.unsavedCount}</strong> คน </span>}
+                  <span>— กรุณาบันทึกค่าจ้างให้ครบและเป็นสถานะ "บันทึกแล้ว" ทุกคนก่อนส่งอนุมัติ</span>
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="vk-btn vk-btn--primary"
+              style={{ fontSize: 12, height: 32 }}
+              onClick={() => navigate(isTpi ? '/tpi-payroll-entry' : '/payroll-entry')}
+            >
+              ไปยังหน้าบันทึกค่าแรง →
+            </button>
+          </div>
+        )}
 
         {periods.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '80px 0', borderTop: '1px solid var(--vk-rule)' }}>
@@ -936,6 +1015,66 @@ export default function Dashboard() {
                 {cancelApproveMutation.isPending ? 'กำลังยกเลิก...' : 'ยืนยัน ยกเลิกอนุมัติ'}
               </button>
               <button className="vk-btn" onClick={() => setShowCancelConfirm(false)}>ปิด</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Block Approval Modal when Outdated or Unsaved exist */}
+      {showBlockApprovalModal && approvalReadiness && (
+        <div className="vk-root" style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(22,19,17,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+          onClick={() => setShowBlockApprovalModal(false)}>
+          <div style={{ background: 'var(--vk-paper)', border: '1px solid var(--vk-rule)', width: '100%', maxWidth: 460, borderRadius: 8, overflow: 'hidden' }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ background: '#d97706', color: '#fff', padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 12 }}>
+              <AlertTriangle style={{ width: 24, height: 24, flexShrink: 0 }} />
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 16 }}>ไม่สามารถอนุมัติงวดได้</div>
+                <div style={{ fontSize: 11, opacity: 0.9, marginTop: 2 }}>งวด {activePeriod?.label}</div>
+              </div>
+            </div>
+            <div style={{ padding: '20px', fontSize: 13, color: 'var(--vk-ink-2)', lineHeight: 1.6, background: 'var(--vk-bone)', display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div>
+                ระบบไม่อนุญาตให้อนุมัติงวด เนื่องจากหน้าบันทึกค่าแรงยังมีรายการที่<strong>ไม่เป็นสถานะ "บันทึกแล้ว" (ต้องเขียวทุกคน)</strong>
+              </div>
+              {approvalReadiness.outdatedCount > 0 && (
+                <div style={{ padding: '10px 12px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 6, color: '#92400e' }}>
+                  <div style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span>🟠</span> มีการเปลี่ยนแปลง (Outdated): {approvalReadiness.outdatedCount} คน
+                  </div>
+                  <div style={{ fontSize: 11, color: '#b45309', marginTop: 4, maxHeight: 60, overflowY: 'auto' }}>
+                    {approvalReadiness.outdatedEmployees.map(e => `${e.employee_code} ${e.name}`).slice(0, 8).join(', ')}
+                    {approvalReadiness.outdatedEmployees.length > 8 && ` และอีก ${approvalReadiness.outdatedEmployees.length - 8} คน`}
+                  </div>
+                </div>
+              )}
+              {approvalReadiness.unsavedCount > 0 && (
+                <div style={{ padding: '10px 12px', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: 6, color: 'var(--vk-ink)' }}>
+                  <div style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span>⚪</span> ยังไม่ได้บันทึกค่าจ้าง: {approvalReadiness.unsavedCount} คน
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--vk-ink-3)', marginTop: 4, maxHeight: 60, overflowY: 'auto' }}>
+                    {approvalReadiness.unsavedEmployees.map(e => `${e.employee_code} ${e.name}`).slice(0, 8).join(', ')}
+                    {approvalReadiness.unsavedEmployees.length > 8 && ` และอีก ${approvalReadiness.unsavedEmployees.length - 8} คน`}
+                  </div>
+                </div>
+              )}
+              <div style={{ fontSize: 12, color: 'var(--vk-ink-3)' }}>
+                กรุณากลับไปที่หน้าบันทึกค่าแรงเพื่อตรวจสอบและกดบันทึกให้ครบทุกคนก่อนส่งอนุมัติงวด
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, padding: '14px 20px', borderTop: '1px solid var(--vk-rule)', background: 'var(--vk-paper)' }}>
+              <button
+                className="vk-btn vk-btn--primary"
+                style={{ flex: 1 }}
+                onClick={() => {
+                  setShowBlockApprovalModal(false)
+                  navigate(isTpi ? '/tpi-payroll-entry' : '/payroll-entry')
+                }}
+              >
+                ไปยังหน้าบันทึกค่าแรง →
+              </button>
+              <button className="vk-btn" onClick={() => setShowBlockApprovalModal(false)}>ปิด</button>
             </div>
           </div>
         </div>

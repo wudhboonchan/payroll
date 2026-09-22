@@ -812,7 +812,7 @@ export default function EmployeeSummary() {
             <div style={{ display: 'flex', gap: 6, fontSize: 10, marginBottom: 10, flexWrap: 'wrap' }}>
               {([
                 { key: 'worked',     color: 'var(--vk-jade)', label: `มีกะทำงาน (${allShifts.length > 0 ? activeIdsThisPeriod.size : 0})` },
-                { key: 'not_worked', color: '#d4cfc9',        label: 'ไม่มีกะ' },
+                { key: 'not_worked', color: '#d4cfc9',        label: `ไม่มีกะ (${Math.max(0, employees.length - (allShifts.length > 0 ? activeIdsThisPeriod.size : 0))})` },
               ] as const).map(s => {
                 const active = statusFilter === s.key
                 return (
