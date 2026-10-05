@@ -43,7 +43,7 @@ export async function checkPeriodApprovalStatus(
   // 2. Fetch advances for this period
   const { data: advances = [], error: advErr } = await supabase
     .from('advance_payments')
-    .select('id, employee_id, amount, note, created_at')
+    .select('id, employee_id, amount, notes, created_at')
     .eq('period_id', period.id)
   if (advErr) throw advErr
 

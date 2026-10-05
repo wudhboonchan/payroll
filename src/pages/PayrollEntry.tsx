@@ -133,9 +133,10 @@ export default function PayrollEntry() {
   const { data: allAdvances = [] } = useQuery<any[]>({
     queryKey: ['advances', 'all', currentPeriod?.id],
     queryFn: async () => {
-      const { data, error } = await supabase.from('advance_payments').select('employee_id,amount').eq('period_id', currentPeriod.id)
+      const { data, error } = await supabase.from('advance_payments').select('employee_id,amount,notes').eq('period_id', currentPeriod.id)
         .limit(10000)
-      if (error) throw error; return data
+      if (error) throw error
+      return (data || []).map((a: any) => ({ ...a, note: a.notes || a.note || '' }))
     }, enabled: !!currentPeriod?.id, staleTime: 30_000,
   })
 

@@ -89,6 +89,8 @@ export default function Dashboard() {
   const periods = useMemo(() => filterActivePeriods(rawPeriods), [rawPeriods])
   const activePeriod = periods.find(p => p.id === selectedPeriodId) ?? periods[0]
   const isApproved = activePeriod?.status === 'approved'
+  const latestPeriod = periods[0]
+  const isLatestPeriodApproved = !latestPeriod || latestPeriod.status === 'approved'
 
   const { data: activeEmployeeCount = 0 } = useQuery<number>({
     queryKey: ['active-employee-count', user?.factory_id],
@@ -390,6 +392,12 @@ export default function Dashboard() {
   const createNextPeriodMutation = useMutation({
     mutationFn: async () => {
       if (!user?.factory_id) throw new Error('ไม่พบข้อมูลโรงงาน')
+      if (periods.length > 0) {
+        const latest = periods[0]
+        if (latest.status !== 'approved') {
+          throw new Error(`ไม่สามารถสร้างงวดใหม่ได้ เนื่องจากงวดล่าสุด (${latest.label}) ยังไม่ได้รับการอนุมัติ`)
+        }
+      }
       let nextStart: Date, nextEnd: Date
       if (periods.length === 0) {
         const now = new Date()
@@ -502,7 +510,7 @@ export default function Dashboard() {
                 {cancelApproveMutation.isPending ? 'กำลังยกเลิก...' : 'ยกเลิกอนุมัติ'}
               </button>
             )}
-            {(periods.length === 0 || isApproved) && (
+            {isLatestPeriodApproved && (
               <button className="vk-btn vk-btn--primary" onClick={() => createNextPeriodMutation.mutate()} disabled={createNextPeriodMutation.isPending}>
                 <Plus style={{ width: 15, height: 15 }} />
                 {createNextPeriodMutation.isPending ? 'กำลังสร้าง...' : periods.length === 0 ? `สร้างงวดแรก (${nextPeriodLabel})` : `สร้างงวดถัดไป (${nextPeriodLabel})`}
