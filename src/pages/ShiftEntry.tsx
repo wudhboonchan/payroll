@@ -29,6 +29,7 @@ interface AssignedEmp {
   employee_id: string; shift_type: string; code: string; name: string
   nationality: string | null
   isClerk: boolean; isHalfShift: boolean; partialHours: number
+  isUnpaid?: boolean
   woodExcess: number; filmAmount: number; otHours: number
   isHolidayOTExempt: boolean; isCrossPosition: boolean
   crossPositionTitle: string; crossPositionExtraPay: number
@@ -313,6 +314,7 @@ const isDisciplinaryAdvanceNote = (notes?: string | null): boolean => {
       .filter((a: any) => activeIds.has(a.employee_id))
       .map((a: any) => {
         const emp = employees.find(e => e.id === a.employee_id)!
+        const isUnpaid = Number(a.actual_hours) === -1
         return {
           employee_id: a.employee_id, shift_type: a.shift_type,
           code: emp.employee_code,
@@ -321,6 +323,7 @@ const isDisciplinaryAdvanceNote = (notes?: string | null): boolean => {
           isClerk: emp.position === 'clerk',
           isHalfShift: a.is_half_shift ?? false,
           partialHours: Number(a.actual_hours ?? 0),
+          isUnpaid,
           woodExcess: Number(a.wood_excess ?? 0),
           filmAmount: Number(a.film_amount ?? 0),
           otHours: Number(a.ot_hours ?? 0),
@@ -344,6 +347,7 @@ const isDisciplinaryAdvanceNote = (notes?: string | null): boolean => {
         code: e.employee_code, name: empName(e),
         nationality: e.nationality ?? null,
         isClerk: true, isHalfShift: false, partialHours: 0,
+        isUnpaid: false,
         woodExcess: 0, filmAmount: 0, otHours: 0,
         isHolidayOTExempt: false, isCrossPosition: false,
         crossPositionTitle: '', crossPositionExtraPay: 0,
@@ -430,6 +434,7 @@ const isDisciplinaryAdvanceNote = (notes?: string | null): boolean => {
         code: emp.employee_code, name: empName(emp),
         nationality: emp.nationality ?? null,
         isClerk, isHalfShift: isClerk, partialHours: 0,
+        isUnpaid: false,
         woodExcess: 0, filmAmount: 0, otHours: 0,
         isHolidayOTExempt: false, isCrossPosition: false,
         crossPositionTitle: '', crossPositionExtraPay: 0, isNew: true,
@@ -591,18 +596,22 @@ const isDisciplinaryAdvanceNote = (notes?: string | null): boolean => {
         return
       }
 
-      const payload = assignments.map(a => ({
-        period_id: currentPeriod.id, employee_id: a.employee_id, work_date: activeDateStr,
-        shift_type: a.shift_type, is_holiday_ot: isHoliday,
-        is_half_shift: a.isHalfShift,
-        wood_excess: a.isClerk ? 0 : a.woodExcess,
-        film_amount: a.isClerk ? 0 : a.filmAmount,
-        ot_hours: a.otHours, actual_hours: a.partialHours || 0,
-        is_holiday_ot_exempt: a.isHolidayOTExempt,
-        is_cross_position: a.isCrossPosition,
-        cross_position_title: a.crossPositionTitle || '',
-        cross_position_extra_pay: a.crossPositionExtraPay || 0,
-      }))
+      const payload = assignments.map(a => {
+        const isUnpaidShift = Boolean(a.isUnpaid || a.partialHours === -1)
+        return {
+          period_id: currentPeriod.id, employee_id: a.employee_id, work_date: activeDateStr,
+          shift_type: a.shift_type, is_holiday_ot: isHoliday,
+          is_half_shift: isUnpaidShift ? false : a.isHalfShift,
+          wood_excess: (a.isClerk || isUnpaidShift) ? 0 : a.woodExcess,
+          film_amount: (a.isClerk || isUnpaidShift) ? 0 : a.filmAmount,
+          ot_hours: isUnpaidShift ? 0 : a.otHours,
+          actual_hours: isUnpaidShift ? -1 : (a.partialHours || 0),
+          is_holiday_ot_exempt: a.isHolidayOTExempt,
+          is_cross_position: isUnpaidShift ? false : a.isCrossPosition,
+          cross_position_title: isUnpaidShift ? '' : (a.crossPositionTitle || ''),
+          cross_position_extra_pay: isUnpaidShift ? 0 : (a.crossPositionExtraPay || 0),
+        }
+      })
       const { error } = await supabase.from('shift_assignments' as any).upsert(payload, { onConflict: 'period_id,employee_id,work_date' })
       if (error) throw error
       const keepIds = assignments.map(a => a.employee_id)
@@ -990,9 +999,30 @@ const isDisciplinaryAdvanceNote = (notes?: string | null): boolean => {
                         <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 3 }}>
                           <span style={{ fontFamily: 'var(--vk-mono)', fontSize: 10, color: 'var(--vk-ink-3)' }}>{emp.code}</span>
                           {emp.isNew && <Pill color="jade">ใหม่</Pill>}
-                          {emp.isHalfShift && !emp.partialHours && !emp.isClerk && <Pill color="amber">8 ชม.</Pill>}
-                          {emp.partialHours > 0 && <Pill color="orange">{emp.partialHours} ชม.</Pill>}
-                          {emp.otHours > 0 && <Pill color="purple">OT {emp.otHours} ชม.</Pill>}
+                          {(emp.isUnpaid || emp.partialHours === -1) ? (
+                            <span
+                              style={{
+                                fontSize: 9,
+                                fontWeight: 700,
+                                padding: '1px 6px',
+                                borderRadius: 999,
+                                background: '#fee2e2',
+                                color: '#b91c1c',
+                                border: '1px solid #fca5a5',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 2,
+                              }}
+                            >
+                              🚫 ไม่จ่ายค่าแรง
+                            </span>
+                          ) : (
+                            <>
+                              {emp.isHalfShift && !emp.partialHours && !emp.isClerk && <Pill color="amber">8 ชม.</Pill>}
+                              {emp.partialHours > 0 && <Pill color="orange">{emp.partialHours} ชม.</Pill>}
+                              {emp.otHours > 0 && <Pill color="purple">OT {emp.otHours} ชม.</Pill>}
+                            </>
+                          )}
                           {emp.woodExcess > 0 && <Pill color="blue">+ค่าไม้</Pill>}
                           {emp.filmAmount > 0 && <Pill color="blue">+ค่าฟิล์ม</Pill>}
                           {emp.isHolidayOTExempt && <Pill color="ink">×1</Pill>}
@@ -1000,26 +1030,49 @@ const isDisciplinaryAdvanceNote = (notes?: string | null): boolean => {
                           {(() => {
                             const empDiscList = dayDisciplinary.filter(a => a.employee_id === emp.employee_id)
                             const empDiscTotal = empDiscList.reduce((s, a) => s + Number(a.amount || 0), 0)
-                            if (empDiscTotal <= 0) return null
-                            return (
-                              <span
-                                style={{
-                                  fontSize: 9,
-                                  fontWeight: 700,
-                                  padding: '1px 6px',
-                                  borderRadius: 999,
-                                  background: '#fee2e2',
-                                  color: '#b91c1c',
-                                  border: '1px solid #fca5a5',
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: 2,
-                                }}
-                                title={`มีรายการหักทำผิดวินัย ${empDiscList.length} รายการ (รวม ฿${empDiscTotal.toLocaleString()})`}
-                              >
-                                <ShieldAlert style={{ width: 9, height: 9 }} /> หักผิดวินัย ฿{empDiscTotal.toLocaleString()}
-                              </span>
-                            )
+                            if (empDiscTotal > 0) {
+                              return (
+                                <span
+                                  style={{
+                                    fontSize: 9,
+                                    fontWeight: 700,
+                                    padding: '1px 6px',
+                                    borderRadius: 999,
+                                    background: '#fee2e2',
+                                    color: '#b91c1c',
+                                    border: '1px solid #fca5a5',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 2,
+                                  }}
+                                  title={`มีรายการหักทำผิดวินัย ${empDiscList.length} รายการ (รวม ฿${empDiscTotal.toLocaleString()})`}
+                                >
+                                  <ShieldAlert style={{ width: 9, height: 9 }} /> หักผิดวินัย ฿{empDiscTotal.toLocaleString()}
+                                </span>
+                              )
+                            }
+                            if (empDiscList.length > 0 && !(emp.isUnpaid || emp.partialHours === -1)) {
+                              return (
+                                <span
+                                  style={{
+                                    fontSize: 9,
+                                    fontWeight: 700,
+                                    padding: '1px 6px',
+                                    borderRadius: 999,
+                                    background: '#fee2e2',
+                                    color: '#b91c1c',
+                                    border: '1px solid #fca5a5',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 2,
+                                  }}
+                                  title={`มีบันทึกทำผิดวินัย ${empDiscList.length} รายการ`}
+                                >
+                                  <ShieldAlert style={{ width: 9, height: 9 }} /> ผิดวินัย
+                                </span>
+                              )
+                            }
+                            return null
                           })()}
                         </div>
                       </div>
@@ -1154,11 +1207,14 @@ function DetailModal({
   onClose: () => void
 }) {
   // earlyReturn = กลับก่อน (8–12 ชม.) vs underHalf = ลา/ป่วย (< 8 ชม.)
+  const isEmpUnpaid = Boolean(emp.isUnpaid || emp.partialHours === -1)
   const [earlyReturn, setEarlyReturn] = React.useState(emp.partialHours >= 8)
-  const isPartial = emp.partialHours > 0
+  const isPartial = emp.partialHours > 0 && !isEmpUnpaid
 
   // Disciplinary deduction state
-  const [showDisciplinaryForm, setShowDisciplinaryForm] = React.useState(false)
+  const [isDisciplinaryOpen, setIsDisciplinaryOpen] = React.useState(
+    Boolean(isEmpUnpaid || disciplinaryAdvances.length > 0)
+  )
   const [incidentDate, setIncidentDate] = React.useState(activeDateStr)
   const [incidentShift, setIncidentShift] = React.useState(emp.shift_type || 'morning')
   const [discReason, setDiscReason] = React.useState('')
@@ -1181,16 +1237,19 @@ function DetailModal({
       toast.error('กรุณาระบุรายละเอียดสาเหตุความผิด เช่น เข้าโรงงานแล้วหนีไม่ทำงาน')
       return
     }
-    const amtNum = Number(discAmount)
-    if (!amtNum || amtNum <= 0) {
-      toast.error('กรุณาระบุยอดเงินที่หัก (ต้องมากกว่า 0 บาท)')
+    const amtNum = Number(discAmount) || 0
+    if (!isEmpUnpaid && amtNum <= 0) {
+      toast.error('กรุณาระบุยอดเงินที่หัก (ต้องมากกว่า 0 บาท) หรือเลือกไม่จ่ายค่าแรงในกะนี้')
       return
     }
 
     const dateToUse = incidentDate || activeDateStr
     const thDateStr = formatIsoToThaiDate(dateToUse)
     const shiftLabel = incidentShift === 'morning' ? 'กะเช้า' : 'กะบ่าย'
-    const noteStr = `[หักทำผิดวินัย] [หักค่าปรับผิดระเบียบ] หักทำผิดวินัย (วันที่ ${thDateStr} ${shiftLabel}) | สาเหตุ: ${cleanReason} | ยอดหัก ฿${amtNum.toLocaleString()}`
+    const unpaidTag = isEmpUnpaid ? '[ไม่จ่ายค่าแรง] ' : ''
+    const unpaidDesc = isEmpUnpaid ? '(ไม่คิดค่าจ้างกะนี้) ' : ''
+    const amtDesc = amtNum > 0 ? `| ยอดหักเพิ่มเติม ฿${amtNum.toLocaleString()}` : '| ไม่คิดค่าจ้างกะนี้'
+    const noteStr = `[หักทำผิดวินัย] ${unpaidTag}[หักค่าปรับผิดระเบียบ] หักทำผิดวินัย ${unpaidDesc}(วันที่ ${thDateStr} ${shiftLabel}) | สาเหตุ: ${cleanReason} ${amtDesc}`
 
     onAddDisciplinary({
       employee_id: emp.employee_id,
@@ -1202,7 +1261,14 @@ function DetailModal({
 
     setDiscReason('')
     setDiscAmount('')
-    setShowDisciplinaryForm(false)
+    toast.success('บันทึกข้อมูลทำผิดวินัยเรียบร้อย')
+  }
+
+  const handleModalConfirm = () => {
+    if (discReason.trim()) {
+      handleSaveDisciplinary()
+    }
+    onClose()
   }
 
   const inputStyle: React.CSSProperties = {
@@ -1255,23 +1321,41 @@ function DetailModal({
           ) : (
             /* ── Worker: hours + wood/film ── */
             <>
+              {isEmpUnpaid && (
+                <div style={{
+                  padding: '8px 12px',
+                  borderRadius: 6,
+                  background: '#fee2e2',
+                  border: '1px solid #fca5a5',
+                  color: '#991b1b',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}>
+                  <ShieldAlert style={{ width: 16, height: 16, flexShrink: 0 }} />
+                  <span>กะนี้ถูกตั้งค่าเป็น <strong>"ไม่จ่ายค่าแรง"</strong> (คิดค่าจ้าง 0 บาท)</span>
+                </div>
+              )}
+
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <label className="vk-eyebrow">ชั่วโมงทำงาน</label>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                   {/* Row 1: full options */}
                   <HourBtn label="12 ชม." sub={isHoliday ? 'OT ×2' : 'ปกติ+กะ'} icon={<Clock style={{ width: 15, height: 15 }} />}
-                    active={!emp.isHalfShift && !isPartial} disabled={false}
-                    onClick={() => onUpdate({ isHalfShift: false, partialHours: 0 })} />
+                    active={!emp.isHalfShift && !isPartial && !isEmpUnpaid} disabled={false}
+                    onClick={() => onUpdate({ isHalfShift: false, partialHours: 0, isUnpaid: false })} />
                   <HourBtn label="8 ชม." sub={isHoliday ? 'OT ×2' : 'ไม่มีค่ากะ'} icon={<Clock4 style={{ width: 15, height: 15 }} />}
-                    active={emp.isHalfShift && !isPartial} disabled={false}
-                    onClick={() => onUpdate({ isHalfShift: true, partialHours: 0 })} />
+                    active={emp.isHalfShift && !isPartial && !isEmpUnpaid} disabled={false}
+                    onClick={() => onUpdate({ isHalfShift: true, partialHours: 0, isUnpaid: false })} />
                   {/* Row 2: partial options */}
                   <HourBtn label="8–12 ชม." sub="กลับก่อน" icon={<Clock4 style={{ width: 15, height: 15 }} />}
-                    active={isPartial && earlyReturn} disabled={false}
-                    onClick={() => { setEarlyReturn(true); onUpdate({ isHalfShift: false, partialHours: emp.partialHours >= 8 && emp.partialHours < 12 ? emp.partialHours : 10 }) }} />
+                    active={isPartial && earlyReturn && !isEmpUnpaid} disabled={false}
+                    onClick={() => { setEarlyReturn(true); onUpdate({ isHalfShift: false, partialHours: emp.partialHours >= 8 && emp.partialHours < 12 ? emp.partialHours : 10, isUnpaid: false }) }} />
                   <HourBtn label="< 8 ชม." sub="ลา/ป่วย" icon={<Clock4 style={{ width: 15, height: 15 }} />}
-                    active={isPartial && !earlyReturn} disabled={false}
-                    onClick={() => { setEarlyReturn(false); onUpdate({ isHalfShift: false, partialHours: emp.partialHours > 0 && emp.partialHours < 8 ? emp.partialHours : 4 }) }} />
+                    active={isPartial && !earlyReturn && !isEmpUnpaid} disabled={false}
+                    onClick={() => { setEarlyReturn(false); onUpdate({ isHalfShift: false, partialHours: emp.partialHours > 0 && emp.partialHours < 8 ? emp.partialHours : 4, isUnpaid: false }) }} />
                 </div>
                 {isPartial && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
@@ -1287,7 +1371,7 @@ function DetailModal({
                         const val = Number(e.target.value) || 0
                         if (earlyReturn && (val <= 8 || val >= 12)) { toast.error('กลับก่อน: ต้องอยู่ระหว่าง 8.5–11.5 ชม.'); return }
                         if (!earlyReturn && val >= 8) { toast.error('ลา/ป่วย: ต้องน้อยกว่า 8 ชม.'); return }
-                        onUpdate({ partialHours: val })
+                        onUpdate({ partialHours: val, isUnpaid: false })
                       }} />
                     <span style={{ fontSize: 12, color: 'var(--vk-ink-3)' }}>ชม. ทำงานจริง</span>
                     {emp.partialHours > 0 && emp.rate_per_12h > 0 && (
@@ -1350,250 +1434,307 @@ function DetailModal({
             </>
           )}
 
-          {/* ── Safety & Disciplinary Fine Section (หักเงินทำผิดวินัย / หนีงาน) ── */}
-          <div style={{
-            marginTop: 4,
-            padding: '14px 16px',
-            borderRadius: 8,
-            background: '#fef2f2',
-            border: '1.5px solid #fca5a5',
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                <ShieldAlert style={{ width: 17, height: 17, color: '#b91c1c', flexShrink: 0 }} />
-                <span style={{ fontWeight: 700, fontSize: 13, color: '#991b1b' }}>
-                  บันทึกทำผิดวินัย / หักเงิน
-                </span>
-              </div>
-            </div>
+          {/* ── Safety & Disciplinary Fine Section (บันทึกทำผิดวินัย / ไม่จ่ายค่าแรง) ── */}
+          <div style={{ borderTop: '1px solid var(--vk-rule-soft)', paddingTop: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <label style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              cursor: 'pointer',
+              fontSize: 13,
+              fontWeight: 600,
+              color: (isDisciplinaryOpen || isEmpUnpaid || disciplinaryAdvances.length > 0) ? '#991b1b' : 'var(--vk-ink)',
+            }}>
+              <input
+                type="checkbox"
+                checked={isDisciplinaryOpen || isEmpUnpaid || disciplinaryAdvances.length > 0}
+                onChange={e => {
+                  const checked = e.target.checked
+                  setIsDisciplinaryOpen(checked)
+                  if (!checked) {
+                    if (isEmpUnpaid) {
+                      onUpdate({ isUnpaid: false, partialHours: 0 })
+                    }
+                    setDiscReason('')
+                    setDiscAmount('')
+                  }
+                }}
+                style={{ accentColor: '#dc2626' }}
+              />
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <ShieldAlert style={{ width: 15, height: 15, color: '#dc2626' }} />
+                บันทึกทำผิดวินัย / ไม่จ่ายค่าแรง
+              </span>
+            </label>
 
-            {/* Context bar reflecting date and shift */}
-            <div style={{ fontSize: 11, color: '#7f1d1d', background: '#ffffff', padding: '6px 10px', borderRadius: 6, border: '1px solid #fecaca', marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 4 }}>
-              <span>📅 <strong>{fmtDisplay(activeDateStr)}</strong> ({formatIsoToThaiDate(activeDateStr)})</span>
-              <span>⏰ <strong>{emp.shift_type === 'morning' ? 'กะเช้า (08:00 — 20:00)' : 'กะบ่าย (20:00 — 08:00)'}</strong></span>
-            </div>
-
-            {/* List existing disciplinary records */}
-            {disciplinaryAdvances.length > 0 && (
-              <div style={{ marginBottom: 10 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: '#991b1b', marginBottom: 5 }}>
-                  รายการหักเงินทำผิดวินัยในงวดนี้ ({disciplinaryAdvances.length} รายการ):
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {disciplinaryAdvances.map((adv: any) => {
-                    const rawNote = adv.notes || ''
-                    const infoMatch = rawNote.match(/(?:หักค่าปรับผิดระเบียบ|หักทำผิดวินัย|หักผิดวินัย)\s*(\([^\)]+\))/) || rawNote.match(/(\(วันที่[^\)]+\))/)
-                    const infoStr = infoMatch ? infoMatch[1] : ''
-                    const reasonMatch = rawNote.match(/สาเหตุ:\s*([^\|]+)/)
-                    const reasonStr = reasonMatch ? reasonMatch[1].trim() : (rawNote.replace(/\[[^\]]+\]/g, '').trim() || 'ทำผิดวินัย')
-                    return (
-                      <div key={adv.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '7px 10px', background: '#ffffff', borderRadius: 6, border: '1px solid #fecaca' }}>
-                        <div style={{ minWidth: 0, flex: 1 }}>
-                          <div style={{ fontSize: 12, fontWeight: 700, color: '#991b1b' }}>
-                            {infoStr || `วันที่ ${adv.request_date ? formatIsoToThaiDate(adv.request_date) : '—'}`}
-                          </div>
-                          <div style={{ fontSize: 11, color: '#4b5563', marginTop: 1, wordBreak: 'break-word' }}>
-                            สาเหตุ: {reasonStr}
-                          </div>
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                          <span style={{ fontFamily: 'var(--vk-mono)', fontWeight: 800, fontSize: 13, color: '#b91c1c' }}>
-                            −฿{Number(adv.amount || 0).toLocaleString()}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteIncident(adv.id)}
-                            title="ลบรายการหักเงินนี้"
-                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#b91c1c', padding: 2, display: 'flex' }}
-                          >
-                            <Trash2 style={{ width: 14, height: 14 }} />
-                          </button>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* Toggle button to open/close add form */}
-            {!showDisciplinaryForm ? (
-              <button
-                type="button"
-                onClick={() => setShowDisciplinaryForm(true)}
-                style={{
-                  width: '100%',
-                  padding: '8px 12px',
-                  fontSize: 12,
-                  fontWeight: 700,
-                  color: '#991b1b',
+            {(isDisciplinaryOpen || isEmpUnpaid || disciplinaryAdvances.length > 0) && (
+              <div style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 12,
+                padding: '12px 14px',
+                background: '#fef2f2',
+                border: '1px solid #fca5a5',
+                borderRadius: 6,
+              }}>
+                {/* Context bar reflecting date and shift */}
+                <div style={{
+                  fontSize: 11,
+                  color: '#7f1d1d',
                   background: '#ffffff',
-                  border: '1px dashed #fca5a5',
+                  padding: '6px 10px',
                   borderRadius: 6,
-                  cursor: 'pointer',
+                  border: '1px solid #fecaca',
                   display: 'flex',
                   alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 6,
-                }}
-              >
-                + บันทึกหักเงินทำผิดวินัย (เช่น เข้าโรงงานแล้วหนีไม่ทำงาน)
-              </button>
-            ) : (
-              <div style={{ background: '#ffffff', border: '1px solid #fca5a5', borderRadius: 6, padding: '12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: '#991b1b' }}>
-                    กรอกข้อมูลหักเงินทำผิดวินัย
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setShowDisciplinaryForm(false)}
-                    style={{ fontSize: 11, color: 'var(--vk-ink-3)', background: 'none', border: 'none', cursor: 'pointer' }}
-                  >
-                    ยกเลิก
-                  </button>
+                  justifyContent: 'space-between',
+                  flexWrap: 'wrap',
+                  gap: 4,
+                }}>
+                  <span>📅 <strong>{fmtDisplay(activeDateStr)}</strong> ({formatIsoToThaiDate(activeDateStr)})</span>
+                  <span>⏰ <strong>{emp.shift_type === 'morning' ? 'กะเช้า (08:00 — 20:00)' : 'กะบ่าย (20:00 — 08:00)'}</strong></span>
                 </div>
 
-                {/* Date & Shift */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, alignItems: 'start' }}>
+                {/* Option: ไม่จ่ายค่าแรงในกะนี้ */}
+                <label style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: 8,
+                  cursor: 'pointer',
+                  padding: '9px 12px',
+                  background: '#ffffff',
+                  borderRadius: 6,
+                  border: isEmpUnpaid ? '1.5px solid #dc2626' : '1px solid #fecaca',
+                }}>
+                  <input
+                    type="checkbox"
+                    checked={isEmpUnpaid}
+                    onChange={e => {
+                      const checked = e.target.checked
+                      onUpdate({
+                        isUnpaid: checked,
+                        partialHours: checked ? -1 : 0,
+                      })
+                      if (checked && !discReason) {
+                        setDiscReason('มาโรงงานแล้วหนีไม่ทำงาน')
+                      }
+                    }}
+                    style={{ marginTop: 2, accentColor: '#dc2626' }}
+                  />
                   <div>
-                    <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#991b1b', marginBottom: 4 }}>
-                      วันที่เกิดเหตุ:
-                    </label>
-                    <ThaiDatePicker
-                      value={incidentDate}
-                      onChange={(val) => setIncidentDate(val || activeDateStr)}
-                      placeholder="วว/ดด/ปปปป (พ.ศ.)"
-                    />
+                    <div style={{ fontSize: 13, fontWeight: 700, color: '#991b1b' }}>
+                      ไม่จ่ายค่าแรงในกะนี้ (ไม่คิดค่าจ้างกะนี้)
+                    </div>
+                    <div style={{ fontSize: 11, color: '#7f1d1d', marginTop: 2 }}>
+                      เช่น เข้าโรงงานแล้วหนีไม่ทำงาน — กะนี้จะไม่ถูกนำไปคิดค่าจ้าง (0 บาท) แต่ยังมีบันทึกการเข้ากะ
+                    </div>
                   </div>
+                </label>
+
+                {/* Existing Disciplinary records (if any) */}
+                {disciplinaryAdvances.length > 0 && (
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: '#991b1b', marginBottom: 5 }}>
+                      รายการบันทึกทำผิดวินัยในงวดนี้ ({disciplinaryAdvances.length} รายการ):
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {disciplinaryAdvances.map((adv: any) => {
+                        const rawNote = adv.notes || ''
+                        const infoMatch = rawNote.match(/(?:หักค่าปรับผิดระเบียบ|หักทำผิดวินัย|หักผิดวินัย)\s*(\([^\)]+\))/) || rawNote.match(/(\(วันที่[^\)]+\))/)
+                        const infoStr = infoMatch ? infoMatch[1] : ''
+                        const reasonMatch = rawNote.match(/สาเหตุ:\s*([^\|]+)/)
+                        const reasonStr = reasonMatch ? reasonMatch[1].trim() : (rawNote.replace(/\[[^\]]+\]/g, '').trim() || 'ทำผิดวินัย')
+                        const isUnpaidNote = rawNote.includes('ไม่คิดค่าจ้าง') || rawNote.includes('[ไม่จ่ายค่าแรง]')
+                        return (
+                          <div key={adv.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '7px 10px', background: '#ffffff', borderRadius: 6, border: '1px solid #fecaca' }}>
+                            <div style={{ minWidth: 0, flex: 1 }}>
+                              <div style={{ fontSize: 12, fontWeight: 700, color: '#991b1b' }}>
+                                {infoStr || `วันที่ ${adv.request_date ? formatIsoToThaiDate(adv.request_date) : '—'}`}
+                              </div>
+                              <div style={{ fontSize: 11, color: '#4b5563', marginTop: 1, wordBreak: 'break-word' }}>
+                                สาเหตุ: {reasonStr}
+                              </div>
+                              {isUnpaidNote && (
+                                <span style={{ fontSize: 10, color: '#dc2626', fontWeight: 600 }}>
+                                  (ไม่คิดค่าจ้างกะนี้)
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                              {Number(adv.amount || 0) > 0 ? (
+                                <span style={{ fontFamily: 'var(--vk-mono)', fontWeight: 800, fontSize: 13, color: '#b91c1c' }}>
+                                  −฿{Number(adv.amount || 0).toLocaleString()}
+                                </span>
+                              ) : (
+                                <span style={{ fontSize: 11, fontWeight: 700, color: '#dc2626' }}>
+                                  ไม่จ่ายค่าแรง
+                                </span>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteIncident(adv.id)}
+                                title="ลบรายการนี้"
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#b91c1c', padding: 2, display: 'flex' }}
+                              >
+                                <Trash2 style={{ width: 14, height: 14 }} />
+                              </button>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Disciplinary input form: reason + optional extra fine */}
+                <div style={{ background: '#ffffff', border: '1px solid #fca5a5', borderRadius: 6, padding: '12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#991b1b' }}>
+                    บันทึกรายละเอียดความผิด / หักเงินเพิ่มเติม
+                  </div>
+
+                  {/* Date & Shift */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, alignItems: 'start' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#991b1b', marginBottom: 4 }}>
+                        วันที่เกิดเหตุ:
+                      </label>
+                      <ThaiDatePicker
+                        value={incidentDate}
+                        onChange={(val) => setIncidentDate(val || activeDateStr)}
+                        placeholder="วว/ดด/ปปปป (พ.ศ.)"
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#991b1b', marginBottom: 4 }}>
+                        กะที่เกิดเหตุ:
+                      </label>
+                      <select
+                        className="vk-input"
+                        value={incidentShift}
+                        onChange={(e) => setIncidentShift(e.target.value)}
+                        style={{
+                          height: 38,
+                          minHeight: 38,
+                          maxHeight: 38,
+                          fontSize: 13,
+                          fontWeight: 500,
+                          background: '#ffffff',
+                          borderColor: '#cbd5e1',
+                          borderRadius: 6,
+                          color: '#0f172a',
+                          boxSizing: 'border-box',
+                          WebkitAppearance: 'none',
+                          MozAppearance: 'none',
+                          appearance: 'none',
+                        }}
+                      >
+                        <option value="morning">กะเช้า (08:00 — 20:00)</option>
+                        <option value="afternoon">กะบ่าย (20:00 — 08:00)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Reason text input */}
                   <div>
                     <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#991b1b', marginBottom: 4 }}>
-                      กะที่เกิดเหตุ:
+                      ระบุสาเหตุ / รายละเอียดความผิด <span style={{ color: '#dc2626' }}>*</span>:
                     </label>
-                    <select
+                    <input
+                      type="text"
                       className="vk-input"
-                      value={incidentShift}
-                      onChange={(e) => setIncidentShift(e.target.value)}
+                      value={discReason}
+                      onChange={(e) => setDiscReason(e.target.value)}
+                      placeholder="เช่น เข้าโรงงานแล้วหนีไม่ทำงาน..."
                       style={{
                         height: 38,
                         minHeight: 38,
-                        maxHeight: 38,
                         fontSize: 13,
-                        fontWeight: 500,
                         background: '#ffffff',
                         borderColor: '#cbd5e1',
                         borderRadius: 6,
-                        color: '#0f172a',
                         boxSizing: 'border-box',
-                        WebkitAppearance: 'none',
-                        MozAppearance: 'none',
-                        appearance: 'none',
                       }}
-                    >
-                      <option value="morning">กะเช้า (08:00 — 20:00)</option>
-                      <option value="afternoon">กะบ่าย (20:00 — 08:00)</option>
-                    </select>
+                    />
                   </div>
-                </div>
 
-                {/* Reason text input */}
-                <div>
-                  <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#991b1b', marginBottom: 4 }}>
-                    ระบุสาเหตุ / รายละเอียดความผิด <span style={{ color: '#dc2626' }}>*</span>:
-                  </label>
-                  <input
-                    type="text"
-                    className="vk-input"
-                    value={discReason}
-                    onChange={(e) => setDiscReason(e.target.value)}
-                    placeholder="เช่น เข้าโรงงานแล้วหนีไม่ทำงาน..."
-                    style={{
-                      height: 38,
-                      minHeight: 38,
-                      fontSize: 13,
-                      background: '#ffffff',
-                      borderColor: '#cbd5e1',
-                      borderRadius: 6,
-                      boxSizing: 'border-box',
-                    }}
-                  />
-                </div>
-
-                {/* Amount input */}
-                <div>
-                  <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#991b1b', marginBottom: 4 }}>
-                    ยอดเงินที่หัก (บาท) <span style={{ color: '#dc2626' }}>*</span>:
-                  </label>
-                  <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                    <span style={{
-                      position: 'absolute',
-                      left: 12,
-                      fontSize: 14,
-                      fontWeight: 700,
-                      color: '#b91c1c',
-                      pointerEvents: 'none',
-                      zIndex: 1,
-                    }}>
-                      ฿
-                    </span>
-                    <input
-                      type="number"
-                      min="0"
-                      step="any"
-                      className="vk-input vk-input--mono"
-                      value={discAmount}
-                      onChange={(e) => setDiscAmount(e.target.value)}
-                      placeholder="0.00"
-                      style={{
-                        height: 38,
-                        minHeight: 38,
-                        paddingLeft: 28,
+                  {/* Amount input */}
+                  <div>
+                    <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#991b1b', marginBottom: 4 }}>
+                      ยอดเงินที่หักเพิ่มเติม (บาท) {isEmpUnpaid ? <span style={{ fontSize: 10, fontWeight: 400, color: 'var(--vk-ink-3)' }}>(ไม่บังคับ หากเลือกไม่จ่ายค่าแรง)</span> : <span style={{ color: '#dc2626' }}>*</span>}:
+                    </label>
+                    <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                      <span style={{
+                        position: 'absolute',
+                        left: 12,
                         fontSize: 14,
                         fontWeight: 700,
                         color: '#b91c1c',
-                        background: '#ffffff',
-                        borderColor: '#cbd5e1',
-                        borderRadius: 6,
-                        boxSizing: 'border-box',
-                      }}
-                    />
+                        pointerEvents: 'none',
+                        zIndex: 1,
+                      }}>
+                        ฿
+                      </span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        className="vk-input vk-input--mono"
+                        value={discAmount}
+                        onChange={(e) => setDiscAmount(e.target.value)}
+                        placeholder={isEmpUnpaid ? '0 (ไม่หักเงินเพิ่ม)' : '0.00'}
+                        style={{
+                          height: 38,
+                          minHeight: 38,
+                          paddingLeft: 28,
+                          fontSize: 14,
+                          fontWeight: 700,
+                          color: '#b91c1c',
+                          background: '#ffffff',
+                          borderColor: '#cbd5e1',
+                          borderRadius: 6,
+                          boxSizing: 'border-box',
+                        }}
+                      />
+                    </div>
                   </div>
-                </div>
 
-                {/* Submit button */}
-                <button
-                  type="button"
-                  disabled={!discAmount || Number(discAmount) <= 0 || !discReason.trim()}
-                  onClick={handleSaveDisciplinary}
-                  style={{
-                    width: '100%',
-                    height: 38,
-                    padding: '0 14px',
-                    background: (!discAmount || Number(discAmount) <= 0 || !discReason.trim()) ? '#f87171' : '#dc2626',
-                    color: '#ffffff',
-                    fontWeight: 700,
-                    fontSize: 13,
-                    borderRadius: 6,
-                    border: 'none',
-                    cursor: (!discAmount || Number(discAmount) <= 0 || !discReason.trim()) ? 'not-allowed' : 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: 6,
-                    boxSizing: 'border-box',
-                  }}
-                >
-                  {discAmount && Number(discAmount) > 0
-                    ? `ยืนยันรายการหักเงิน ฿${Number(discAmount).toLocaleString()}`
-                    : 'ยืนยันรายการหักเงิน'}
-                </button>
+                  {/* Add Disciplinary Incident Button */}
+                  <button
+                    type="button"
+                    disabled={!discReason.trim() || (!isEmpUnpaid && (!discAmount || Number(discAmount) <= 0))}
+                    onClick={handleSaveDisciplinary}
+                    style={{
+                      width: '100%',
+                      height: 38,
+                      padding: '0 14px',
+                      background: (!discReason.trim() || (!isEmpUnpaid && (!discAmount || Number(discAmount) <= 0))) ? '#f87171' : '#dc2626',
+                      color: '#ffffff',
+                      fontWeight: 700,
+                      fontSize: 13,
+                      borderRadius: 6,
+                      border: 'none',
+                      cursor: (!discReason.trim() || (!isEmpUnpaid && (!discAmount || Number(discAmount) <= 0))) ? 'not-allowed' : 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 6,
+                      boxSizing: 'border-box',
+                    }}
+                  >
+                    {Number(discAmount) > 0
+                      ? `บันทึกรายการหักเงิน ฿${Number(discAmount).toLocaleString()}`
+                      : isEmpUnpaid
+                      ? 'บันทึกประวัติหนีงาน / ไม่จ่ายค่าแรง'
+                      : 'บันทึกข้อมูลทำผิดวินัย'}
+                  </button>
+                </div>
               </div>
             )}
           </div>
         </div>
 
         <div style={{ padding: '12px 20px', borderTop: '1px solid var(--vk-rule)', background: 'var(--vk-bone)', display: 'flex', justifyContent: 'flex-end', flexShrink: 0 }}>
-          <button className="vk-btn vk-btn--primary" onClick={onClose}>ตกลง</button>
+          <button className="vk-btn vk-btn--primary" onClick={handleModalConfirm}>ตกลง</button>
         </div>
       </div>
     </div>

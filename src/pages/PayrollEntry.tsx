@@ -238,23 +238,25 @@ export default function PayrollEntry() {
     const discAdvTotal = discAdv.reduce((s, a) => s + Number(a.amount || 0), 0)
     const safetyAdvTotal = safetyAdv.reduce((s, a) => s + Number(a.amount || 0), 0)
 
-    const normShifts = empShifts.filter(s => !s.is_holiday_ot || s.is_holiday_ot_exempt)
-    const holShifts  = empShifts.filter(s => s.is_holiday_ot && !s.is_holiday_ot_exempt)
+    const isUnpaidShift = (s: any) => Number(s.actual_hours) === -1
+    const payableShifts = empShifts.filter(s => !isUnpaidShift(s))
+    const normShifts = payableShifts.filter(s => !s.is_holiday_ot || s.is_holiday_ot_exempt)
+    const holShifts  = payableShifts.filter(s => s.is_holiday_ot && !s.is_holiday_ot_exempt)
     const normDays = normShifts.filter(s => !s.is_half_shift && !s.actual_hours).length
     const halfDays = normShifts.filter(s => s.is_half_shift && !s.actual_hours).length
-    const partialHrs = normShifts.reduce((s, sh) => s + Number(sh.actual_hours || 0), 0)
+    const partialHrs = normShifts.reduce((s, sh) => s + (Number(sh.actual_hours) > 0 ? Number(sh.actual_hours) : 0), 0)
     const holFull = holShifts.filter(s => !s.is_half_shift).length
     const holHalf = holShifts.filter(s => s.is_half_shift).length
     // Clerk: weekday shifts = ค่าจ้างปกติ; weekend shifts = OT (tracked via ot_hours)
     const clerkWeekdayShifts = normShifts.filter(s => !isWeekendDate(s.work_date))
     const clerkWeekendShifts = normShifts.filter(s => isWeekendDate(s.work_date))
     const clerkNormDays = clerkWeekdayShifts.length  // only weekday shifts count as normal pay
-    const clerkOt  = empShifts.filter(s => !isWeekendDate(s.work_date)).reduce((s, sh) => s + Number(sh.ot_hours || 0), 0)
-    const clerkOt1x = empShifts.filter(s => isWeekendDate(s.work_date)).reduce((s, sh) => s + Number(sh.ot_hours || 0), 0)
-    const clerkOtDays = empShifts.filter(s => !isWeekendDate(s.work_date) && Number(s.ot_hours || 0) > 0).length
-    const autoW = empShifts.reduce((s, sh) => s + Number(sh.wood_excess || 0), 0)
-    const autoF = empShifts.reduce((s, sh) => s + Number(sh.film_amount || 0), 0)
-    const crossPos = empShifts.filter(s => s.is_cross_position)
+    const clerkOt  = payableShifts.filter(s => !isWeekendDate(s.work_date)).reduce((s, sh) => s + Number(sh.ot_hours || 0), 0)
+    const clerkOt1x = payableShifts.filter(s => isWeekendDate(s.work_date)).reduce((s, sh) => s + Number(sh.ot_hours || 0), 0)
+    const clerkOtDays = payableShifts.filter(s => !isWeekendDate(s.work_date) && Number(s.ot_hours || 0) > 0).length
+    const autoW = payableShifts.reduce((s, sh) => s + Number(sh.wood_excess || 0), 0)
+    const autoF = payableShifts.reduce((s, sh) => s + Number(sh.film_amount || 0), 0)
+    const crossPos = payableShifts.filter(s => s.is_cross_position)
     const autoSp = crossPos.reduce((s, sh) => s + Number(sh.cross_position_extra_pay || 0), 0)
     // Group cross-positions by title, sum amounts
     const posMap = new Map<string, number>()
@@ -313,19 +315,21 @@ export default function PayrollEntry() {
       const empProfileComplete = !!(emp as any)?.data_complete
       const empSsEligible = !emp.exempt_social_security && (empIsThai || (empHasSsNumber && empProfileComplete))
       const empSsRate  = empSsEligible ? (currentPeriod?.social_security_rate ?? 0.05) : 0
-      const normShifts  = shifts.filter(s => !s.is_holiday_ot || s.is_holiday_ot_exempt)
-      const holShifts   = shifts.filter(s => s.is_holiday_ot && !s.is_holiday_ot_exempt)
+      const isUnpaidShift = (s: any) => Number(s.actual_hours) === -1
+      const payableShifts = shifts.filter(s => !isUnpaidShift(s))
+      const normShifts  = payableShifts.filter(s => !s.is_holiday_ot || s.is_holiday_ot_exempt)
+      const holShifts   = payableShifts.filter(s => s.is_holiday_ot && !s.is_holiday_ot_exempt)
       const normDays    = normShifts.filter(s => !s.is_half_shift && !s.actual_hours).length
       const halfDays    = normShifts.filter(s => s.is_half_shift  && !s.actual_hours).length
-      const partialHrs  = normShifts.reduce((s, sh) => s + Number(sh.actual_hours || 0), 0)
+      const partialHrs  = normShifts.reduce((s, sh) => s + (Number(sh.actual_hours) > 0 ? Number(sh.actual_hours) : 0), 0)
       const holFull     = holShifts.filter(s => !s.is_half_shift).length
       const holHalf     = holShifts.filter(s =>  s.is_half_shift).length
       const clerkNorm   = normShifts.filter(s => !isWeekendDate(s.work_date)).length
-      const clerkOt     = shifts.filter(s => !isWeekendDate(s.work_date)).reduce((s, sh) => s + Number(sh.ot_hours || 0), 0)
-      const clerkOt1x   = shifts.filter(s =>  isWeekendDate(s.work_date)).reduce((s, sh) => s + Number(sh.ot_hours || 0), 0)
-      const autoW  = shifts.reduce((s, sh) => s + Number(sh.wood_excess           || 0), 0)
-      const autoF  = shifts.reduce((s, sh) => s + Number(sh.film_amount           || 0), 0)
-      const autoSp = shifts.filter(s => s.is_cross_position).reduce((s, sh) => s + Number(sh.cross_position_extra_pay || 0), 0)
+      const clerkOt     = payableShifts.filter(s => !isWeekendDate(s.work_date)).reduce((s, sh) => s + Number(sh.ot_hours || 0), 0)
+      const clerkOt1x   = payableShifts.filter(s =>  isWeekendDate(s.work_date)).reduce((s, sh) => s + Number(sh.ot_hours || 0), 0)
+      const autoW  = payableShifts.reduce((s, sh) => s + Number(sh.wood_excess           || 0), 0)
+      const autoF  = payableShifts.reduce((s, sh) => s + Number(sh.film_amount           || 0), 0)
+      const autoSp = payableShifts.filter(s => s.is_cross_position).reduce((s, sh) => s + Number(sh.cross_position_extra_pay || 0), 0)
       const advTotal = advances.reduce((s, a) => s + Number(a.amount), 0)
       const c = calculatePayroll({
         position: emp.position as 'worker' | 'clerk',

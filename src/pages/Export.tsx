@@ -117,16 +117,18 @@ function buildSlipHtml(entry: any, period: any, shifts: any[], branchName: strin
   const jobTitle = emp.job_title || ''
 
   // ── shift breakdown (mirrors PaySlip exactly) ──
-  const normShifts = shifts.filter((s: any) => !s.is_holiday_ot || s.is_holiday_ot_exempt)
-  const holShifts  = shifts.filter((s: any) => s.is_holiday_ot && !s.is_holiday_ot_exempt)
+  const isUnpaid = (s: any) => Number(s.actual_hours) === -1
+  const payableShifts = shifts.filter((s: any) => !isUnpaid(s))
+  const normShifts = payableShifts.filter((s: any) => !s.is_holiday_ot || s.is_holiday_ot_exempt)
+  const holShifts  = payableShifts.filter((s: any) => s.is_holiday_ot && !s.is_holiday_ot_exempt)
   const normDays   = normShifts.filter((s: any) => !s.is_half_shift && !s.actual_hours).length
   const halfDays   = normShifts.filter((s: any) => s.is_half_shift && !s.actual_hours).length
-  const partialHrs = normShifts.reduce((a: number, s: any) => a + Number(s.actual_hours || 0), 0)
+  const partialHrs = normShifts.reduce((a: number, s: any) => a + (Number(s.actual_hours) > 0 ? Number(s.actual_hours) : 0), 0)
   const holFull    = holShifts.filter((s: any) => !s.is_half_shift).length
   const holHalf    = holShifts.filter((s: any) =>  s.is_half_shift).length
   const clerkNorm  = normShifts.filter((s: any) => !isWeekend(s.work_date)).length
-  const clerkOt    = shifts.filter((s: any) => !isWeekend(s.work_date)).reduce((a: number, s: any) => a + Number(s.ot_hours || 0), 0)
-  const clerkOt1x  = shifts.filter((s: any) => isWeekend(s.work_date)).reduce((a: number, s: any) => a + Number(s.ot_hours || 0), 0)
+  const clerkOt    = payableShifts.filter((s: any) => !isWeekend(s.work_date)).reduce((a: number, s: any) => a + Number(s.ot_hours || 0), 0)
+  const clerkOt1x  = payableShifts.filter((s: any) => isWeekend(s.work_date)).reduce((a: number, s: any) => a + Number(s.ot_hours || 0), 0)
   const daysShift  = isClerk
     ? normShifts.filter((s: any) => isWeekend(s.work_date)).length
     : normDays
@@ -935,19 +937,21 @@ export default function Export() {
             const empIsThai = !emp.nationality || emp.nationality === 'ไทย'
             const empSsRate = empIsThai && !emp.exempt_social_security ? (Number((periodObj as any)?.social_security_rate ?? 0.05)) : 0
 
-            const normShifts = empShifts.filter((s: any) => !s.is_holiday_ot || s.is_holiday_ot_exempt)
-            const holShifts = empShifts.filter((s: any) => s.is_holiday_ot && !s.is_holiday_ot_exempt)
+            const isUnpaid = (s: any) => Number(s.actual_hours) === -1
+            const payableShifts = empShifts.filter((s: any) => !isUnpaid(s))
+            const normShifts = payableShifts.filter((s: any) => !s.is_holiday_ot || s.is_holiday_ot_exempt)
+            const holShifts = payableShifts.filter((s: any) => s.is_holiday_ot && !s.is_holiday_ot_exempt)
             const normDays = normShifts.filter((s: any) => !s.is_half_shift && !s.actual_hours).length
             const halfDays = normShifts.filter((s: any) => s.is_half_shift && !s.actual_hours).length
-            const partialHrs = normShifts.reduce((s: number, sh: any) => s + Number(sh.actual_hours || 0), 0)
+            const partialHrs = normShifts.reduce((s: number, sh: any) => s + (Number(sh.actual_hours) > 0 ? Number(sh.actual_hours) : 0), 0)
             const holFull = holShifts.filter((s: any) => !s.is_half_shift).length
             const holHalf = holShifts.filter((s: any) => s.is_half_shift).length
             const clerkNorm = normShifts.filter((s: any) => !isWeekend(s.work_date)).length
-            const clerkOt = empShifts.filter((s: any) => !isWeekend(s.work_date)).reduce((s: number, sh: any) => s + Number(sh.ot_hours || 0), 0)
-            const clerkOt1x = empShifts.filter((s: any) => isWeekend(s.work_date)).reduce((s: number, sh: any) => s + Number(sh.ot_hours || 0), 0)
-            const autoW = empShifts.reduce((s: number, sh: any) => s + Number(sh.wood_excess || 0), 0)
-            const autoF = empShifts.reduce((s: number, sh: any) => s + Number(sh.film_amount || 0), 0)
-            const autoSp = empShifts.filter((s: any) => s.is_cross_position).reduce((s: number, sh: any) => s + Number(sh.cross_position_extra_pay || 0), 0)
+            const clerkOt = payableShifts.filter((s: any) => !isWeekend(s.work_date)).reduce((s: number, sh: any) => s + Number(sh.ot_hours || 0), 0)
+            const clerkOt1x = payableShifts.filter((s: any) => isWeekend(s.work_date)).reduce((s: number, sh: any) => s + Number(sh.ot_hours || 0), 0)
+            const autoW = payableShifts.reduce((s: number, sh: any) => s + Number(sh.wood_excess || 0), 0)
+            const autoF = payableShifts.reduce((s: number, sh: any) => s + Number(sh.film_amount || 0), 0)
+            const autoSp = payableShifts.filter((s: any) => s.is_cross_position).reduce((s: number, sh: any) => s + Number(sh.cross_position_extra_pay || 0), 0)
 
             const periodDays = periodObj ? (() => {
               const s = new Date(periodObj.period_start + 'T00:00:00')

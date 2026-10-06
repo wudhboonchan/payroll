@@ -432,17 +432,19 @@ export default function PaySlip() {
 
   // ── shift breakdown (mirrors PayrollEntry logic exactly) ──
   const isWeekend = (d: string) => { const day = new Date(d).getDay(); return day === 0 || day === 6 }
+  const isUnpaid = (s: any) => Number(s.actual_hours) === -1
   const empIsClerk = selectedEmp?.position === 'clerk'
-  const normShifts = empShifts.filter((s: any) => !s.is_holiday_ot || s.is_holiday_ot_exempt)
-  const holShifts  = empShifts.filter((s: any) => s.is_holiday_ot && !s.is_holiday_ot_exempt)
+  const payableShifts = empShifts.filter((s: any) => !isUnpaid(s))
+  const normShifts = payableShifts.filter((s: any) => !s.is_holiday_ot || s.is_holiday_ot_exempt)
+  const holShifts  = payableShifts.filter((s: any) => s.is_holiday_ot && !s.is_holiday_ot_exempt)
   const normDays   = normShifts.filter((s: any) => !s.is_half_shift && !s.actual_hours).length
   const halfDays   = normShifts.filter((s: any) => s.is_half_shift && !s.actual_hours).length
-  const partialHrs = normShifts.reduce((a: number, s: any) => a + Number(s.actual_hours || 0), 0)
+  const partialHrs = normShifts.reduce((a: number, s: any) => a + (Number(s.actual_hours) > 0 ? Number(s.actual_hours) : 0), 0)
   const holFull    = holShifts.filter((s: any) => !s.is_half_shift).length
   const holHalf    = holShifts.filter((s: any) => s.is_half_shift).length
   const clerkNorm  = normShifts.filter((s: any) => !isWeekend(s.work_date)).length
-  const clerkOt    = empShifts.filter((s: any) => !isWeekend(s.work_date)).reduce((a: number, s: any) => a + Number(s.ot_hours || 0), 0)
-  const clerkOt1x  = empShifts.filter((s: any) => isWeekend(s.work_date)).reduce((a: number, s: any) => a + Number(s.ot_hours || 0), 0)
+  const clerkOt    = payableShifts.filter((s: any) => !isWeekend(s.work_date)).reduce((a: number, s: any) => a + Number(s.ot_hours || 0), 0)
+  const clerkOt1x  = payableShifts.filter((s: any) => isWeekend(s.work_date)).reduce((a: number, s: any) => a + Number(s.ot_hours || 0), 0)
   const workerNormalDays = normDays
   // For display labels
   const daysShift = empIsClerk

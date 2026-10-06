@@ -428,8 +428,14 @@ export default function EmployeeSummary() {
       let baseWage = 0
       let shiftAllowance = 0
       let otPay = 0
+      const isUnpaid = Number(shift.actual_hours) === -1
 
-      if (isClerk) {
+      if (isUnpaid) {
+        hours = 0
+        baseWage = 0
+        shiftAllowance = 0
+        otPay = 0
+      } else if (isClerk) {
         hours = weekend ? (shift.ot_hours || 0) : 8 + (shift.ot_hours || 0)
         if (weekend) {
           baseWage = 0
@@ -471,10 +477,10 @@ export default function EmployeeSummary() {
         }
       }
 
-      const woodExcess = Number(shift.wood_excess || 0)
-      const filmAmount = Number(shift.film_amount || 0)
-      const crossPay = Number(shift.cross_position_extra_pay || 0)
-      const crossTitle = shift.cross_position_title || ''
+      const woodExcess = isUnpaid ? 0 : Number(shift.wood_excess || 0)
+      const filmAmount = isUnpaid ? 0 : Number(shift.film_amount || 0)
+      const crossPay = isUnpaid ? 0 : Number(shift.cross_position_extra_pay || 0)
+      const crossTitle = isUnpaid ? '' : (shift.cross_position_title || '')
 
       const totalEarned = baseWage + shiftAllowance + otPay + woodExcess + filmAmount + crossPay
 
@@ -482,6 +488,7 @@ export default function EmployeeSummary() {
         workDate: dateStr,
         dayType,
         isWorked: true,
+        isUnpaid,
         shiftType: shift.shift_type,
         hours,
         baseWage,
@@ -1041,19 +1048,27 @@ export default function EmployeeSummary() {
                         <div>
                           {day.isWorked ? (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                              {selectedEmp?.position !== 'clerk' && (
-                                <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 6px', background: day.shiftType === 'morning' ? 'rgba(216,154,42,0.15)' : 'rgba(74,110,138,0.15)', color: day.shiftType === 'morning' ? '#a16207' : '#1e6091', display: 'inline-block' }}>
-                                  {day.shiftType === 'morning' ? 'เช้า' : day.shiftType === 'afternoon' ? 'บ่าย' : 'เข้า'}
+                              {day.isUnpaid ? (
+                                <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 6px', background: '#fee2e2', color: '#b91c1c', display: 'inline-block' }}>
+                                  ไม่จ่ายค่าแรง
                                 </span>
-                              )}
-                              {selectedEmp?.position !== 'clerk' && (
-                                <span style={{ fontFamily: 'var(--vk-mono)', fontSize: 10, color: 'var(--vk-ink-3)' }}>{day.hours} ชม.</span>
-                              )}
-                              {selectedEmp?.position === 'clerk' && day.otPay === 0 && (
-                                <span style={{ fontSize: 11, color: 'var(--vk-ink-3)' }}>ทำงานปกติ</span>
-                              )}
-                              {selectedEmp?.position === 'clerk' && day.otPay > 0 && (
-                                <span style={{ fontFamily: 'var(--vk-mono)', fontSize: 10, color: 'var(--vk-ink-3)' }}>{day.hours} ชม.</span>
+                              ) : (
+                                <>
+                                  {selectedEmp?.position !== 'clerk' && (
+                                    <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 6px', background: day.shiftType === 'morning' ? 'rgba(216,154,42,0.15)' : 'rgba(74,110,138,0.15)', color: day.shiftType === 'morning' ? '#a16207' : '#1e6091', display: 'inline-block' }}>
+                                      {day.shiftType === 'morning' ? 'เช้า' : day.shiftType === 'afternoon' ? 'บ่าย' : 'เข้า'}
+                                    </span>
+                                  )}
+                                  {selectedEmp?.position !== 'clerk' && (
+                                    <span style={{ fontFamily: 'var(--vk-mono)', fontSize: 10, color: 'var(--vk-ink-3)' }}>{day.hours} ชม.</span>
+                                  )}
+                                  {selectedEmp?.position === 'clerk' && day.otPay === 0 && (
+                                    <span style={{ fontSize: 11, color: 'var(--vk-ink-3)' }}>ทำงานปกติ</span>
+                                  )}
+                                  {selectedEmp?.position === 'clerk' && day.otPay > 0 && (
+                                    <span style={{ fontFamily: 'var(--vk-mono)', fontSize: 10, color: 'var(--vk-ink-3)' }}>{day.hours} ชม.</span>
+                                  )}
+                                </>
                               )}
                             </div>
                           ) : (
@@ -1065,6 +1080,7 @@ export default function EmployeeSummary() {
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
                           {day.isWorked ? (
                             <>
+                              {day.isUnpaid && <span style={chipStyle('#991b1b', '#fee2e2')}>ไม่คิดค่าจ้าง (0 บาท)</span>}
                               {day.baseWage > 0 && <span style={chipStyle('#374151', '#f3f4f6')}>ค่าจ้าง ฿{monoNum(day.baseWage)}</span>}
                               {day.shiftAllowance > 0 && <span style={chipStyle('#065f46', '#d1fae5')}>ค่ากะ +฿{monoNum(day.shiftAllowance)}</span>}
                               {/* OT 1.5x weekday = purple, OT 1x weekend = blue */}

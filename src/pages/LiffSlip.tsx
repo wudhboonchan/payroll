@@ -404,11 +404,13 @@ export default function LiffSlip() {
     const isClerk = emp.position === 'clerk'
 
     // shift counts
-    const normShifts   = shifts.filter(s => !s.is_holiday_ot || s.is_holiday_ot_exempt)
+    const isUnpaid = (s: any) => Number(s.actual_hours) === -1
+    const payableShifts = shifts.filter(s => !isUnpaid(s))
+    const normShifts   = payableShifts.filter(s => !s.is_holiday_ot || s.is_holiday_ot_exempt)
     const days_normal  = normShifts.length
     const days_shift   = normShifts.filter(s => !s.is_half_shift && !s.actual_hours).length
-    const clerkOt1_5xH = shifts.filter(s => !isWeekend(new Date(s.work_date))).reduce((a, s) => a + Number(s.ot_hours || 0), 0)
-    const clerkOt1xH   = shifts.filter(s =>  isWeekend(new Date(s.work_date))).reduce((a, s) => a + Number(s.ot_hours || 0), 0)
+    const clerkOt1_5xH = payableShifts.filter(s => !isWeekend(new Date(s.work_date))).reduce((a, s) => a + Number(s.ot_hours || 0), 0)
+    const clerkOt1xH   = payableShifts.filter(s =>  isWeekend(new Date(s.work_date))).reduce((a, s) => a + Number(s.ot_hours || 0), 0)
 
     const clerkMonthly = Number(emp.rate_per_12h || 0)
     const clerkHourly  = (clerkMonthly / 30) / 8
