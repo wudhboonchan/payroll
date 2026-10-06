@@ -152,6 +152,11 @@ export default function ShiftEntry() {
   const activeDateStr = fmtDate(activeDate)
   const weekend = isWeekend(activeDateStr)
 
+  // Staged disciplinary deductions for the active date (only committed to DB when clicking "บันทึกวันนี้")
+  const [dayDisciplinary, setDayDisciplinary] = useState<any[]>([])
+  const [deletedDiscIds, setDeletedDiscIds] = useState<string[]>([])
+  const prevDateRef = useRef<string>('')
+
   const isAtStart = currentPeriod ? activeDateStr <= currentPeriod.period_start : true
   const isAtEnd   = currentPeriod ? activeDateStr >= currentPeriod.period_end : true
 
@@ -210,6 +215,85 @@ const isDisciplinaryAdvanceNote = (notes?: string | null): boolean => {
     enabled: !!currentPeriod?.id,
     staleTime: 10_000,
   })
+
+  // Synchronize dayDisciplinary when active date changes or when assignments load from DB
+  useEffect(() => {
+    const isDateChange = prevDateRef.current !== activeDateStr
+    prevDateRef.current = activeDateStr
+
+    if (isDateChange) {
+      setDeletedDiscIds([])
+    }
+
+    // Only load saved disciplinary records from DB if this date has saved assignments in DB
+    if (rawAssignments && rawAssignments.length > 0) {
+      const thDateStr = formatIsoToThaiDate(activeDateStr)
+      const savedForDay = periodDisciplinaryAdvances.filter((a: any) => {
+        return (
+          a.request_date === activeDateStr ||
+          (a.notes && (a.notes.includes(thDateStr) || a.notes.includes(activeDateStr)))
+        )
+      })
+
+      setDayDisciplinary(prev => {
+        if (isDateChange) return savedForDay
+        const drafts = prev.filter(d => d.isDraft || String(d.id).startsWith('draft-'))
+        const activeSaved = savedForDay.filter(s => !deletedDiscIds.includes(s.id))
+        return [...activeSaved, ...drafts]
+      })
+    } else {
+      // Date has NOT been saved in DB yet!
+      // Only keep in-session drafts for employees currently in assignments
+      setDayDisciplinary(prev => {
+        if (isDateChange) return []
+        const currentEmpIds = new Set(assignments.map(a => a.employee_id))
+        return prev.filter(d => (d.isDraft || String(d.id).startsWith('draft-')) && currentEmpIds.has(d.employee_id))
+      })
+    }
+  }, [activeDateStr, rawAssignments, periodDisciplinaryAdvances])
+
+  // Auto-clean any orphaned disciplinary advances in DB where no shift assignment exists
+  useEffect(() => {
+    if (!currentPeriod?.id) return
+    const cleanupOrphans = async () => {
+      try {
+        const { data: allDisc } = await supabase
+          .from('advance_payments')
+          .select('id, employee_id, request_date, notes')
+          .eq('period_id', currentPeriod.id)
+
+        const discItems = (allDisc || []).filter((a: any) => isDisciplinaryAdvanceNote(a.notes))
+        if (discItems.length === 0) return
+
+        const { data: allShifts } = await supabase
+          .from('shift_assignments')
+          .select('employee_id, work_date')
+          .eq('period_id', currentPeriod.id)
+
+        const shiftKeySet = new Set((allShifts || []).map((s: any) => `${s.employee_id}_${s.work_date}`))
+
+        const orphanedIds: string[] = []
+        for (const disc of discItems) {
+          if (disc.request_date && !shiftKeySet.has(`${disc.employee_id}_${disc.request_date}`)) {
+            orphanedIds.push(disc.id)
+          }
+        }
+
+        if (orphanedIds.length > 0) {
+          await supabase.from('advance_payments').delete().in('id', orphanedIds)
+          queryClient.invalidateQueries({ queryKey: ['shifts-disciplinary-advances'] })
+          queryClient.invalidateQueries({ queryKey: ['advances-v2'] })
+          queryClient.invalidateQueries({ queryKey: ['advances'] })
+          queryClient.invalidateQueries({ queryKey: ['payslip-advances'] })
+          queryClient.invalidateQueries({ queryKey: ['all-payroll-entries'] })
+          queryClient.invalidateQueries({ queryKey: ['summary-all-advances'] })
+        }
+      } catch (err) {
+        console.error('Failed to cleanup orphaned disciplinary advances:', err)
+      }
+    }
+    cleanupOrphans()
+  }, [currentPeriod?.id, queryClient])
 
   // Sync DB → local state when date changes; auto-delete orphaned assignments from inactive employees
   useEffect(() => {
@@ -371,14 +455,52 @@ const isDisciplinaryAdvanceNote = (notes?: string | null): boolean => {
     setAssignments(prev => prev.map(a => a.employee_id === empId ? { ...a, isAutoAssigned: false } : a))
   }
 
+  const handleAddDisciplinary = (item: {
+    employee_id: string
+    amount: number
+    notes: string
+    request_date: string
+    shift_type: string
+  }) => {
+    const draftId = `draft-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+    const newRecord = {
+      id: draftId,
+      employee_id: item.employee_id,
+      amount: item.amount,
+      notes: item.notes,
+      request_date: item.request_date,
+      created_at: new Date().toISOString(),
+      isDraft: true,
+    }
+    setDayDisciplinary(prev => [...prev, newRecord])
+    toast.success(`เพิ่มรายการหักเงินทำผิดวินัย ฿${item.amount.toLocaleString()} (จะบันทึกลงระบบเมื่อกด "บันทึกวันนี้")`)
+  }
+
+  const handleDeleteDisciplinary = (id: string) => {
+    setDayDisciplinary(prev => prev.filter(d => d.id !== id))
+    if (!String(id).startsWith('draft-')) {
+      setDeletedDiscIds(prev => [...prev, id])
+    }
+    toast.info('ลบรายการหักเงินแล้ว')
+  }
+
   const handleRemove = async (empId: string) => {
     // 1. Remove from local assignments state
     setAssignments(prev => prev.filter(a => a.employee_id !== empId))
 
+    // 2. Remove all disciplinary items for this employee from dayDisciplinary
+    const empDisc = dayDisciplinary.filter(d => d.employee_id === empId)
+    setDayDisciplinary(prev => prev.filter(d => d.employee_id !== empId))
+
+    const realDbIds = empDisc.filter(d => !String(d.id).startsWith('draft-')).map(d => d.id)
+    if (realDbIds.length > 0) {
+      setDeletedDiscIds(prev => [...prev, ...realDbIds])
+    }
+
     if (!currentPeriod?.id) return
 
     try {
-      // 2. Delete from shift_assignments in DB if this shift was already saved
+      // 3. Delete from shift_assignments in DB if this shift was already saved
       await supabase
         .from('shift_assignments')
         .delete()
@@ -386,38 +508,33 @@ const isDisciplinaryAdvanceNote = (notes?: string | null): boolean => {
         .eq('work_date', activeDateStr)
         .eq('employee_id', empId)
 
-      // 3. Immediately find and delete any disciplinary deduction tied to this employee for this shift/date
-      const { data: dbAdvances } = await supabase
-        .from('advance_payments')
-        .select('id, notes, request_date')
-        .eq('period_id', currentPeriod.id)
-        .eq('employee_id', empId)
-
-      const thDateStr = formatIsoToThaiDate(activeDateStr)
-      const toDeleteIds = (dbAdvances || [])
-        .filter((a: any) => {
-          if (!isDisciplinaryAdvanceNote(a.notes)) return false
-          return (
-            a.request_date === activeDateStr ||
-            (a.notes && (a.notes.includes(thDateStr) || a.notes.includes(activeDateStr)))
-          )
-        })
-        .map((a: any) => a.id)
-
-      if (toDeleteIds.length > 0) {
-        const { error: delErr } = await supabase
+      // 4. If any disciplinary deductions for this employee were already in DB for this date, delete them immediately
+      if (realDbIds.length > 0) {
+        await supabase.from('advance_payments').delete().in('id', realDbIds)
+      } else {
+        const thDateStr = formatIsoToThaiDate(activeDateStr)
+        const { data: dbAdvances } = await supabase
           .from('advance_payments')
-          .delete()
-          .in('id', toDeleteIds)
+          .select('id, notes, request_date')
+          .eq('period_id', currentPeriod.id)
+          .eq('employee_id', empId)
 
-        if (delErr) {
-          console.error('Error deleting disciplinary advances:', delErr)
-        } else {
-          toast.info('ลบกะและรายการหักทำผิดวินัยที่เกี่ยวข้องเรียบร้อยแล้ว')
+        const toDeleteIds = (dbAdvances || [])
+          .filter((a: any) => {
+            if (!isDisciplinaryAdvanceNote(a.notes)) return false
+            return (
+              a.request_date === activeDateStr ||
+              (a.notes && (a.notes.includes(thDateStr) || a.notes.includes(activeDateStr)))
+            )
+          })
+          .map((a: any) => a.id)
+
+        if (toDeleteIds.length > 0) {
+          await supabase.from('advance_payments').delete().in('id', toDeleteIds)
         }
       }
 
-      // 4. Invalidate all related caches across the application (Advances, Payroll, Payslip, Summary)
+      // Invalidate all related caches
       queryClient.invalidateQueries({ queryKey: ['shifts-v2'] })
       queryClient.invalidateQueries({ queryKey: ['all-period-shifts'] })
       queryClient.invalidateQueries({ queryKey: ['summary-all-shifts'] })
@@ -450,12 +567,12 @@ const isDisciplinaryAdvanceNote = (notes?: string | null): boolean => {
         await supabase.from('shift_assignments').delete().eq('period_id', currentPeriod.id).eq('work_date', activeDateStr)
 
         // Delete all disciplinary deductions for this date
+        const thDateStr = formatIsoToThaiDate(activeDateStr)
         const { data: dayAdvances } = await supabase
           .from('advance_payments')
           .select('id, notes, request_date')
           .eq('period_id', currentPeriod.id)
 
-        const thDateStr = formatIsoToThaiDate(activeDateStr)
         const delIds = (dayAdvances || [])
           .filter((a: any) => {
             if (!isDisciplinaryAdvanceNote(a.notes)) return false
@@ -469,8 +586,11 @@ const isDisciplinaryAdvanceNote = (notes?: string | null): boolean => {
         if (delIds.length > 0) {
           await supabase.from('advance_payments').delete().in('id', delIds)
         }
+        setDayDisciplinary([])
+        setDeletedDiscIds([])
         return
       }
+
       const payload = assignments.map(a => ({
         period_id: currentPeriod.id, employee_id: a.employee_id, work_date: activeDateStr,
         shift_type: a.shift_type, is_holiday_ot: isHoliday,
@@ -488,14 +608,19 @@ const isDisciplinaryAdvanceNote = (notes?: string | null): boolean => {
       const keepIds = assignments.map(a => a.employee_id)
       await supabase.from('shift_assignments').delete().eq('period_id', currentPeriod.id).eq('work_date', activeDateStr).not('employee_id', 'in', `(${keepIds.join(',')})`)
 
+      // Delete any explicitly removed disciplinary records from DB
+      if (deletedDiscIds.length > 0) {
+        await supabase.from('advance_payments').delete().in('id', deletedDiscIds)
+      }
+
       // Delete disciplinary deductions for any employee removed from this date
+      const thDateStr = formatIsoToThaiDate(activeDateStr)
       const { data: removedAdvances } = await supabase
         .from('advance_payments')
         .select('id, notes, request_date, employee_id')
         .eq('period_id', currentPeriod.id)
         .not('employee_id', 'in', `(${keepIds.join(',')})`)
 
-      const thDateStr = formatIsoToThaiDate(activeDateStr)
       const delIds = (removedAdvances || [])
         .filter((a: any) => {
           if (!isDisciplinaryAdvanceNote(a.notes)) return false
@@ -509,6 +634,24 @@ const isDisciplinaryAdvanceNote = (notes?: string | null): boolean => {
       if (delIds.length > 0) {
         await supabase.from('advance_payments').delete().in('id', delIds)
       }
+
+      // Insert all draft disciplinary deductions for employees kept in today's shift
+      const draftsToInsert = dayDisciplinary
+        .filter(d => (d.isDraft || String(d.id).startsWith('draft-')) && keepIds.includes(d.employee_id))
+        .map(d => ({
+          period_id: currentPeriod.id,
+          employee_id: d.employee_id,
+          amount: Math.round(Number(d.amount) * 100) / 100,
+          request_date: d.request_date || activeDateStr,
+          notes: d.notes,
+        }))
+
+      if (draftsToInsert.length > 0) {
+        const { error: insErr } = await supabase.from('advance_payments').insert(draftsToInsert)
+        if (insErr) throw insErr
+      }
+
+      setDeletedDiscIds([])
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['shifts-v2'] })
@@ -855,7 +998,7 @@ const isDisciplinaryAdvanceNote = (notes?: string | null): boolean => {
                           {emp.isHolidayOTExempt && <Pill color="ink">×1</Pill>}
                           {emp.isCrossPosition && <Pill color="jade">สลับตำแหน่ง</Pill>}
                           {(() => {
-                            const empDiscList = periodDisciplinaryAdvances.filter(a => a.employee_id === emp.employee_id)
+                            const empDiscList = dayDisciplinary.filter(a => a.employee_id === emp.employee_id)
                             const empDiscTotal = empDiscList.reduce((s, a) => s + Number(a.amount || 0), 0)
                             if (empDiscTotal <= 0) return null
                             return (
@@ -872,7 +1015,7 @@ const isDisciplinaryAdvanceNote = (notes?: string | null): boolean => {
                                   alignItems: 'center',
                                   gap: 2,
                                 }}
-                                title={`มีรายการหักทำผิดวินัยในงวดนี้ ${empDiscList.length} รายการ (รวม ฿${empDiscTotal.toLocaleString()})`}
+                                title={`มีรายการหักทำผิดวินัย ${empDiscList.length} รายการ (รวม ฿${empDiscTotal.toLocaleString()})`}
                               >
                                 <ShieldAlert style={{ width: 9, height: 9 }} /> หักผิดวินัย ฿{empDiscTotal.toLocaleString()}
                               </span>
@@ -917,7 +1060,9 @@ const isDisciplinaryAdvanceNote = (notes?: string | null): boolean => {
           weekend={weekend}
           currentPeriod={currentPeriod}
           activeDateStr={activeDateStr}
-          disciplinaryAdvances={periodDisciplinaryAdvances.filter(a => a.employee_id === detailEmp.employee_id)}
+          disciplinaryAdvances={dayDisciplinary.filter(a => a.employee_id === detailEmp.employee_id)}
+          onAddDisciplinary={handleAddDisciplinary}
+          onDeleteDisciplinary={handleDeleteDisciplinary}
           onUpdate={(patch) => updateAssignment(detailEmp.employee_id, patch)}
           onClose={() => {
             // If there are more clerks waiting in queue, open next one
@@ -986,6 +1131,8 @@ function DetailModal({
   currentPeriod,
   activeDateStr,
   disciplinaryAdvances,
+  onAddDisciplinary,
+  onDeleteDisciplinary,
   onUpdate,
   onClose,
 }: {
@@ -995,10 +1142,17 @@ function DetailModal({
   currentPeriod: Period | null
   activeDateStr: string
   disciplinaryAdvances: any[]
+  onAddDisciplinary: (item: {
+    employee_id: string
+    amount: number
+    notes: string
+    request_date: string
+    shift_type: string
+  }) => void
+  onDeleteDisciplinary: (id: string) => void
   onUpdate: (patch: Partial<AssignedEmp>) => void
   onClose: () => void
 }) {
-  const queryClient = useQueryClient()
   // earlyReturn = กลับก่อน (8–12 ชม.) vs underHalf = ลา/ป่วย (< 8 ชม.)
   const [earlyReturn, setEarlyReturn] = React.useState(emp.partialHours >= 8)
   const isPartial = emp.partialHours > 0
@@ -1009,27 +1163,15 @@ function DetailModal({
   const [incidentShift, setIncidentShift] = React.useState(emp.shift_type || 'morning')
   const [discReason, setDiscReason] = React.useState('')
   const [discAmount, setDiscAmount] = React.useState<number | string>('')
-  const [isSavingDisc, setIsSavingDisc] = React.useState(false)
 
   const empBaseRate = emp.rate_per_12h > 0 ? emp.rate_per_12h : 357
 
-  const handleDeleteIncident = async (id: string) => {
+  const handleDeleteIncident = (id: string) => {
     if (!window.confirm('ต้องการลบรายการหักเงินทำผิดวินัยนี้ใช่หรือไม่?')) return
-    try {
-      const { error } = await supabase.from('advance_payments').delete().eq('id', id)
-      if (error) throw error
-      toast.success('ลบรายการหักเงินทำผิดวินัยสำเร็จ')
-      queryClient.invalidateQueries({ queryKey: ['shifts-disciplinary-advances'] })
-      queryClient.invalidateQueries({ queryKey: ['advances'] })
-      queryClient.invalidateQueries({ queryKey: ['payslip-advances'] })
-      queryClient.invalidateQueries({ queryKey: ['all-payroll-entries'] })
-      queryClient.invalidateQueries({ queryKey: ['summary-all-advances'] })
-    } catch (err: any) {
-      toast.error('ลบไม่สำเร็จ: ' + (err?.message || ''))
-    }
+    onDeleteDisciplinary(id)
   }
 
-  const handleSaveDisciplinary = async () => {
+  const handleSaveDisciplinary = () => {
     if (!currentPeriod?.id) {
       toast.error('ไม่พบงวดการจ่ายเงินปัจจุบัน')
       return
@@ -1045,37 +1187,22 @@ function DetailModal({
       return
     }
 
-    setIsSavingDisc(true)
-    try {
-      const dateToUse = incidentDate || activeDateStr
-      const thDateStr = formatIsoToThaiDate(dateToUse)
-      const shiftLabel = incidentShift === 'morning' ? 'กะเช้า' : 'กะบ่าย'
-      const noteStr = `[หักทำผิดวินัย] [หักค่าปรับผิดระเบียบ] หักทำผิดวินัย (วันที่ ${thDateStr} ${shiftLabel}) | สาเหตุ: ${cleanReason} | ยอดหัก ฿${amtNum.toLocaleString()}`
+    const dateToUse = incidentDate || activeDateStr
+    const thDateStr = formatIsoToThaiDate(dateToUse)
+    const shiftLabel = incidentShift === 'morning' ? 'กะเช้า' : 'กะบ่าย'
+    const noteStr = `[หักทำผิดวินัย] [หักค่าปรับผิดระเบียบ] หักทำผิดวินัย (วันที่ ${thDateStr} ${shiftLabel}) | สาเหตุ: ${cleanReason} | ยอดหัก ฿${amtNum.toLocaleString()}`
 
-      const { error } = await supabase.from('advance_payments').insert({
-        period_id: currentPeriod.id,
-        employee_id: emp.employee_id,
-        amount: Math.round(amtNum * 100) / 100,
-        request_date: dateToUse,
-        notes: noteStr,
-      })
-      if (error) throw error
+    onAddDisciplinary({
+      employee_id: emp.employee_id,
+      amount: amtNum,
+      notes: noteStr,
+      request_date: dateToUse,
+      shift_type: incidentShift,
+    })
 
-      toast.success(`บันทึกหักเงินทำผิดวินัย ${emp.name} ฿${amtNum.toLocaleString()} เรียบร้อย`)
-      queryClient.invalidateQueries({ queryKey: ['shifts-disciplinary-advances'] })
-      queryClient.invalidateQueries({ queryKey: ['advances'] })
-      queryClient.invalidateQueries({ queryKey: ['payslip-advances'] })
-      queryClient.invalidateQueries({ queryKey: ['all-payroll-entries'] })
-      queryClient.invalidateQueries({ queryKey: ['summary-all-advances'] })
-
-      setDiscReason('')
-      setDiscAmount('')
-      setShowDisciplinaryForm(false)
-    } catch (err: any) {
-      toast.error('บันทึกไม่สำเร็จ: ' + (err?.message || ''))
-    } finally {
-      setIsSavingDisc(false)
-    }
+    setDiscReason('')
+    setDiscAmount('')
+    setShowDisciplinaryForm(false)
   }
 
   const inputStyle: React.CSSProperties = {
@@ -1436,20 +1563,19 @@ function DetailModal({
                 {/* Submit button */}
                 <button
                   type="button"
-                  disabled={isSavingDisc}
+                  disabled={!discAmount || Number(discAmount) <= 0 || !discReason.trim()}
                   onClick={handleSaveDisciplinary}
                   style={{
                     width: '100%',
                     height: 38,
                     padding: '0 14px',
-                    background: '#dc2626',
+                    background: (!discAmount || Number(discAmount) <= 0 || !discReason.trim()) ? '#f87171' : '#dc2626',
                     color: '#ffffff',
                     fontWeight: 700,
                     fontSize: 13,
                     borderRadius: 6,
                     border: 'none',
-                    cursor: isSavingDisc ? 'not-allowed' : 'pointer',
-                    opacity: isSavingDisc ? 0.7 : 1,
+                    cursor: (!discAmount || Number(discAmount) <= 0 || !discReason.trim()) ? 'not-allowed' : 'pointer',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -1457,11 +1583,9 @@ function DetailModal({
                     boxSizing: 'border-box',
                   }}
                 >
-                  {isSavingDisc
-                    ? 'กำลังบันทึก...'
-                    : discAmount && Number(discAmount) > 0
-                    ? `ยืนยันบันทึกหักเงิน ฿${Number(discAmount).toLocaleString()}`
-                    : 'ยืนยันบันทึกหักเงิน'}
+                  {discAmount && Number(discAmount) > 0
+                    ? `ยืนยันรายการหักเงิน ฿${Number(discAmount).toLocaleString()}`
+                    : 'ยืนยันรายการหักเงิน'}
                 </button>
               </div>
             )}

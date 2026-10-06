@@ -264,24 +264,6 @@ export default function PaySlip() {
     }, enabled: !!currentPeriod?.id && !!selectedEmpId, staleTime: 0, refetchOnMount: 'always',
   })
 
-  const { data: empAdvances = [] } = useQuery<any[]>({
-    queryKey: ['payslip-advances', currentPeriod?.id, selectedEmpId],
-    queryFn: async () => {
-      if (!currentPeriod?.id || !selectedEmpId) return []
-      const { data, error } = await supabase
-        .from('advance_payments')
-        .select('*')
-        .eq('period_id', currentPeriod.id)
-        .eq('employee_id', selectedEmpId)
-        .order('created_at', { ascending: true })
-      if (error) return []
-      return data || []
-    },
-    enabled: !!currentPeriod?.id && !!selectedEmpId,
-    staleTime: 0,
-    refetchOnMount: 'always',
-  })
-
   // Fetch ALL shifts for period (Diamond), filter by employee in JS
   const { data: allShifts = [] } = useQuery<any[]>({
     queryKey: ['payslip-all-shifts', currentPeriod?.id],
@@ -303,6 +285,32 @@ export default function PaySlip() {
     }, enabled: !!currentPeriod?.id && !isTpi, staleTime: 0,
   })
   const empShifts = allShifts.filter((s: any) => s.employee_id === selectedEmpId)
+
+  const { data: empAdvances = [] } = useQuery<any[]>({
+    queryKey: ['payslip-advances', currentPeriod?.id, selectedEmpId],
+    queryFn: async () => {
+      if (!currentPeriod?.id || !selectedEmpId) return []
+      const { data, error } = await supabase
+        .from('advance_payments')
+        .select('*')
+        .eq('period_id', currentPeriod.id)
+        .eq('employee_id', selectedEmpId)
+        .order('created_at', { ascending: true })
+      if (error) return []
+      const shiftSet = new Set((allShifts || []).filter((s: any) => s.employee_id === selectedEmpId).map((s: any) => s.work_date))
+      return (data || []).filter((a: any) => {
+        const n = a.notes || ''
+        const isDisc = n.includes('หักทำผิดวินัย') || n.includes('หักผิดวินัย') || n.includes('[หักทำผิดวินัย]') || n.includes('[หักผิดวินัย]') || n.includes('หักค่าปรับผิดระเบียบ') || n.includes('ค่าปรับผิดระเบียบ') || n.includes('[หักค่าปรับ จป.]')
+        if (isDisc && a.request_date) {
+          return shiftSet.has(a.request_date)
+        }
+        return true
+      })
+    },
+    enabled: !!currentPeriod?.id && !!selectedEmpId,
+    staleTime: 0,
+    refetchOnMount: 'always',
+  })
 
   // Fetch ALL shifts for period (TPI)
   const { data: allTpiShifts = [] } = useQuery<TpiShiftRow[]>({

@@ -358,7 +358,15 @@ export default function EmployeeSummary() {
         .select('employee_id,amount,request_date,notes')
         .eq('period_id', selectedPeriodId)
       if (error) throw error
-      return data
+      const shiftSet = new Set((allShifts || []).map((s: any) => `${s.employee_id}_${s.work_date}`))
+      return (data || []).filter((a: any) => {
+        const n = a.notes || ''
+        const isDisc = n.includes('หักทำผิดวินัย') || n.includes('หักผิดวินัย') || n.includes('[หักทำผิดวินัย]') || n.includes('[หักผิดวินัย]') || n.includes('หักค่าปรับผิดระเบียบ') || n.includes('ค่าปรับผิดระเบียบ') || n.includes('[หักค่าปรับ จป.]')
+        if (isDisc && a.request_date) {
+          return shiftSet.has(`${a.employee_id}_${a.request_date}`)
+        }
+        return true
+      })
     },
     enabled: !!selectedPeriodId,
   })

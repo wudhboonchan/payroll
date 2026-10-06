@@ -133,10 +133,20 @@ export default function PayrollEntry() {
   const { data: allAdvances = [] } = useQuery<any[]>({
     queryKey: ['advances', 'all', currentPeriod?.id],
     queryFn: async () => {
-      const { data, error } = await supabase.from('advance_payments').select('employee_id,amount,notes').eq('period_id', currentPeriod.id)
+      const { data, error } = await supabase.from('advance_payments').select('employee_id,amount,notes,request_date').eq('period_id', currentPeriod.id)
         .limit(10000)
       if (error) throw error
-      return (data || []).map((a: any) => ({ ...a, note: a.notes || a.note || '' }))
+      const shiftSet = new Set((allShifts || []).map((s: any) => `${s.employee_id}_${s.work_date}`))
+      return (data || [])
+        .filter((a: any) => {
+          const n = a.notes || ''
+          const isDisc = n.includes('หักทำผิดวินัย') || n.includes('หักผิดวินัย') || n.includes('[หักทำผิดวินัย]') || n.includes('[หักผิดวินัย]') || n.includes('หักค่าปรับผิดระเบียบ') || n.includes('ค่าปรับผิดระเบียบ') || n.includes('[หักค่าปรับ จป.]')
+          if (isDisc && a.request_date) {
+            return shiftSet.has(`${a.employee_id}_${a.request_date}`)
+          }
+          return true
+        })
+        .map((a: any) => ({ ...a, note: a.notes || a.note || '' }))
     }, enabled: !!currentPeriod?.id, staleTime: 30_000,
   })
 

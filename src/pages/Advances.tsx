@@ -256,8 +256,22 @@ export default function Advances() {
     queryKey: ['advances-v2', currentPeriod?.id],
     queryFn: async () => {
       if (!currentPeriod) return []
-      const { data, error } = await supabase.from('advance_payments').select('id,employee_id,amount,notes,is_carryover,created_at,employee:employees(employee_code,first_name,last_name,nationality)').eq('period_id', currentPeriod.id).order('is_carryover', { ascending: false }).order('created_at', { ascending: false })
-      if (error) throw error; return data
+      const [advRes, shiftRes] = await Promise.all([
+        supabase.from('advance_payments').select('id,employee_id,amount,notes,request_date,is_carryover,created_at,employee:employees(employee_code,first_name,last_name,nationality)').eq('period_id', currentPeriod.id).order('is_carryover', { ascending: false }).order('created_at', { ascending: false }),
+        supabase.from('shift_assignments').select('employee_id,work_date').eq('period_id', currentPeriod.id)
+      ])
+      if (advRes.error) throw advRes.error
+      const shifts = shiftRes.data || []
+      const shiftSet = new Set(shifts.map((s: any) => `${s.employee_id}_${s.work_date}`))
+
+      return (advRes.data || []).filter((a: any) => {
+        const n = a.notes || ''
+        const isDisc = n.includes('หักทำผิดวินัย') || n.includes('หักผิดวินัย') || n.includes('[หักทำผิดวินัย]') || n.includes('[หักผิดวินัย]') || n.includes('หักค่าปรับผิดระเบียบ') || n.includes('ค่าปรับผิดระเบียบ') || n.includes('[หักค่าปรับ จป.]')
+        if (isDisc && a.request_date) {
+          return shiftSet.has(`${a.employee_id}_${a.request_date}`)
+        }
+        return true
+      })
     },
     enabled: !!currentPeriod,
     staleTime: 0,
