@@ -1238,8 +1238,8 @@ function DetailModal({
       return
     }
     const amtNum = Number(discAmount) || 0
-    if (!isEmpUnpaid && amtNum <= 0) {
-      toast.error('กรุณาระบุยอดเงินที่หัก (ต้องมากกว่า 0 บาท) หรือเลือกไม่จ่ายค่าแรงในกะนี้')
+    if (amtNum <= 0) {
+      toast.error('กรุณาระบุยอดเงินที่หัก (ต้องมากกว่า 0 บาท)')
       return
     }
 
@@ -1248,8 +1248,7 @@ function DetailModal({
     const shiftLabel = incidentShift === 'morning' ? 'กะเช้า' : 'กะบ่าย'
     const unpaidTag = isEmpUnpaid ? '[ไม่จ่ายค่าแรง] ' : ''
     const unpaidDesc = isEmpUnpaid ? '(ไม่คิดค่าจ้างกะนี้) ' : ''
-    const amtDesc = amtNum > 0 ? `| ยอดหักเพิ่มเติม ฿${amtNum.toLocaleString()}` : '| ไม่คิดค่าจ้างกะนี้'
-    const noteStr = `[หักทำผิดวินัย] ${unpaidTag}[หักค่าปรับผิดระเบียบ] หักทำผิดวินัย ${unpaidDesc}(วันที่ ${thDateStr} ${shiftLabel}) | สาเหตุ: ${cleanReason} ${amtDesc}`
+    const noteStr = `[หักทำผิดวินัย] ${unpaidTag}[หักค่าปรับผิดระเบียบ] หักทำผิดวินัย ${unpaidDesc}(วันที่ ${thDateStr} ${shiftLabel}) | สาเหตุ: ${cleanReason} | ยอดหัก ฿${amtNum.toLocaleString()}`
 
     onAddDisciplinary({
       employee_id: emp.employee_id,
@@ -1265,7 +1264,7 @@ function DetailModal({
   }
 
   const handleModalConfirm = () => {
-    if (discReason.trim()) {
+    if (discReason.trim() && discAmount && Number(discAmount) > 0) {
       handleSaveDisciplinary()
     }
     onClose()
@@ -1561,15 +1560,9 @@ function DetailModal({
                               )}
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                              {Number(adv.amount || 0) > 0 ? (
-                                <span style={{ fontFamily: 'var(--vk-mono)', fontWeight: 800, fontSize: 13, color: '#b91c1c' }}>
-                                  −฿{Number(adv.amount || 0).toLocaleString()}
-                                </span>
-                              ) : (
-                                <span style={{ fontSize: 11, fontWeight: 700, color: '#dc2626' }}>
-                                  ไม่จ่ายค่าแรง
-                                </span>
-                              )}
+                              <span style={{ fontFamily: 'var(--vk-mono)', fontWeight: 800, fontSize: 13, color: '#b91c1c' }}>
+                                −฿{Number(adv.amount || 0).toLocaleString()}
+                              </span>
                               <button
                                 type="button"
                                 onClick={() => handleDeleteIncident(adv.id)}
@@ -1586,10 +1579,10 @@ function DetailModal({
                   </div>
                 )}
 
-                {/* Disciplinary input form: reason + optional extra fine */}
+                {/* Disciplinary input form: reason + fine */}
                 <div style={{ background: '#ffffff', border: '1px solid #fca5a5', borderRadius: 6, padding: '12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
                   <div style={{ fontSize: 12, fontWeight: 700, color: '#991b1b' }}>
-                    บันทึกรายละเอียดความผิด / หักเงินเพิ่มเติม
+                    บันทึกรายละเอียดความผิดและยอดเงินที่หัก
                   </div>
 
                   {/* Date & Shift */}
@@ -1660,7 +1653,7 @@ function DetailModal({
                   {/* Amount input */}
                   <div>
                     <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#991b1b', marginBottom: 4 }}>
-                      ยอดเงินที่หักเพิ่มเติม (บาท) {isEmpUnpaid ? <span style={{ fontSize: 10, fontWeight: 400, color: 'var(--vk-ink-3)' }}>(ไม่บังคับ หากเลือกไม่จ่ายค่าแรง)</span> : <span style={{ color: '#dc2626' }}>*</span>}:
+                      ยอดเงินที่หัก (บาท) <span style={{ color: '#dc2626' }}>*</span>:
                     </label>
                     <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
                       <span style={{
@@ -1681,7 +1674,7 @@ function DetailModal({
                         className="vk-input vk-input--mono"
                         value={discAmount}
                         onChange={(e) => setDiscAmount(e.target.value)}
-                        placeholder={isEmpUnpaid ? '0 (ไม่หักเงินเพิ่ม)' : '0.00'}
+                        placeholder="0.00"
                         style={{
                           height: 38,
                           minHeight: 38,
@@ -1701,19 +1694,19 @@ function DetailModal({
                   {/* Add Disciplinary Incident Button */}
                   <button
                     type="button"
-                    disabled={!discReason.trim() || (!isEmpUnpaid && (!discAmount || Number(discAmount) <= 0))}
+                    disabled={!discReason.trim() || !discAmount || Number(discAmount) <= 0}
                     onClick={handleSaveDisciplinary}
                     style={{
                       width: '100%',
                       height: 38,
                       padding: '0 14px',
-                      background: (!discReason.trim() || (!isEmpUnpaid && (!discAmount || Number(discAmount) <= 0))) ? '#f87171' : '#dc2626',
+                      background: (!discReason.trim() || !discAmount || Number(discAmount) <= 0) ? '#f87171' : '#dc2626',
                       color: '#ffffff',
                       fontWeight: 700,
                       fontSize: 13,
                       borderRadius: 6,
                       border: 'none',
-                      cursor: (!discReason.trim() || (!isEmpUnpaid && (!discAmount || Number(discAmount) <= 0))) ? 'not-allowed' : 'pointer',
+                      cursor: (!discReason.trim() || !discAmount || Number(discAmount) <= 0) ? 'not-allowed' : 'pointer',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -1721,11 +1714,9 @@ function DetailModal({
                       boxSizing: 'border-box',
                     }}
                   >
-                    {Number(discAmount) > 0
-                      ? `บันทึกรายการหักเงิน ฿${Number(discAmount).toLocaleString()}`
-                      : isEmpUnpaid
-                      ? 'บันทึกประวัติหนีงาน / ไม่จ่ายค่าแรง'
-                      : 'บันทึกข้อมูลทำผิดวินัย'}
+                    {discAmount && Number(discAmount) > 0
+                      ? `ยืนยันรายการหักเงิน ฿${Number(discAmount).toLocaleString()}`
+                      : 'ยืนยันรายการหักเงิน'}
                   </button>
                 </div>
               </div>
