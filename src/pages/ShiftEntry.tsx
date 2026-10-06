@@ -5,8 +5,10 @@ import { supabase } from '../lib/supabase'
 import { useAppStore } from '../store/useAppStore'
 import { TopBar } from '../components/layout/TopBar'
 import { toast } from 'sonner'
-import { ChevronLeft, ChevronRight, Save, X, Clock, Clock4, CheckSquare, Search } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Save, X, Clock, Clock4, CheckSquare, Search, ShieldAlert, Trash2 } from 'lucide-react'
 import { compareEmployeeCode, filterActivePeriods } from '../lib/formatters'
+import { ThaiDatePicker } from '../components/common/ThaiDatePicker'
+import { formatIsoToThaiDate } from '../features/tpi/safetyFines'
 import '../styles/tokens.css'
 
 // ── helpers ────────────────────────────────────────────────────────────
@@ -177,6 +179,38 @@ export default function ShiftEntry() {
     }, enabled: !!currentPeriod,
   })
 
+const isDisciplinaryAdvanceNote = (notes?: string | null): boolean => {
+  if (!notes) return false
+  return (
+    notes.includes('หักทำผิดวินัย') ||
+    notes.includes('หักผิดวินัย') ||
+    notes.includes('[หักทำผิดวินัย]') ||
+    notes.includes('[หักผิดวินัย]') ||
+    notes.includes('[หักค่าปรับ จป.]') ||
+    notes.includes('หักค่าปรับผิดระเบียบ') ||
+    notes.includes('ค่าปรับผิดระเบียบ') ||
+    /\[(?:หัก)?(?:ทำ)?ผิดวินัย\]/i.test(notes) ||
+    /หัก(?:ทำ)?ผิดวินัย/i.test(notes)
+  )
+}
+
+  // ── fetch disciplinary advances for current period ──
+  const { data: periodDisciplinaryAdvances = [] } = useQuery<any[]>({
+    queryKey: ['shifts-disciplinary-advances', currentPeriod?.id],
+    queryFn: async () => {
+      if (!currentPeriod?.id) return []
+      const { data, error } = await supabase
+        .from('advance_payments')
+        .select('id, employee_id, amount, notes, request_date, created_at')
+        .eq('period_id', currentPeriod.id)
+        .order('created_at', { ascending: false })
+      if (error) return []
+      return (data || []).filter((a: any) => isDisciplinaryAdvanceNote(a.notes))
+    },
+    enabled: !!currentPeriod?.id,
+    staleTime: 10_000,
+  })
+
   // Sync DB → local state when date changes; auto-delete orphaned assignments from inactive employees
   useEffect(() => {
     if (loadingAssignments || employees.length === 0 || !currentPeriod) return
@@ -337,8 +371,67 @@ export default function ShiftEntry() {
     setAssignments(prev => prev.map(a => a.employee_id === empId ? { ...a, isAutoAssigned: false } : a))
   }
 
-  const handleRemove = (empId: string) => {
+  const handleRemove = async (empId: string) => {
+    // 1. Remove from local assignments state
     setAssignments(prev => prev.filter(a => a.employee_id !== empId))
+
+    if (!currentPeriod?.id) return
+
+    try {
+      // 2. Delete from shift_assignments in DB if this shift was already saved
+      await supabase
+        .from('shift_assignments')
+        .delete()
+        .eq('period_id', currentPeriod.id)
+        .eq('work_date', activeDateStr)
+        .eq('employee_id', empId)
+
+      // 3. Immediately find and delete any disciplinary deduction tied to this employee for this shift/date
+      const { data: dbAdvances } = await supabase
+        .from('advance_payments')
+        .select('id, notes, request_date')
+        .eq('period_id', currentPeriod.id)
+        .eq('employee_id', empId)
+
+      const thDateStr = formatIsoToThaiDate(activeDateStr)
+      const toDeleteIds = (dbAdvances || [])
+        .filter((a: any) => {
+          if (!isDisciplinaryAdvanceNote(a.notes)) return false
+          return (
+            a.request_date === activeDateStr ||
+            (a.notes && (a.notes.includes(thDateStr) || a.notes.includes(activeDateStr)))
+          )
+        })
+        .map((a: any) => a.id)
+
+      if (toDeleteIds.length > 0) {
+        const { error: delErr } = await supabase
+          .from('advance_payments')
+          .delete()
+          .in('id', toDeleteIds)
+
+        if (delErr) {
+          console.error('Error deleting disciplinary advances:', delErr)
+        } else {
+          toast.info('ลบกะและรายการหักทำผิดวินัยที่เกี่ยวข้องเรียบร้อยแล้ว')
+        }
+      }
+
+      // 4. Invalidate all related caches across the application (Advances, Payroll, Payslip, Summary)
+      queryClient.invalidateQueries({ queryKey: ['shifts-v2'] })
+      queryClient.invalidateQueries({ queryKey: ['all-period-shifts'] })
+      queryClient.invalidateQueries({ queryKey: ['summary-all-shifts'] })
+      queryClient.invalidateQueries({ queryKey: ['v2-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['payment-channel-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['shifts-disciplinary-advances'] })
+      queryClient.invalidateQueries({ queryKey: ['advances-v2'] })
+      queryClient.invalidateQueries({ queryKey: ['advances'] })
+      queryClient.invalidateQueries({ queryKey: ['payslip-advances'] })
+      queryClient.invalidateQueries({ queryKey: ['all-payroll-entries'] })
+      queryClient.invalidateQueries({ queryKey: ['summary-all-advances'] })
+    } catch (err: any) {
+      console.error('Failed to cleanup shift and disciplinary deduction:', err)
+    }
   }
 
   const navigate = (dir: -1 | 1) => {
@@ -355,6 +448,27 @@ export default function ShiftEntry() {
         const ok = await new Promise<boolean>(resolve => { confirmResolveRef.current = resolve; setConfirmDeleteOpen(true) })
         if (!ok) throw new Error('ยกเลิก')
         await supabase.from('shift_assignments').delete().eq('period_id', currentPeriod.id).eq('work_date', activeDateStr)
+
+        // Delete all disciplinary deductions for this date
+        const { data: dayAdvances } = await supabase
+          .from('advance_payments')
+          .select('id, notes, request_date')
+          .eq('period_id', currentPeriod.id)
+
+        const thDateStr = formatIsoToThaiDate(activeDateStr)
+        const delIds = (dayAdvances || [])
+          .filter((a: any) => {
+            if (!isDisciplinaryAdvanceNote(a.notes)) return false
+            return (
+              a.request_date === activeDateStr ||
+              (a.notes && (a.notes.includes(thDateStr) || a.notes.includes(activeDateStr)))
+            )
+          })
+          .map((a: any) => a.id)
+
+        if (delIds.length > 0) {
+          await supabase.from('advance_payments').delete().in('id', delIds)
+        }
         return
       }
       const payload = assignments.map(a => ({
@@ -373,6 +487,28 @@ export default function ShiftEntry() {
       if (error) throw error
       const keepIds = assignments.map(a => a.employee_id)
       await supabase.from('shift_assignments').delete().eq('period_id', currentPeriod.id).eq('work_date', activeDateStr).not('employee_id', 'in', `(${keepIds.join(',')})`)
+
+      // Delete disciplinary deductions for any employee removed from this date
+      const { data: removedAdvances } = await supabase
+        .from('advance_payments')
+        .select('id, notes, request_date, employee_id')
+        .eq('period_id', currentPeriod.id)
+        .not('employee_id', 'in', `(${keepIds.join(',')})`)
+
+      const thDateStr = formatIsoToThaiDate(activeDateStr)
+      const delIds = (removedAdvances || [])
+        .filter((a: any) => {
+          if (!isDisciplinaryAdvanceNote(a.notes)) return false
+          return (
+            a.request_date === activeDateStr ||
+            (a.notes && (a.notes.includes(thDateStr) || a.notes.includes(activeDateStr)))
+          )
+        })
+        .map((a: any) => a.id)
+
+      if (delIds.length > 0) {
+        await supabase.from('advance_payments').delete().in('id', delIds)
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['shifts-v2'] })
@@ -380,6 +516,12 @@ export default function ShiftEntry() {
       queryClient.invalidateQueries({ queryKey: ['summary-all-shifts'] })
       queryClient.invalidateQueries({ queryKey: ['v2-stats'] })
       queryClient.invalidateQueries({ queryKey: ['payment-channel-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['shifts-disciplinary-advances'] })
+      queryClient.invalidateQueries({ queryKey: ['advances-v2'] })
+      queryClient.invalidateQueries({ queryKey: ['advances'] })
+      queryClient.invalidateQueries({ queryKey: ['payslip-advances'] })
+      queryClient.invalidateQueries({ queryKey: ['all-payroll-entries'] })
+      queryClient.invalidateQueries({ queryKey: ['summary-all-advances'] })
       toast.success(`บันทึกข้อมูล ${fmtDisplay(activeDateStr)} สำเร็จ`)
     },
     onError: (e: Error) => toast.error('บันทึกไม่สำเร็จ', { description: e.message }),
@@ -712,6 +854,30 @@ export default function ShiftEntry() {
                           {emp.filmAmount > 0 && <Pill color="blue">+ค่าฟิล์ม</Pill>}
                           {emp.isHolidayOTExempt && <Pill color="ink">×1</Pill>}
                           {emp.isCrossPosition && <Pill color="jade">สลับตำแหน่ง</Pill>}
+                          {(() => {
+                            const empDiscList = periodDisciplinaryAdvances.filter(a => a.employee_id === emp.employee_id)
+                            const empDiscTotal = empDiscList.reduce((s, a) => s + Number(a.amount || 0), 0)
+                            if (empDiscTotal <= 0) return null
+                            return (
+                              <span
+                                style={{
+                                  fontSize: 9,
+                                  fontWeight: 700,
+                                  padding: '1px 6px',
+                                  borderRadius: 999,
+                                  background: '#fee2e2',
+                                  color: '#b91c1c',
+                                  border: '1px solid #fca5a5',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 2,
+                                }}
+                                title={`มีรายการหักทำผิดวินัยในงวดนี้ ${empDiscList.length} รายการ (รวม ฿${empDiscTotal.toLocaleString()})`}
+                              >
+                                <ShieldAlert style={{ width: 9, height: 9 }} /> หักผิดวินัย ฿{empDiscTotal.toLocaleString()}
+                              </span>
+                            )
+                          })()}
                         </div>
                       </div>
                       <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
@@ -746,7 +912,12 @@ export default function ShiftEntry() {
       {/* Employee detail modal */}
       {detailEmp && (
         <DetailModal
-          emp={detailEmp} isHoliday={isHoliday} weekend={weekend}
+          emp={detailEmp}
+          isHoliday={isHoliday}
+          weekend={weekend}
+          currentPeriod={currentPeriod}
+          activeDateStr={activeDateStr}
+          disciplinaryAdvances={periodDisciplinaryAdvances.filter(a => a.employee_id === detailEmp.employee_id)}
           onUpdate={(patch) => updateAssignment(detailEmp.employee_id, patch)}
           onClose={() => {
             // If there are more clerks waiting in queue, open next one
@@ -808,14 +979,104 @@ function Pill({ color, children }: { color: PillColor; children: React.ReactNode
 }
 
 // ── Detail Modal ───────────────────────────────────────────────────────
-function DetailModal({ emp, isHoliday, weekend, onUpdate, onClose }: {
-  emp: AssignedEmp; isHoliday: boolean; weekend: boolean
+function DetailModal({
+  emp,
+  isHoliday,
+  weekend,
+  currentPeriod,
+  activeDateStr,
+  disciplinaryAdvances,
+  onUpdate,
+  onClose,
+}: {
+  emp: AssignedEmp
+  isHoliday: boolean
+  weekend: boolean
+  currentPeriod: Period | null
+  activeDateStr: string
+  disciplinaryAdvances: any[]
   onUpdate: (patch: Partial<AssignedEmp>) => void
   onClose: () => void
 }) {
+  const queryClient = useQueryClient()
   // earlyReturn = กลับก่อน (8–12 ชม.) vs underHalf = ลา/ป่วย (< 8 ชม.)
   const [earlyReturn, setEarlyReturn] = React.useState(emp.partialHours >= 8)
   const isPartial = emp.partialHours > 0
+
+  // Disciplinary deduction state
+  const [showDisciplinaryForm, setShowDisciplinaryForm] = React.useState(false)
+  const [incidentDate, setIncidentDate] = React.useState(activeDateStr)
+  const [incidentShift, setIncidentShift] = React.useState(emp.shift_type || 'morning')
+  const [discReason, setDiscReason] = React.useState('')
+  const [discAmount, setDiscAmount] = React.useState<number | string>('')
+  const [isSavingDisc, setIsSavingDisc] = React.useState(false)
+
+  const empBaseRate = emp.rate_per_12h > 0 ? emp.rate_per_12h : 357
+
+  const handleDeleteIncident = async (id: string) => {
+    if (!window.confirm('ต้องการลบรายการหักเงินทำผิดวินัยนี้ใช่หรือไม่?')) return
+    try {
+      const { error } = await supabase.from('advance_payments').delete().eq('id', id)
+      if (error) throw error
+      toast.success('ลบรายการหักเงินทำผิดวินัยสำเร็จ')
+      queryClient.invalidateQueries({ queryKey: ['shifts-disciplinary-advances'] })
+      queryClient.invalidateQueries({ queryKey: ['advances'] })
+      queryClient.invalidateQueries({ queryKey: ['payslip-advances'] })
+      queryClient.invalidateQueries({ queryKey: ['all-payroll-entries'] })
+      queryClient.invalidateQueries({ queryKey: ['summary-all-advances'] })
+    } catch (err: any) {
+      toast.error('ลบไม่สำเร็จ: ' + (err?.message || ''))
+    }
+  }
+
+  const handleSaveDisciplinary = async () => {
+    if (!currentPeriod?.id) {
+      toast.error('ไม่พบงวดการจ่ายเงินปัจจุบัน')
+      return
+    }
+    const cleanReason = discReason.trim()
+    if (!cleanReason) {
+      toast.error('กรุณาระบุรายละเอียดสาเหตุความผิด เช่น เข้าโรงงานแล้วหนีไม่ทำงาน')
+      return
+    }
+    const amtNum = Number(discAmount)
+    if (!amtNum || amtNum <= 0) {
+      toast.error('กรุณาระบุยอดเงินที่หัก (ต้องมากกว่า 0 บาท)')
+      return
+    }
+
+    setIsSavingDisc(true)
+    try {
+      const dateToUse = incidentDate || activeDateStr
+      const thDateStr = formatIsoToThaiDate(dateToUse)
+      const shiftLabel = incidentShift === 'morning' ? 'กะเช้า' : 'กะบ่าย'
+      const noteStr = `[หักทำผิดวินัย] [หักค่าปรับผิดระเบียบ] หักทำผิดวินัย (วันที่ ${thDateStr} ${shiftLabel}) | สาเหตุ: ${cleanReason} | ยอดหัก ฿${amtNum.toLocaleString()}`
+
+      const { error } = await supabase.from('advance_payments').insert({
+        period_id: currentPeriod.id,
+        employee_id: emp.employee_id,
+        amount: Math.round(amtNum * 100) / 100,
+        request_date: dateToUse,
+        notes: noteStr,
+      })
+      if (error) throw error
+
+      toast.success(`บันทึกหักเงินทำผิดวินัย ${emp.name} ฿${amtNum.toLocaleString()} เรียบร้อย`)
+      queryClient.invalidateQueries({ queryKey: ['shifts-disciplinary-advances'] })
+      queryClient.invalidateQueries({ queryKey: ['advances'] })
+      queryClient.invalidateQueries({ queryKey: ['payslip-advances'] })
+      queryClient.invalidateQueries({ queryKey: ['all-payroll-entries'] })
+      queryClient.invalidateQueries({ queryKey: ['summary-all-advances'] })
+
+      setDiscReason('')
+      setDiscAmount('')
+      setShowDisciplinaryForm(false)
+    } catch (err: any) {
+      toast.error('บันทึกไม่สำเร็จ: ' + (err?.message || ''))
+    } finally {
+      setIsSavingDisc(false)
+    }
+  }
 
   const inputStyle: React.CSSProperties = {
     fontFamily: 'var(--vk-mono)', fontSize: 14, fontWeight: 600,
@@ -830,20 +1091,24 @@ function DetailModal({ emp, isHoliday, weekend, onUpdate, onClose }: {
     }} onClick={e => { if (e.target === e.currentTarget) onClose() }}>
       <div style={{
         background: 'var(--vk-paper)', border: '1px solid var(--vk-rule)',
-        width: '100%', maxWidth: 400,
+        width: '100%', maxWidth: 460, maxHeight: '92vh', display: 'flex', flexDirection: 'column',
+        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.08)',
+        borderRadius: 8, overflow: 'hidden',
       }}>
         {/* Header */}
-        <div style={{ background: 'var(--vk-persimmon)', color: 'var(--vk-bone)', padding: '14px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ background: 'var(--vk-persimmon)', color: 'var(--vk-bone)', padding: '14px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
           <div>
             <div style={{ fontWeight: 700, fontSize: 15 }}>{emp.name}</div>
-            <div style={{ fontSize: 11, opacity: 0.75, fontFamily: 'var(--vk-mono)', marginTop: 1 }}>{emp.code}{emp.isClerk ? ' · เสมียน' : ''}</div>
+            <div style={{ fontSize: 11, opacity: 0.85, fontFamily: 'var(--vk-mono)', marginTop: 1 }}>
+              {emp.code}{emp.isClerk ? ' · เสมียน' : ''} · ค่าแรง ฿{empBaseRate.toLocaleString()}
+            </div>
           </div>
           <button onClick={onClose} style={{ background: 'rgba(255,255,255,0.15)', border: 'none', cursor: 'pointer', color: 'var(--vk-bone)', padding: 6, display: 'flex', borderRadius: 4 }}>
             <X style={{ width: 15, height: 15 }} />
           </button>
         </div>
 
-        <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: 18 }}>
+        <div style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto', flex: 1 }}>
           {emp.isClerk ? (
             /* ── Clerk: OT hours ── */
             <>
@@ -957,9 +1222,253 @@ function DetailModal({ emp, isHoliday, weekend, onUpdate, onClose }: {
               </div>
             </>
           )}
+
+          {/* ── Safety & Disciplinary Fine Section (หักเงินทำผิดวินัย / หนีงาน) ── */}
+          <div style={{
+            marginTop: 4,
+            padding: '14px 16px',
+            borderRadius: 8,
+            background: '#fef2f2',
+            border: '1.5px solid #fca5a5',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                <ShieldAlert style={{ width: 17, height: 17, color: '#b91c1c', flexShrink: 0 }} />
+                <span style={{ fontWeight: 700, fontSize: 13, color: '#991b1b' }}>
+                  บันทึกทำผิดวินัย / หักเงิน
+                </span>
+              </div>
+            </div>
+
+            {/* Context bar reflecting date and shift */}
+            <div style={{ fontSize: 11, color: '#7f1d1d', background: '#ffffff', padding: '6px 10px', borderRadius: 6, border: '1px solid #fecaca', marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 4 }}>
+              <span>📅 <strong>{fmtDisplay(activeDateStr)}</strong> ({formatIsoToThaiDate(activeDateStr)})</span>
+              <span>⏰ <strong>{emp.shift_type === 'morning' ? 'กะเช้า (08:00 — 20:00)' : 'กะบ่าย (20:00 — 08:00)'}</strong></span>
+            </div>
+
+            {/* List existing disciplinary records */}
+            {disciplinaryAdvances.length > 0 && (
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#991b1b', marginBottom: 5 }}>
+                  รายการหักเงินทำผิดวินัยในงวดนี้ ({disciplinaryAdvances.length} รายการ):
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {disciplinaryAdvances.map((adv: any) => {
+                    const rawNote = adv.notes || ''
+                    const infoMatch = rawNote.match(/(?:หักค่าปรับผิดระเบียบ|หักทำผิดวินัย|หักผิดวินัย)\s*(\([^\)]+\))/) || rawNote.match(/(\(วันที่[^\)]+\))/)
+                    const infoStr = infoMatch ? infoMatch[1] : ''
+                    const reasonMatch = rawNote.match(/สาเหตุ:\s*([^\|]+)/)
+                    const reasonStr = reasonMatch ? reasonMatch[1].trim() : (rawNote.replace(/\[[^\]]+\]/g, '').trim() || 'ทำผิดวินัย')
+                    return (
+                      <div key={adv.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '7px 10px', background: '#ffffff', borderRadius: 6, border: '1px solid #fecaca' }}>
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: '#991b1b' }}>
+                            {infoStr || `วันที่ ${adv.request_date ? formatIsoToThaiDate(adv.request_date) : '—'}`}
+                          </div>
+                          <div style={{ fontSize: 11, color: '#4b5563', marginTop: 1, wordBreak: 'break-word' }}>
+                            สาเหตุ: {reasonStr}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                          <span style={{ fontFamily: 'var(--vk-mono)', fontWeight: 800, fontSize: 13, color: '#b91c1c' }}>
+                            −฿{Number(adv.amount || 0).toLocaleString()}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteIncident(adv.id)}
+                            title="ลบรายการหักเงินนี้"
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#b91c1c', padding: 2, display: 'flex' }}
+                          >
+                            <Trash2 style={{ width: 14, height: 14 }} />
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Toggle button to open/close add form */}
+            {!showDisciplinaryForm ? (
+              <button
+                type="button"
+                onClick={() => setShowDisciplinaryForm(true)}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: '#991b1b',
+                  background: '#ffffff',
+                  border: '1px dashed #fca5a5',
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6,
+                }}
+              >
+                + บันทึกหักเงินทำผิดวินัย (เช่น เข้าโรงงานแล้วหนีไม่ทำงาน)
+              </button>
+            ) : (
+              <div style={{ background: '#ffffff', border: '1px solid #fca5a5', borderRadius: 6, padding: '12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: '#991b1b' }}>
+                    กรอกข้อมูลหักเงินทำผิดวินัย
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowDisciplinaryForm(false)}
+                    style={{ fontSize: 11, color: 'var(--vk-ink-3)', background: 'none', border: 'none', cursor: 'pointer' }}
+                  >
+                    ยกเลิก
+                  </button>
+                </div>
+
+                {/* Date & Shift */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, alignItems: 'start' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#991b1b', marginBottom: 4 }}>
+                      วันที่เกิดเหตุ:
+                    </label>
+                    <ThaiDatePicker
+                      value={incidentDate}
+                      onChange={(val) => setIncidentDate(val || activeDateStr)}
+                      placeholder="วว/ดด/ปปปป (พ.ศ.)"
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#991b1b', marginBottom: 4 }}>
+                      กะที่เกิดเหตุ:
+                    </label>
+                    <select
+                      className="vk-input"
+                      value={incidentShift}
+                      onChange={(e) => setIncidentShift(e.target.value)}
+                      style={{
+                        height: 38,
+                        minHeight: 38,
+                        maxHeight: 38,
+                        fontSize: 13,
+                        fontWeight: 500,
+                        background: '#ffffff',
+                        borderColor: '#cbd5e1',
+                        borderRadius: 6,
+                        color: '#0f172a',
+                        boxSizing: 'border-box',
+                        WebkitAppearance: 'none',
+                        MozAppearance: 'none',
+                        appearance: 'none',
+                      }}
+                    >
+                      <option value="morning">กะเช้า (08:00 — 20:00)</option>
+                      <option value="afternoon">กะบ่าย (20:00 — 08:00)</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Reason text input */}
+                <div>
+                  <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#991b1b', marginBottom: 4 }}>
+                    ระบุสาเหตุ / รายละเอียดความผิด <span style={{ color: '#dc2626' }}>*</span>:
+                  </label>
+                  <input
+                    type="text"
+                    className="vk-input"
+                    value={discReason}
+                    onChange={(e) => setDiscReason(e.target.value)}
+                    placeholder="เช่น เข้าโรงงานแล้วหนีไม่ทำงาน..."
+                    style={{
+                      height: 38,
+                      minHeight: 38,
+                      fontSize: 13,
+                      background: '#ffffff',
+                      borderColor: '#cbd5e1',
+                      borderRadius: 6,
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                </div>
+
+                {/* Amount input */}
+                <div>
+                  <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#991b1b', marginBottom: 4 }}>
+                    ยอดเงินที่หัก (บาท) <span style={{ color: '#dc2626' }}>*</span>:
+                  </label>
+                  <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                    <span style={{
+                      position: 'absolute',
+                      left: 12,
+                      fontSize: 14,
+                      fontWeight: 700,
+                      color: '#b91c1c',
+                      pointerEvents: 'none',
+                      zIndex: 1,
+                    }}>
+                      ฿
+                    </span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      className="vk-input vk-input--mono"
+                      value={discAmount}
+                      onChange={(e) => setDiscAmount(e.target.value)}
+                      placeholder="0.00"
+                      style={{
+                        height: 38,
+                        minHeight: 38,
+                        paddingLeft: 28,
+                        fontSize: 14,
+                        fontWeight: 700,
+                        color: '#b91c1c',
+                        background: '#ffffff',
+                        borderColor: '#cbd5e1',
+                        borderRadius: 6,
+                        boxSizing: 'border-box',
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* Submit button */}
+                <button
+                  type="button"
+                  disabled={isSavingDisc}
+                  onClick={handleSaveDisciplinary}
+                  style={{
+                    width: '100%',
+                    height: 38,
+                    padding: '0 14px',
+                    background: '#dc2626',
+                    color: '#ffffff',
+                    fontWeight: 700,
+                    fontSize: 13,
+                    borderRadius: 6,
+                    border: 'none',
+                    cursor: isSavingDisc ? 'not-allowed' : 'pointer',
+                    opacity: isSavingDisc ? 0.7 : 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 6,
+                    boxSizing: 'border-box',
+                  }}
+                >
+                  {isSavingDisc
+                    ? 'กำลังบันทึก...'
+                    : discAmount && Number(discAmount) > 0
+                    ? `ยืนยันบันทึกหักเงิน ฿${Number(discAmount).toLocaleString()}`
+                    : 'ยืนยันบันทึกหักเงิน'}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
-        <div style={{ padding: '12px 20px', borderTop: '1px solid var(--vk-rule)', background: 'var(--vk-bone)', display: 'flex', justifyContent: 'flex-end' }}>
+        <div style={{ padding: '12px 20px', borderTop: '1px solid var(--vk-rule)', background: 'var(--vk-bone)', display: 'flex', justifyContent: 'flex-end', flexShrink: 0 }}>
           <button className="vk-btn vk-btn--primary" onClick={onClose}>ตกลง</button>
         </div>
       </div>

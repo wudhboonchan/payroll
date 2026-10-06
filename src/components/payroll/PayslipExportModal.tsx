@@ -246,7 +246,11 @@ export default function PayslipExportModal({ isOpen, onClose, uniqueMonths }: Pr
             !n.includes('ลงโทษ ขาด/ลา/มาสาย') &&
             !n.includes('[หักค่าปรับ จป.]') &&
             !n.includes('หักค่าปรับผิดระเบียบ') &&
-            !n.includes('ค่าปรับผิดระเบียบ')
+            !n.includes('ค่าปรับผิดระเบียบ') &&
+            !n.includes('[หักทำผิดวินัย]') &&
+            !n.includes('[หักผิดวินัย]') &&
+            !n.includes('หักทำผิดวินัย') &&
+            !n.includes('หักผิดวินัย')
         })
         const scanAdvances = empAdvances.filter(a => (a.notes || '').includes('[สแกนหน้าไม่สำเร็จ]') || (a.notes || '').includes('สแกนหน้าไม่สำเร็จ'))
         const discAdvances = empAdvances.filter(a => {
@@ -255,7 +259,13 @@ export default function PayslipExportModal({ isOpen, onClose, uniqueMonths }: Pr
         })
         const safetyAdvances = empAdvances.filter(a => {
           const n = a.notes || ''
-          return n.includes('[หักค่าปรับ จป.]') || n.includes('หักค่าปรับผิดระเบียบ') || n.includes('ค่าปรับผิดระเบียบ')
+          return n.includes('[หักค่าปรับ จป.]') ||
+            n.includes('หักค่าปรับผิดระเบียบ') ||
+            n.includes('ค่าปรับผิดระเบียบ') ||
+            n.includes('[หักทำผิดวินัย]') ||
+            n.includes('[หักผิดวินัย]') ||
+            n.includes('หักทำผิดวินัย') ||
+            n.includes('หักผิดวินัย')
         })
 
         const sumAdv = (list: AdvanceRow[]) => list.reduce((s, a) => s + Number(a.amount || 0), 0)
@@ -317,15 +327,21 @@ export default function PayslipExportModal({ isOpen, onClose, uniqueMonths }: Pr
         }
         if (safetyAdvances.length > 0) {
           for (const s of safetyAdvances) {
-            const infoMatch = (s.notes || '').match(/หักค่าปรับผิดระเบียบ\s*(\([^\)]+\))/)
+            const notes = s.notes || ''
+            const isDisciplinary = notes.includes('หักทำผิดวินัย') || notes.includes('หักผิดวินัย')
+            const infoMatch = notes.match(/(?:หักค่าปรับผิดระเบียบ|หักทำผิดวินัย|หักผิดวินัย)\s*(\([^\)]+\))/) ||
+                              notes.match(/(\(วันที่[^\)]+\))/)
             let infoStr = infoMatch ? infoMatch[1] : ''
             if (infoStr && /วันที่\s*\d{4}[-\/]/.test(infoStr)) {
               infoStr = infoStr.replace(/วันที่\s*([\d\/\-]+)/, (_, d) => `วันที่ ${formatThaiDateDDMMYYYY(d)}`)
             }
+            const titlePrefix = isDisciplinary ? 'หักทำผิดวินัย' : 'หักค่าปรับผิดระเบียบ'
             const label = infoStr
-              ? `หักค่าปรับผิดระเบียบ\n${infoStr}`
-              : ((s.notes || '').match(/(หักค่าปรับผิดระเบียบ\s*\([^\)]+\))/)?.[1] || 'หักค่าปรับผิดระเบียบ')
-            const reasonMatch = (s.notes || '').match(/สาเหตุ:\s*([^\|]+)/)
+              ? `${titlePrefix}\n${infoStr}`
+              : ((notes.match(/(?:หักค่าปรับผิดระเบียบ|หักทำผิดวินัย|หักผิดวินัย)\s*(\([^\)]+\))/)?.[1])
+                ? `${titlePrefix}\n${notes.match(/(?:หักค่าปรับผิดระเบียบ|หักทำผิดวินัย|หักผิดวินัย)\s*(\([^\)]+\))/)?.[1]}`
+                : titlePrefix)
+            const reasonMatch = notes.match(/สาเหตุ:\s*([^\|]+)/)
             const reason = reasonMatch ? `สาเหตุ: ${reasonMatch[1].trim()}` : null
             deduction_items.push({
               label,

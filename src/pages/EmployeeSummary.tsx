@@ -731,7 +731,9 @@ export default function EmployeeSummary() {
 
       if (stats.entrySS > 0) rows.push(['รายการหัก', 'ประกันสังคม', -stats.entrySS])
       empAdvances.forEach((adv, i) => {
-        rows.push(['รายการหัก', `เบิกล่วงหน้า (#${i+1}) ${adv.notes || ''}`, -Number(adv.amount || 0)])
+        const isDisc = (adv.notes || '').includes('หักทำผิดวินัย') || (adv.notes || '').includes('หักผิดวินัย')
+        const typeLabel = isDisc ? 'หักทำผิดวินัย' : `เบิกล่วงหน้า (#${i+1})`
+        rows.push(['รายการหัก', `${typeLabel} ${adv.notes || ''}`.trim(), -Number(adv.amount || 0)])
       })
       if (stats.entrySafety > 0) rows.push(['รายการหัก', 'อุปกรณ์ความปลอดภัย', -stats.entrySafety])
       if (stats.entryUniform > 0) rows.push(['รายการหัก', 'ค่าเสื้อพนักงาน', -stats.entryUniform])
@@ -1127,19 +1129,26 @@ export default function EmployeeSummary() {
                   <>
                     <div style={{ padding: '7px 32px 4px', borderTop: '1px solid var(--vk-rule-soft)', background: '#fff8f6', borderLeft: '3px solid var(--vk-crimson)' }}>
                       <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--vk-crimson)', opacity: 0.7 }}>
-                        เบิกล่วงหน้า — {empAdvances.length} รายการ
+                        รายการหักเงิน / เบิกล่วงหน้า — {empAdvances.length} รายการ
                       </div>
                     </div>
-                    {empAdvances.map((adv, i) => (
-                      <div key={i} style={{ display: 'grid', gridTemplateColumns: '130px 90px 1fr 90px', gap: 8, padding: '7px 32px', borderTop: '1px solid var(--vk-rule-soft)', alignItems: 'center', borderLeft: '3px solid var(--vk-crimson)', background: '#fff8f6' }}>
-                        <div style={{ fontSize: 11, color: 'var(--vk-ink-2)', fontFamily: 'var(--vk-mono)' }}>
-                          {adv.request_date ? fmtDisplayDate(adv.request_date) : 'รายการ ' + (i + 1)}
+                    {empAdvances.map((adv, i) => {
+                      const isDisc = (adv.notes || '').includes('หักทำผิดวินัย') || (adv.notes || '').includes('หักผิดวินัย')
+                      return (
+                        <div key={i} style={{ display: 'grid', gridTemplateColumns: '130px 90px 1fr 90px', gap: 8, padding: '7px 32px', borderTop: '1px solid var(--vk-rule-soft)', alignItems: 'center', borderLeft: '3px solid var(--vk-crimson)', background: isDisc ? '#fef2f2' : '#fff8f6' }}>
+                          <div style={{ fontSize: 11, color: isDisc ? '#b91c1c' : 'var(--vk-ink-2)', fontFamily: 'var(--vk-mono)', fontWeight: isDisc ? 700 : 500 }}>
+                            {isDisc ? '🚨 หักทำผิดวินัย' : (adv.request_date ? fmtDisplayDate(adv.request_date) : 'รายการ ' + (i + 1))}
+                          </div>
+                          <div>
+                            {isDisc && adv.request_date && (
+                              <span style={{ fontSize: 10, color: '#991b1b', fontFamily: 'var(--vk-mono)' }}>{fmtDisplayDate(adv.request_date)}</span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: 11, color: isDisc ? '#7f1d1d' : 'var(--vk-ink-3)', fontWeight: isDisc ? 500 : 400 }}>{adv.notes || '—'}</div>
+                          <div style={{ textAlign: 'right', fontFamily: 'var(--vk-mono)', fontSize: 13, fontWeight: 700, color: 'var(--vk-crimson)' }}>−฿{monoNum(Number(adv.amount))}</div>
                         </div>
-                        <div />
-                        <div style={{ fontSize: 11, color: 'var(--vk-ink-3)' }}>{adv.notes || '—'}</div>
-                        <div style={{ textAlign: 'right', fontFamily: 'var(--vk-mono)', fontSize: 13, fontWeight: 700, color: 'var(--vk-crimson)' }}>−฿{monoNum(Number(adv.amount))}</div>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </>
                 )}
 

@@ -196,7 +196,13 @@ export default function PayrollEntry() {
       const note = a.note || ''
       const isScan = note.includes('[สแกนหน้าไม่สำเร็จ]') || note.includes('สแกนหน้าไม่สำเร็จ')
       const isDisc = note.includes('[ลงโทษ ขาดงานไม่มีคนแทน]') || note.includes('ลงโทษ ขาดงาน') || note.includes('[ลงโทษ ขาด/ลา/มาสาย]') || note.includes('ลงโทษ ขาด/ลา/มาสาย')
-      const isSafety = note.includes('[หักค่าปรับ จป.]') || note.includes('หักค่าปรับผิดระเบียบ') || note.includes('ค่าปรับผิดระเบียบ')
+      const isSafety = note.includes('[หักค่าปรับ จป.]') ||
+        note.includes('หักค่าปรับผิดระเบียบ') ||
+        note.includes('ค่าปรับผิดระเบียบ') ||
+        note.includes('[หักทำผิดวินัย]') ||
+        note.includes('[หักผิดวินัย]') ||
+        note.includes('หักทำผิดวินัย') ||
+        note.includes('หักผิดวินัย')
       return !isScan && !isDisc && !isSafety
     })
     const scanAdv = empAdvances.filter(a => {
@@ -209,7 +215,13 @@ export default function PayrollEntry() {
     })
     const safetyAdv = empAdvances.filter(a => {
       const note = a.note || ''
-      return note.includes('[หักค่าปรับ จป.]') || note.includes('หักค่าปรับผิดระเบียบ') || note.includes('ค่าปรับผิดระเบียบ')
+      return note.includes('[หักค่าปรับ จป.]') ||
+        note.includes('หักค่าปรับผิดระเบียบ') ||
+        note.includes('ค่าปรับผิดระเบียบ') ||
+        note.includes('[หักทำผิดวินัย]') ||
+        note.includes('[หักผิดวินัย]') ||
+        note.includes('หักทำผิดวินัย') ||
+        note.includes('หักผิดวินัย')
     })
     const regAdvTotal = regAdv.reduce((s, a) => s + Number(a.amount || 0), 0)
     const scanAdvTotal = scanAdv.reduce((s, a) => s + Number(a.amount || 0), 0)
@@ -779,16 +791,22 @@ export default function PayrollEntry() {
                         { label: 'หักสแกนหน้าไม่ผ่าน', value: scanAdvTotal, sub: scanAdv.length > 0 ? `${scanAdv.length} รายการสแกนหน้าไม่สำเร็จ` : null, showAlways: false },
                         { label: 'หักลงโทษขาดงานไม่มีคนแทน', value: discAdvTotal, sub: discAdv.length > 0 ? `${discAdv.length} รายการลงโทษขาดงาน (2 เท่า)` : null, showAlways: false },
                         ...(safetyAdv.length > 0 ? safetyAdv.map((adv) => {
-                          const infoMatch = (adv.note || '').match(/หักค่าปรับผิดระเบียบ\s*(\([^\)]+\))/)
+                          const noteStr = adv.note || ''
+                          const isDisciplinary = noteStr.includes('หักทำผิดวินัย') || noteStr.includes('หักผิดวินัย')
+                          const infoMatch = noteStr.match(/(?:หักค่าปรับผิดระเบียบ|หักทำผิดวินัย|หักผิดวินัย)\s*(\([^\)]+\))/) ||
+                                            noteStr.match(/(\(วันที่[^\)]+\))/)
                           let infoStr = infoMatch ? infoMatch[1] : ''
                           if (infoStr && /วันที่\s*\d{4}[-\/]/.test(infoStr)) {
                             infoStr = infoStr.replace(/วันที่\s*([\d\/\-]+)/, (_, d) => `วันที่ ${formatThaiDateDDMMYYYY(d)}`)
                           }
+                          const titlePrefix = isDisciplinary ? 'หักทำผิดวินัย' : 'หักค่าปรับผิดระเบียบ'
                           const label = infoStr
-                            ? `หักค่าปรับผิดระเบียบ\n${infoStr}`
-                            : ((adv.note || '').match(/(หักค่าปรับผิดระเบียบ\s*\([^\)]+\))/)?.[1] || 'หักค่าปรับผิดระเบียบ')
-                          const reasonMatch = (adv.note || '').match(/สาเหตุ:\s*([^\|]+)/)
-                          const sub = reasonMatch ? `สาเหตุ: ${reasonMatch[1].trim()} (ยอดหักงวดละ ฿${monoNum(Number(adv.amount))})` : `ยอดหัก ฿${monoNum(Number(adv.amount))}`
+                            ? `${titlePrefix}\n${infoStr}`
+                            : ((noteStr.match(/(?:หักค่าปรับผิดระเบียบ|หักทำผิดวินัย|หักผิดวินัย)\s*(\([^\)]+\))/)?.[1])
+                              ? `${titlePrefix}\n${noteStr.match(/(?:หักค่าปรับผิดระเบียบ|หักทำผิดวินัย|หักผิดวินัย)\s*(\([^\)]+\))/)?.[1]}`
+                              : titlePrefix)
+                          const reasonMatch = noteStr.match(/สาเหตุ:\s*([^\|]+)/)
+                          const sub = reasonMatch ? `สาเหตุ: ${reasonMatch[1].trim()} (ยอดหัก ฿${monoNum(Number(adv.amount))})` : `ยอดหัก ฿${monoNum(Number(adv.amount))}`
                           return {
                             label,
                             value: Number(adv.amount),
@@ -1345,11 +1363,15 @@ export default function PayrollEntry() {
                       {safetyAdv.length > 0 && (
                         <div style={{ padding: '8px 10px', background: 'rgba(124, 58, 237, 0.05)', borderRadius: 6, marginTop: 8, border: '1px dashed #c4b5fd' }}>
                           <div style={{ fontSize: 11, fontWeight: 700, color: '#6d28d9', marginBottom: 6 }}>
-                            รายละเอียดหักค่าปรับผิดระเบียบวินัย จป. ({safetyAdv.length} รายการ):
+                            รายละเอียดหักทำผิดวินัย / ค่าปรับผิดระเบียบ ({safetyAdv.length} รายการ):
                           </div>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                             {safetyAdv.map((adv, idx) => {
-                              const cleanNote = (adv.note || '').replace(/\[หักค่าปรับ จป\.\]/g, '').trim()
+                              const cleanNote = (adv.note || '')
+                                .replace(/\[หักทำผิดวินัย\]/g, '')
+                                .replace(/\[หักค่าปรับผิดระเบียบ\]/g, '')
+                                .replace(/\[หักค่าปรับ จป\.\]/g, '')
+                                .trim()
                               const parts = cleanNote.split('|').map(p => p.trim()).filter(Boolean)
                               return (
                                 <div key={idx} style={{ padding: '7px 10px', background: '#ffffff', borderRadius: 4, border: '1px solid #ede9fe' }}>

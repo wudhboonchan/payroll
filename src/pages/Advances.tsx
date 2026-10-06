@@ -77,6 +77,30 @@ function renderNotes(notes: string | null) {
       </div>
     )
   }
+  if (notes.includes('[หักทำผิดวินัย]') || notes.includes('[หักผิดวินัย]') || notes.includes('หักทำผิดวินัย') || notes.includes('หักผิดวินัย')) {
+    const cleanNote = notes.replace(/\[หักทำผิดวินัย\]/g, '').replace(/\[หักผิดวินัย\]/g, '').replace(/\[หักค่าปรับผิดระเบียบ\]/g, '').trim()
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        <span
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 4,
+            background: '#fee2e2',
+            color: '#b91c1c',
+            border: '1px solid #fca5a5',
+            padding: '2px 8px',
+            borderRadius: 4,
+            fontSize: 11,
+            fontWeight: 700,
+          }}
+        >
+          <ShieldAlert style={{ width: 11, height: 11 }} /> หักทำผิดวินัย
+        </span>
+        {cleanNote && <span style={{ fontSize: 13 }}>{cleanNote}</span>}
+      </div>
+    )
+  }
   if (notes.includes('[หักค่าปรับ จป.]') || notes.includes('หักค่าปรับผิดระเบียบ') || notes.includes('ค่าปรับผิดระเบียบ')) {
     const cleanNote = notes.replace('[หักค่าปรับ จป.]', '').trim()
     return (
