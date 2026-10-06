@@ -290,15 +290,23 @@ export default function PaySlip() {
     queryKey: ['payslip-advances', currentPeriod?.id, selectedEmpId],
     queryFn: async () => {
       if (!currentPeriod?.id || !selectedEmpId) return []
-      const { data, error } = await supabase
-        .from('advance_payments')
-        .select('*')
-        .eq('period_id', currentPeriod.id)
-        .eq('employee_id', selectedEmpId)
-        .order('created_at', { ascending: true })
-      if (error) return []
-      const shiftSet = new Set((allShifts || []).filter((s: any) => s.employee_id === selectedEmpId).map((s: any) => s.work_date))
-      return (data || []).filter((a: any) => {
+      const [advRes, shiftRes] = await Promise.all([
+        supabase
+          .from('advance_payments')
+          .select('*')
+          .eq('period_id', currentPeriod.id)
+          .eq('employee_id', selectedEmpId)
+          .order('created_at', { ascending: true }),
+        supabase
+          .from('shift_assignments')
+          .select('work_date')
+          .eq('period_id', currentPeriod.id)
+          .eq('employee_id', selectedEmpId)
+      ])
+      if (advRes.error) return []
+      const shifts = shiftRes.data || []
+      const shiftSet = new Set(shifts.map((s: any) => s.work_date))
+      return (advRes.data || []).filter((a: any) => {
         const n = a.notes || ''
         const isDisc = n.includes('หักทำผิดวินัย') || n.includes('หักผิดวินัย') || n.includes('[หักทำผิดวินัย]') || n.includes('[หักผิดวินัย]') || n.includes('หักค่าปรับผิดระเบียบ') || n.includes('ค่าปรับผิดระเบียบ') || n.includes('[หักค่าปรับ จป.]')
         if (isDisc && a.request_date) {

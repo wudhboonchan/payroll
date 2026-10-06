@@ -354,12 +354,20 @@ export default function EmployeeSummary() {
     queryKey: ['summary-all-advances', selectedPeriodId],
     queryFn: async () => {
       if (!selectedPeriodId) return []
-      const { data, error } = await supabase.from('advance_payments')
-        .select('employee_id,amount,request_date,notes')
-        .eq('period_id', selectedPeriodId)
-      if (error) throw error
-      const shiftSet = new Set((allShifts || []).map((s: any) => `${s.employee_id}_${s.work_date}`))
-      return (data || []).filter((a: any) => {
+      const [advRes, shiftRes] = await Promise.all([
+        supabase.from('advance_payments')
+          .select('employee_id,amount,request_date,notes')
+          .eq('period_id', selectedPeriodId)
+          .limit(10000),
+        supabase.from('shift_assignments')
+          .select('employee_id,work_date')
+          .eq('period_id', selectedPeriodId)
+          .limit(10000)
+      ])
+      if (advRes.error) throw advRes.error
+      const shifts = shiftRes.data || []
+      const shiftSet = new Set(shifts.map((s: any) => `${s.employee_id}_${s.work_date}`))
+      return (advRes.data || []).filter((a: any) => {
         const n = a.notes || ''
         const isDisc = n.includes('หักทำผิดวินัย') || n.includes('หักผิดวินัย') || n.includes('[หักทำผิดวินัย]') || n.includes('[หักผิดวินัย]') || n.includes('หักค่าปรับผิดระเบียบ') || n.includes('ค่าปรับผิดระเบียบ') || n.includes('[หักค่าปรับ จป.]')
         if (isDisc && a.request_date) {
@@ -369,6 +377,8 @@ export default function EmployeeSummary() {
       })
     },
     enabled: !!selectedPeriodId,
+    staleTime: 0,
+    refetchOnMount: 'always',
   })
 
   // Selected employee data resolution
