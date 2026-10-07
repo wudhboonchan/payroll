@@ -214,13 +214,13 @@ export function calculateFactoryBilling(
 
       const isSkilled = s.rate_tier === 'skilled'
       const isHalf = !!s.is_half_shift
-      const shiftUnits = isHalf ? 0.5 : 1.0
+      const shiftUnits = (s.actual_hours ?? (isHalf ? 4 : 8)) / 8
 
       const baseDailyRate = isSkilled ? skilledRate : normalRate
 
       if (s.is_holiday_ot) {
         // กะทำงานวันหยุด (ได้ 2 เท่า): คิดเป็น OT 2.0x เต็มจำนวน 2 เท่า (เช่น 16 ชม. = 1,428 บาท)
-        const holHours = isHalf ? 4 : 8
+        const holHours = s.actual_hours ?? (isHalf ? 4 : 8)
         const singleWage = Number(s.rate_snapshot) || (baseDailyRate * shiftUnits)
         const doubleWage = singleWage * 2
         ot20Hours += holHours

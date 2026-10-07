@@ -97,6 +97,10 @@ export const AttendanceEntryModal: React.FC<Props> = ({
       return
     }
 
+    if (initialLog?.workflow_status === 'pending' && !reason.trim()) {
+      setError('กรุณากรอกเหตุผลเพื่อดำเนินรายการให้เสร็จ')
+      return
+    }
     setSubmitting(true)
     setError(null)
 

@@ -185,7 +185,7 @@ export function calculateEmployeeTimesheetReport(
     for (const s of empShifts) {
       const dayIdx = dateIndexMap.get(s.work_date)
       const isHalf = !!s.is_half_shift
-      const shiftBaseHrs = isHalf ? 4 : 8
+      const shiftBaseHrs = s.actual_hours ?? (isHalf ? 4 : 8)
       const otHrs = Number(s.ot_hours) || 0
 
       // Add to daily total hours for timesheet cell
@@ -196,7 +196,7 @@ export function calculateEmployeeTimesheetReport(
       if (s.is_holiday_ot) {
         // Holiday shift: 2.0x base
         ot20Hours += shiftBaseHrs
-        ot20Wage += (Number(s.rate_snapshot) || dailyRate) * (isHalf ? 0.5 : 1.0) * 2.0
+        ot20Wage += (s.rate_snapshot ?? (dailyRate - Math.ceil(dailyRate / 8) * (8 - shiftBaseHrs))) * 2.0
 
         if (otHrs > 0) {
           // Extra OT on holiday: 3.0x
@@ -206,7 +206,7 @@ export function calculateEmployeeTimesheetReport(
       } else {
         // Normal day shift
         normalHours += shiftBaseHrs
-        normalWage += (Number(s.rate_snapshot) || dailyRate) * (isHalf ? 0.5 : 1.0)
+        normalWage += (s.rate_snapshot ?? (dailyRate - Math.ceil(dailyRate / 8) * (8 - shiftBaseHrs)))
 
         if (otHrs > 0) {
           ot15Hours += otHrs

@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { supabase } from '../../lib/supabase'
 import type { Json } from '../../types/database'
-import type { Job, WageProfile, Entry, ShiftDay } from './model'
+import { jobAvailabilityError, type Job, type WageProfile, type Entry, type ShiftDay } from './model'
 type Table<Row> = { Row: Row; Insert: Partial<Row>; Update: Partial<Row>; Relationships: [] }
 type TpiDatabase = { public: {
   Tables: { tpi_job_codes: Table<Job>; tpi_employee_wage_profiles: Table<WageProfile> }
@@ -30,6 +30,16 @@ export async function loadDay(factory:string,date:string):Promise<ShiftDay> {
   return data as unknown as ShiftDay
 }
 export async function saveDay(factory:string,date:string,day:ShiftDay) {
+  // Check current database settings, since the cached job list may be stale.
+  const [currentJobs, savedDay] = await Promise.all([loadJobs(factory), loadDay(factory, date)])
+  for (const entry of day.entries) {
+    const job = currentJobs.find(j => j.id === entry.job_id)
+    if (!job) throw new Error(`ไม่พบรหัสงาน ${entry.job_code_snapshot || entry.job_id} ในโรงงานนี้ กรุณารีเฟรช`)
+    const message = jobAvailabilityError(job, date)
+    const isExistingAssignment = savedDay.entries.some(saved => saved.employee_id === entry.employee_id
+      && saved.shift_index === entry.shift_index && saved.job_id === entry.job_id)
+    if (message && !isExistingAssignment) throw new Error(message)
+  }
   const entriesPayload = day.entries.map((e:Entry)=>({
     employee_id:e.employee_id,
     shift_index:e.shift_index,

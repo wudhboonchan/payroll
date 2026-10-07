@@ -1,3 +1,4 @@
+import { invalidateTpiAttendanceAndShifts } from '../features/tpi/attendanceCache'
 import React, { useState, useMemo } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -33,7 +34,7 @@ import {
 } from '../features/tpi/attendanceApi'
 import { AttendanceEntryModal } from '../features/tpi/AttendanceEntryModal'
 import { EmployeeAttendanceHistoryModal } from '../features/tpi/EmployeeAttendanceHistoryModal'
-import { formatEmployeeFullName, formatThaiDateShort } from '../lib/formatters'
+import { filterActivePeriods, formatEmployeeFullName, formatThaiDateShort } from '../lib/formatters'
 import '../styles/tokens.css'
 
 const THAI_MONTH_NAMES = [
@@ -47,16 +48,50 @@ export default function TpiAttendance() {
   const { user, companyContext } = useAppStore()
   const queryClient = useQueryClient()
 
-  // ── Month Selection State (Separate Year & Month) ──
+  // Use the same latest payroll period as TpiPayrollEntry and TpiShiftEntry.
+  const { data: rawPeriods = [], isPending: isPeriodsPending } = useQuery<Array<{ id: string; period_start: string; period_end: string; status: string; label: string }>>({
+    queryKey: ['periods', user?.factory_id],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('payroll_periods').select('*')
+        .eq('factory_id', user?.factory_id ?? '').order('period_start', { ascending: false })
+      if (error) throw error
+      return data || []
+    },
+    enabled: !!user?.factory_id,
+  })
+  const periods = useMemo(() => filterActivePeriods(rawPeriods), [rawPeriods])
+  const currentPeriod = periods[0]
   const now = new Date()
   const currentYear = now.getFullYear()
-  const currentMonth = now.getMonth() + 1 // 1-12
-
-  const [selectedYear, setSelectedYear] = useState<number>(currentYear)
-  const [selectedMonth, setSelectedMonth] = useState<number>(currentMonth)
-
+  const currentMonth = now.getMonth() + 1
+  const periodYear = Number(currentPeriod?.period_start.slice(0, 4)) || currentYear
+  const periodMonth = Number(currentPeriod?.period_start.slice(5, 7)) || currentMonth
+  const monthContext = `${user?.factory_id}:${currentPeriod?.id || 'none'}:${currentPeriod?.period_start || ''}`
+  const [monthOverride, setMonthOverride] = useState<{ context: string; year: number; month: number } | null>(null)
+  const selectedYear = monthOverride?.context === monthContext ? monthOverride.year : periodYear
+  const selectedMonth = monthOverride?.context === monthContext ? monthOverride.month : periodMonth
+  const setSelectedYear = (value: React.SetStateAction<number>) => setMonthOverride({
+    context: monthContext, year: typeof value === 'function' ? value(selectedYear) : value, month: selectedMonth,
+  })
+  const setSelectedMonth = (value: React.SetStateAction<number>) => setMonthOverride({
+    context: monthContext, year: selectedYear, month: typeof value === 'function' ? value(selectedMonth) : value,
+  })
   const selectedYearMonth = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`
-  const isCurrentMonth = selectedYear === currentYear && selectedMonth === currentMonth
+  const isPeriodMonth = selectedYear === periodYear && selectedMonth === periodMonth
+  const minYear = Math.min(currentYear - 4, ...periods.map(p => Number(p.period_start.slice(0, 4))))
+  const maxYear = Math.max(currentYear + 4, periodYear)
+
+  const { data: pendingLogs = [] } = useQuery<AttendanceLog[]>({
+    queryKey: ['tpi-pending-attendance', user?.factory_id, 'records'],
+    enabled: !!user?.factory_id,
+    queryFn: async () => {
+      const { data, error } = await (supabase as any).from('tpi_attendance_logs')
+        .select('*, employee:employees(id,employee_code,first_name,last_name,position,nationality)')
+        .eq('factory_id', user!.factory_id).eq('workflow_status', 'pending').order('work_date')
+      if (error) throw error
+      return data || []
+    },
+  })
 
   // ── Search & Filter State ──
   const [searchTerm, setSearchTerm] = useState('')
@@ -81,14 +116,11 @@ export default function TpiAttendance() {
   const [itemToDelete, setItemToDelete] = useState<AttendanceLog | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
 
-  // ── Year Options for Dropdown (เริ่มต้นที่ปีปัจจุบัน และสร้างปีอนาคต) ──
   const yearOptions = useMemo(() => {
     const years: number[] = []
-    for (let y = currentYear; y <= currentYear + 4; y++) {
-      years.push(y)
-    }
+    for (let y = minYear; y <= maxYear; y++) years.push(y)
     return years
-  }, [currentYear])
+  }, [minYear, maxYear])
 
   // Calculate start and end date for selected month
   const { startDate, endDate } = useMemo(() => {
@@ -106,9 +138,8 @@ export default function TpiAttendance() {
   // Navigate to previous / next month (ไม่ย้อนไปก่อนปีปัจจุบัน)
   const handlePrevMonth = () => {
     if (selectedMonth === 1) {
-      if (selectedYear > currentYear) {
-        setSelectedMonth(12)
-        setSelectedYear(prev => prev - 1)
+      if (selectedYear > minYear) {
+        setMonthOverride({ context: monthContext, year: selectedYear - 1, month: 12 })
       }
     } else {
       setSelectedMonth(prev => prev - 1)
@@ -117,19 +148,15 @@ export default function TpiAttendance() {
 
   const handleNextMonth = () => {
     if (selectedMonth === 12) {
-      if (selectedYear < currentYear + 4) {
-        setSelectedMonth(1)
-        setSelectedYear(prev => prev + 1)
+      if (selectedYear < maxYear) {
+        setMonthOverride({ context: monthContext, year: selectedYear + 1, month: 1 })
       }
     } else {
       setSelectedMonth(prev => prev + 1)
     }
   }
 
-  const handleResetCurrentMonth = () => {
-    setSelectedYear(currentYear)
-    setSelectedMonth(currentMonth)
-  }
+  const handleResetPeriodMonth = () => setMonthOverride(null)
 
   // ── Fetch Employees for Dropdown / Form ──
   const { data: employees = [] } = useQuery({
@@ -158,7 +185,7 @@ export default function TpiAttendance() {
       if (!user?.factory_id) return []
       return await loadMonthlyAttendanceLogs(user.factory_id, startDate, endDate)
     },
-    enabled: !!user?.factory_id,
+    enabled: !!user?.factory_id && !isPeriodsPending,
   })
 
   // ── Summary Metrics for the Selected Month ──
@@ -294,8 +321,7 @@ export default function TpiAttendance() {
       )
       setItemToDelete(null)
       refetchLogs()
-      queryClient.invalidateQueries({ queryKey: ['tpi-monthly-attendance'] })
-      queryClient.invalidateQueries({ queryKey: ['tpi-daily-attendance'] })
+      await invalidateTpiAttendanceAndShifts(queryClient)
     } catch (err: any) {
       console.error('Error deleting attendance log:', err)
       toast.error(err.message || 'ไม่สามารถลบรายการได้')
@@ -333,10 +359,35 @@ export default function TpiAttendance() {
       }}
     >
       {/* 1. Header Bar */}
-      <TopBar title="ขาด / ลา / มาสาย" onMenuClick={onMenuClick} />
+      <TopBar title="ขาด / ลา / มาสาย" subtitle={currentPeriod?.label || undefined} onMenuClick={onMenuClick} />
+
 
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
         <div style={{ padding: '20px 24px 60px', maxWidth: 1400, width: '100%', margin: '0 auto' }}>
+          {pendingLogs.length > 0 && (
+            <section className="vk-attendance-pending" aria-label="รายการรอกรอกเหตุผล">
+              <div className="vk-attendance-pending__heading">
+                <Clock size={16} aria-hidden="true" />
+                <strong>รอกรอกเหตุผล {pendingLogs.length} รายการ</strong>
+                <span>รายการค้างจากทุกเดือน</span>
+              </div>
+              <div className="vk-attendance-pending__list">
+                {pendingLogs.map(log => (
+                  <div key={log.id} className="vk-attendance-pending__row">
+                    <div className="vk-attendance-pending__details">
+                      <span className="vk-attendance-pending__date">{formatThaiDateShort(log.work_date)}</span>
+                      <span>{log.employee?.employee_code} · {log.employee ? formatEmployeeFullName(log.employee as any, true) : 'ไม่พบข้อมูลพนักงาน'}</span>
+                      <span className="vk-attendance-pending__hours">หัก {log.deducted_hours} ชม.</span>
+                    </div>
+                    <button type="button" className="vk-attendance-pending__action" onClick={() => { setEditingLog(log); setIsEntryModalOpen(true) }}>
+                      กรอกเหตุผลและเลือกประเภท →
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
           {/* Header Row: Title & Actions */}
           <div
             style={{
@@ -435,7 +486,7 @@ export default function TpiAttendance() {
               <button
                 type="button"
                 onClick={handlePrevMonth}
-                disabled={selectedYear === currentYear && selectedMonth === 1}
+                disabled={selectedYear === minYear && selectedMonth === 1}
                 title="เดือนก่อนหน้า"
                 className="vk-btn vk-btn--ghost"
                 style={{
@@ -446,8 +497,8 @@ export default function TpiAttendance() {
                   alignItems: 'center',
                   justifyContent: 'center',
                   borderRadius: 6,
-                  opacity: selectedYear === currentYear && selectedMonth === 1 ? 0.35 : 1,
-                  cursor: selectedYear === currentYear && selectedMonth === 1 ? 'not-allowed' : 'pointer',
+                  opacity: selectedYear === minYear && selectedMonth === 1 ? 0.35 : 1,
+                  cursor: selectedYear === minYear && selectedMonth === 1 ? 'not-allowed' : 'pointer',
                 }}
               >
                 <ChevronLeft style={{ width: 16, height: 16 }} />
@@ -507,7 +558,7 @@ export default function TpiAttendance() {
               <button
                 type="button"
                 onClick={handleNextMonth}
-                disabled={selectedYear === currentYear + 4 && selectedMonth === 12}
+                disabled={selectedYear === maxYear && selectedMonth === 12}
                 title="เดือนถัดไป"
                 className="vk-btn vk-btn--ghost"
                 style={{
@@ -518,17 +569,17 @@ export default function TpiAttendance() {
                   alignItems: 'center',
                   justifyContent: 'center',
                   borderRadius: 6,
-                  opacity: selectedYear === currentYear + 4 && selectedMonth === 12 ? 0.35 : 1,
-                  cursor: selectedYear === currentYear + 4 && selectedMonth === 12 ? 'not-allowed' : 'pointer',
+                  opacity: selectedYear === maxYear && selectedMonth === 12 ? 0.35 : 1,
+                  cursor: selectedYear === maxYear && selectedMonth === 12 ? 'not-allowed' : 'pointer',
                 }}
               >
                 <ChevronRight style={{ width: 16, height: 16 }} />
               </button>
 
-              {!isCurrentMonth && (
+              {!isPeriodMonth && (
                 <button
                   type="button"
-                  onClick={handleResetCurrentMonth}
+                  onClick={handleResetPeriodMonth}
                   style={{
                     fontSize: 11,
                     fontWeight: 600,
@@ -540,7 +591,7 @@ export default function TpiAttendance() {
                     padding: '2px 4px',
                   }}
                 >
-                  กลับไปเดือนปัจจุบัน
+                  กลับไปเดือนของงวดค่าจ้าง
                 </button>
               )}
             </div>
@@ -986,6 +1037,7 @@ export default function TpiAttendance() {
                                 สาย {item.minutes_late} นาที
                               </span>
                             ) : null}
+                            {item.workflow_status === 'pending' && <strong style={{ color: '#b45309' }}>รอกรอกเหตุผล (pending) · หัก {item.deducted_hours} ชม. </strong>}
                             {item.reason ? (
                               <span>{item.reason}</span>
                             ) : item.minutes_late ? null : (
@@ -1261,10 +1313,11 @@ export default function TpiAttendance() {
           setEditingLog(null)
         }}
         factoryId={user?.factory_id || ''}
-        defaultDate={`${selectedYearMonth}-01`}
+        defaultDate={isPeriodMonth && currentPeriod ? currentPeriod.period_start : `${selectedYearMonth}-01`}
         initialLog={editingLog}
         employees={employees}
         onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ['tpi-pending-attendance'] })
           refetchLogs()
           queryClient.invalidateQueries({ queryKey: ['tpi-monthly-attendance'] })
           queryClient.invalidateQueries({ queryKey: ['tpi-daily-attendance'] })
@@ -1332,7 +1385,7 @@ export default function TpiAttendance() {
                   color: '#991b1b',
                 }}
               >
-                เมื่อลบแล้ว สิทธิ์เบี้ยขยันของพนักงานในเดือนนี้จะถูกคำนวณใหม่โดยอัตโนมัติ
+                {itemToDelete.source === 'shift' ? 'เมื่อลบแล้ว จะยกเลิกการหักชั่วโมงของพนักงานในวันนั้น คืนค่าแรงเต็มกะ และนำรายการออกจากคำเตือนงานค้าง' : 'เมื่อลบแล้ว สิทธิ์เบี้ยขยันของพนักงานในเดือนนี้จะถูกคำนวณใหม่โดยอัตโนมัติ'}
               </div>
             </div>
 

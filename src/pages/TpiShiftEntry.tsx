@@ -1,3 +1,4 @@
+import { invalidateTpiAttendanceAndShifts } from '../features/tpi/attendanceCache'
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useOutletContext, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -590,6 +591,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
   const [modalEmp, setModalEmp] = useState<Employee | null>(null)
   const [modalShift1JobId, setModalShift1JobId] = useState<string>('')
   const [modalShift1Index, setModalShift1Index] = useState<number>(0)
+  const [modalShift1DeductHours, setModalShift1DeductHours] = useState<number>(1)
   const [modalShift1IsHalf, setModalShift1IsHalf] = useState<boolean>(false)
   const [modalShift1HasOt, setModalShift1HasOt] = useState<boolean>(false)
   const [modalShift1OtHours, setModalShift1OtHours] = useState<number>(1)
@@ -598,6 +600,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
   const [modalHasShift2, setModalHasShift2] = useState<boolean>(false)
   const [modalShift2JobId, setModalShift2JobId] = useState<string>('')
   const [modalShift2Index, setModalShift2Index] = useState<number>(1)
+  const [modalShift2DeductHours, setModalShift2DeductHours] = useState<number>(1)
   const [modalShift2IsHalf, setModalShift2IsHalf] = useState<boolean>(false)
   const [modalShift2HasOt, setModalShift2HasOt] = useState<boolean>(false)
   const [modalShift2OtHours, setModalShift2OtHours] = useState<number>(1)
@@ -993,6 +996,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
       setModalShift1JobId(defaultJobId)
       setModalShift1Index(0)
       setModalShift1IsHalf(false)
+      setModalShift1DeductHours(1)
       setModalShift1HasOt(false)
       setModalShift1OtHours(defaultOtHours)
       setModalShift1OtBeforeShift(false)
@@ -1001,13 +1005,15 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
       setModalShift2JobId(defaultJobId)
       setModalShift2Index(1)
       setModalShift2IsHalf(false)
+      setModalShift2DeductHours(1)
       setModalShift2HasOt(false)
       setModalShift2OtHours(defaultOtHours)
     } else if (empEntries.length === 1) {
       const s1 = empEntries[0]
       setModalShift1JobId(s1.job_id)
       setModalShift1Index(s1.shift_index)
-      setModalShift1IsHalf(!!s1.is_half_shift)
+      setModalShift1IsHalf((s1.actual_hours ?? (s1.is_half_shift ? 4 : 8)) < 8)
+      setModalShift1DeductHours(Math.max(1, Math.min(7, 8 - (s1.actual_hours ?? (s1.is_half_shift ? 4 : 8)))))
       setModalShift1HasOt(!!(s1.ot_hours && s1.ot_hours > 0))
       setModalShift1OtHours(s1.ot_hours || defaultOtHours)
       setModalShift1OtBeforeShift(!!s1.is_ot_before_shift)
@@ -1016,6 +1022,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
       setModalShift2JobId(s1.job_id)
       setModalShift2Index((s1.shift_index + 1) % 3)
       setModalShift2IsHalf(false)
+      setModalShift2DeductHours(1)
       setModalShift2HasOt(false)
       setModalShift2OtHours(defaultOtHours)
     } else {
@@ -1023,7 +1030,8 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
       const s2 = empEntries[1]
       setModalShift1JobId(s1.job_id)
       setModalShift1Index(s1.shift_index)
-      setModalShift1IsHalf(!!s1.is_half_shift)
+      setModalShift1IsHalf((s1.actual_hours ?? (s1.is_half_shift ? 4 : 8)) < 8)
+      setModalShift1DeductHours(Math.max(1, Math.min(7, 8 - (s1.actual_hours ?? (s1.is_half_shift ? 4 : 8)))))
       // 2 shifts (16h) cannot do OT
       setModalShift1HasOt(false)
       setModalShift1OtHours(defaultOtHours)
@@ -1032,7 +1040,8 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
       setModalHasShift2(true)
       setModalShift2JobId(s2.job_id)
       setModalShift2Index(s2.shift_index)
-      setModalShift2IsHalf(!!s2.is_half_shift)
+      setModalShift2IsHalf((s2.actual_hours ?? (s2.is_half_shift ? 4 : 8)) < 8)
+      setModalShift2DeductHours(Math.max(1, Math.min(7, 8 - (s2.actual_hours ?? (s2.is_half_shift ? 4 : 8)))))
       setModalShift2HasOt(false)
       setModalShift2OtHours(defaultOtHours)
     }
@@ -1258,8 +1267,8 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
         employee_id: modalEmp.id,
         job_id: modalShift1JobId,
         shift_index: modalShift1Index,
-        is_half_shift: modalShift1IsHalf,
-        actual_hours: modalShift1IsHalf ? 4 : 8,
+        is_half_shift: false,
+        actual_hours: modalShift1IsHalf ? 8 - modalShift1DeductHours : 8,
         ot_hours: ot1.ot_hours,
         ot_pay: ot1.ot_pay,
         is_ot_before_shift: (!modalHasShift2 && modalShift1HasOt) ? modalShift1OtBeforeShift : false,
@@ -1291,8 +1300,8 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
         employee_id: modalEmp.id,
         job_id: modalShift2JobId,
         shift_index: modalShift2Index,
-        is_half_shift: modalShift2IsHalf,
-        actual_hours: modalShift2IsHalf ? 4 : 8,
+        is_half_shift: false,
+        actual_hours: modalShift2IsHalf ? 8 - modalShift2DeductHours : 8,
         ot_hours: 0,
         ot_pay: 0,
         is_ot_before_shift: false,
@@ -1507,7 +1516,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
       if (!emp) return null
 
       const empDoubleEntries = entries.filter((e) => e.employee_id === empId && e.job_id === jobId)
-      const hasHalf = empDoubleEntries.some((e) => e.is_half_shift)
+      const hasHalf = empDoubleEntries.some((e) => (e.actual_hours ?? (e.is_half_shift ? 4 : 8)) < 8)
       const hasOt = empDoubleEntries.some((e) => (e.ot_hours ?? 0) > 0)
       const totalOtHrs = empDoubleEntries.reduce((sum, e) => sum + (e.ot_hours || 0), 0)
       const isAnyPending = empDoubleEntries.some((e) => !!e.is_pending)
@@ -1569,7 +1578,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                   </span>
                 )}
                 <span className="vk-double-badge">ควบกะเช้า + กะบ่าย</span>
-                {hasHalf && <span className="vk-tpi-wp-half">ครึ่งกะ</span>}
+                {hasHalf && <span className="vk-tpi-wp-half">ไม่เต็มกะ</span>}
                 {hasOt && (
                   <span className="vk-tpi-wp-ot">
                     OT {totalOtHrs} ชม.
@@ -1664,7 +1673,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                   </span>
                 )}
                 <span className="vk-double-badge">ควบกะบ่าย + กะดึก</span>
-                {hasHalf && <span className="vk-tpi-wp-half">ครึ่งกะ</span>}
+                {hasHalf && <span className="vk-tpi-wp-half">ไม่เต็มกะ</span>}
                 {hasOt && (
                   <span className="vk-tpi-wp-ot">
                     OT {totalOtHrs} ชม.
@@ -1761,7 +1770,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                   </span>
                 )}
                 <span className="vk-double-badge">ควบเช้า + ดึก</span>
-                {hasHalf && <span className="vk-tpi-wp-half">ครึ่งกะ</span>}
+                {hasHalf && <span className="vk-tpi-wp-half">ไม่เต็มกะ</span>}
                 {hasOt && (
                   <span className="vk-tpi-wp-ot">
                     OT {totalOtHrs} ชม.
@@ -1857,7 +1866,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                   </span>
                 )}
                 <span className="vk-double-badge">ควบเช้า + ดึก</span>
-                {hasHalf && <span className="vk-tpi-wp-half">ครึ่งกะ</span>}
+                {hasHalf && <span className="vk-tpi-wp-half">ไม่เต็มกะ</span>}
                 {hasOt && (
                   <span className="vk-tpi-wp-ot">
                     OT {totalOtHrs} ชม.
@@ -2020,6 +2029,9 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
       return true
     },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tpi-pending-attendance'] })
+      queryClient.invalidateQueries({ queryKey: ['tpi-monthly-attendance'] })
+      queryClient.invalidateQueries({ queryKey: ['tpi-daily-attendance'] })
       setStoredHoliday(user?.factory_id, activeDateStr, isHoliday)
       queryClient.invalidateQueries({ queryKey: ['tpi-jobs', user?.factory_id] })
       queryClient.invalidateQueries({ queryKey: ['tpi-shift-day', user?.factory_id, activeDateStr] })
@@ -2784,9 +2796,9 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                                                   2 กะ
                                                 </span>
                                               )}
-                                              {entry.is_half_shift && (
-                                                <span className="vk-tpi-wp-half" title="ทำงานครึ่งกะ (4 ชม.) ลาครึ่งวัน">
-                                                  ครึ่งกะ 4 ชม.
+                                              {(entry.actual_hours ?? (entry.is_half_shift ? 4 : 8)) < 8 && (
+                                                <span className="vk-tpi-wp-half" title="ทำงานไม่เต็มกะ">
+                                                  หัก {8 - (entry.actual_hours ?? 4)} ชม.
                                                 </span>
                                               )}
                                               {(Number(entry.ot_hours) || 0) > 0 && (
@@ -3063,9 +3075,9 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                                                   2 กะ
                                                 </span>
                                               )}
-                                              {entry.is_half_shift && (
-                                                <span className="vk-tpi-wp-half" title="ทำงานครึ่งกะ (4 ชม.) ลาครึ่งวัน">
-                                                  ครึ่งกะ 4 ชม.
+                                              {(entry.actual_hours ?? (entry.is_half_shift ? 4 : 8)) < 8 && (
+                                                <span className="vk-tpi-wp-half" title="ทำงานไม่เต็มกะ">
+                                                  หัก {8 - (entry.actual_hours ?? 4)} ชม.
                                                 </span>
                                               )}
                                               {(Number(entry.ot_hours) || 0) > 0 && (
@@ -3192,12 +3204,12 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
           ? (modalTier === 'skilled' ? (modalOtJob?.skilled_rate ?? 377) : (modalOtJob?.normal_rate ?? 357))
           : (modalTier === 'skilled' && modalOtJob?.skilled_rate ? modalOtJob.skilled_rate : (modalOtJob?.normal_rate || 357))
 
-        const modalShift1Wage = modalShift1IsHalf ? modalBaseRate1 / 2 : modalBaseRate1
+        const modalShift1Wage = modalShift1IsHalf ? modalBaseRate1 - Math.ceil(modalBaseRate1 / 8) * modalShift1DeductHours : modalBaseRate1
         const modalShift1OtCalc = modalShift1HasOt
           ? calculateEntryOt(modalShift1OtHours, modalOtBaseRate)
           : { ot_hours: 0, ot_pay: 0 }
 
-        const modalShift2Wage = modalShift2IsHalf ? modalBaseRate2 / 2 : modalBaseRate2
+        const modalShift2Wage = modalShift2IsHalf ? modalBaseRate2 - Math.ceil(modalBaseRate2 / 8) * modalShift2DeductHours : modalBaseRate2
 
         return (
           <div className="vk-modal-backdrop" onClick={() => setModalEmp(null)}>
@@ -3380,7 +3392,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                         onChange={(e) => setModalShift1IsHalf(e.target.checked)}
                         style={{ accentColor: '#d97706', width: 15, height: 15 }}
                       />
-                      <span>ทำงานครึ่งกะ / ลาครึ่งวัน (4 ชม.)</span>
+                      <span>ทำงานไม่เต็มกะ</span>
                     </label>
                     <span
                       style={{
@@ -3389,9 +3401,28 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                         color: modalShift1IsHalf ? '#b45309' : '#64748b',
                       }}
                     >
-                      {modalShift1IsHalf ? 'คิดค่าแรง 50% (4 ชม.)' : 'เต็มกะ (8 ชม.)'}
+                      {modalShift1IsHalf ? `หัก ${modalShift1DeductHours} ชม.` : 'เต็มกะ (8 ชม.)'}
                     </span>
                   </div>
+
+                  {modalShift1IsHalf && (
+                    <div className="vk-hour-deduction">
+                      <div className="vk-hour-deduction__top">
+                        <label className="vk-hour-deduction__field" htmlFor="shift-1-deduct-hours">
+                          <span>จำนวนชั่วโมงที่หัก</span>
+                          <select id="shift-1-deduct-hours" className="vk-modal-select" value={modalShift1DeductHours} onChange={e => setModalShift1DeductHours(Number(e.target.value))}>
+                            {[1, 2, 3, 4, 5, 6, 7].map(h => <option key={h} value={h}>{h} ชม.</option>)}
+                          </select>
+                        </label>
+                        <span className="vk-hour-deduction__rate">อัตราหัก <strong>{Math.ceil(modalBaseRate1 / 8).toLocaleString('th-TH')} บาท/ชม.</strong></span>
+                      </div>
+                      <div className="vk-hour-deduction__summary" aria-live="polite">
+                        <div><span>หักค่าแรง {modalShift1DeductHours} ชม.</span><strong className="vk-hour-deduction__amount">−{(Math.ceil(modalBaseRate1 / 8) * modalShift1DeductHours).toLocaleString('th-TH')} บาท</strong></div>
+                        <div><span>ค่าแรงคงเหลือ</span><strong>{modalShift1Wage.toLocaleString('th-TH')} บาท</strong></div>
+                      </div>
+                      <p className="vk-hour-deduction__note">หลังบันทึกกะ กรุณาเลือกประเภทและกรอกเหตุผลที่หน้าบันทึกขาดลามาสาย</p>
+                    </div>
+                  )}
 
                   {/* OT Section for Shift 1 — identical UI for all positions */}
                   <div
@@ -3735,7 +3766,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                             onChange={(e) => setModalShift2IsHalf(e.target.checked)}
                             style={{ accentColor: '#d97706', width: 15, height: 15 }}
                           />
-                          <span>ทำงานครึ่งกะ / ลาครึ่งวัน (4 ชม.)</span>
+                          <span>ทำงานไม่เต็มกะ</span>
                         </label>
                         <span
                           style={{
@@ -3744,9 +3775,28 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                             color: modalShift2IsHalf ? '#b45309' : '#64748b',
                           }}
                         >
-                          {modalShift2IsHalf ? 'คิดค่าแรง 50% (4 ชม.)' : 'เต็มกะ (8 ชม.)'}
+                          {modalShift2IsHalf ? `หัก ${modalShift2DeductHours} ชม.` : 'เต็มกะ (8 ชม.)'}
                         </span>
                       </div>
+
+                      {modalShift2IsHalf && (
+                    <div className="vk-hour-deduction">
+                      <div className="vk-hour-deduction__top">
+                        <label className="vk-hour-deduction__field" htmlFor="shift-2-deduct-hours">
+                          <span>จำนวนชั่วโมงที่หัก</span>
+                          <select id="shift-2-deduct-hours" className="vk-modal-select" value={modalShift2DeductHours} onChange={e => setModalShift2DeductHours(Number(e.target.value))}>
+                            {[1, 2, 3, 4, 5, 6, 7].map(h => <option key={h} value={h}>{h} ชม.</option>)}
+                          </select>
+                        </label>
+                        <span className="vk-hour-deduction__rate">อัตราหัก <strong>{Math.ceil(modalBaseRate2 / 8).toLocaleString('th-TH')} บาท/ชม.</strong></span>
+                      </div>
+                      <div className="vk-hour-deduction__summary" aria-live="polite">
+                        <div><span>หักค่าแรง {modalShift2DeductHours} ชม.</span><strong className="vk-hour-deduction__amount">−{(Math.ceil(modalBaseRate2 / 8) * modalShift2DeductHours).toLocaleString('th-TH')} บาท</strong></div>
+                        <div><span>ค่าแรงคงเหลือ</span><strong>{modalShift2Wage.toLocaleString('th-TH')} บาท</strong></div>
+                      </div>
+                      <p className="vk-hour-deduction__note">หลังบันทึกกะ กรุณาเลือกประเภทและกรอกเหตุผลที่หน้าบันทึกขาดลามาสาย</p>
+                    </div>
+                  )}
 
                       {/* Shift 2 16h limit notice — no OT allowed for 2 shifts */}
                       <div
@@ -5065,6 +5115,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
         workDate={activeDateStr}
         employees={employees}
         onChanged={() => {
+          invalidateTpiAttendanceAndShifts(queryClient)
           refetchAttendance()
         }}
       />

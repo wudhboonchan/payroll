@@ -713,3 +713,116 @@ input[type="date"].vk-input::-webkit-calendar-picker-indicator,
   margin: auto 0 auto auto !important;
   cursor: pointer;
 }
+
+/* Dashboard: attendance work awaiting completion, distinct from yellow warnings. */
+.vk-dashboard-pending-attendance {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 10px 14px;
+  border: 1px solid var(--vk-auto);
+  border-radius: var(--vk-r1);
+  background: var(--vk-auto-tint);
+  color: #36556d;
+  font-family: var(--vk-sans);
+}
+.vk-dashboard-pending-attendance__icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--vk-auto);
+}
+.vk-dashboard-pending-attendance__content { flex: 1; min-width: 0; }
+.vk-dashboard-pending-attendance__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.vk-dashboard-pending-attendance__header button {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: #36556d;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.vk-dashboard-pending-attendance__header button:hover { color: var(--vk-ink); }
+.vk-dashboard-pending-attendance__header button:focus-visible {
+  outline: 2px solid var(--vk-auto);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+.vk-dashboard-pending-attendance p {
+  margin: 3px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.vk-attendance-pending {
+  margin-bottom: 20px;
+  padding: 12px 16px;
+  border: 1px solid var(--vk-auto);
+  border-radius: var(--vk-r1);
+  background: var(--vk-auto-tint);
+  color: #36556d;
+  font-family: var(--vk-sans);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.vk-attendance-pending__heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  font-size: 13px;
+}
+.vk-attendance-pending__heading > span { font-size: 11px; font-weight: 400; }
+.vk-attendance-pending__list { margin-top: 10px; }
+.vk-attendance-pending__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 8px 0;
+  border-top: 1px solid rgba(74, 110, 138, 0.2);
+}
+.vk-attendance-pending__details {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  min-width: 0;
+}
+.vk-attendance-pending__date { font-size: 11px; }
+.vk-attendance-pending__hours {
+  padding: 1px 7px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.5);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.vk-attendance-pending__action {
+  padding: 5px 10px;
+  border: 1px solid var(--vk-auto);
+  border-radius: var(--vk-r1);
+  background: var(--vk-bone);
+  color: #36556d;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+  cursor: pointer;
+}
+.vk-attendance-pending__action:hover { background: #fff; color: var(--vk-ink); }
+.vk-attendance-pending__action:focus-visible { outline: 2px solid var(--vk-auto); outline-offset: 3px; }

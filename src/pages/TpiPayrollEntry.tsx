@@ -1,3 +1,4 @@
+import { resolveDiligence, diligenceOverrideReason, formatDiligenceOverride } from '../features/tpi/diligence'
 import { DeductionProductPicker } from '../components/payroll/DeductionProductPicker'
 import { formatSafetyEquipmentDetail, formatUniformDetail } from '../lib/deductionProducts'
 import React, { useState, useMemo, useEffect } from 'react'
@@ -469,6 +470,7 @@ export default function TpiPayrollEntry() {
   const [overrideNormal, setOverrideNormal] = useState<number | null>(null)
   const [overrideShift, setOverrideShift] = useState<number | null>(null)
   const [overrideSafety, setOverrideSafety] = useState<number | null>(null)
+  const [diligenceReason, setDiligenceReason] = useState('')
   const [overrideDiligence, setOverrideDiligence] = useState<number | null>(null)
   const [editingSafety, setEditingSafety] = useState(false)
   const [editingDiligence, setEditingDiligence] = useState(false)
@@ -491,6 +493,7 @@ export default function TpiPayrollEntry() {
   const isForeigner = !!selectedEmp?.nationality && selectedEmp.nationality !== 'ไทย'
   const isDiligenceWaived = isEndMonth && !!currentPeriod?.waive_foreign_diligence && isForeigner
   const defaultDiligence = (isEndMonth && empAttendanceLogs.length === 0 && !isDiligenceWaived) ? 300 : 0
+  const effectiveDiligence = overrideDiligence ?? defaultDiligence
   const monthCycle = formatMonthlyCycleRange(currentPeriod?.period_end)
 
   useEffect(() => {
@@ -540,30 +543,10 @@ export default function TpiPayrollEntry() {
       setOverrideSafety(hasSafetyOverride ? safeAmt : null)
       setEditingSafety(false)
 
-      // 2. Diligence allowance autofill & override detection
-      let dilAmt = defaultDilLocal
-      let hasDilOverride = false
-      if (existingEntry.override_reason?.includes('เบี้ยขยัน')) {
-        const m = existingEntry.override_reason.match(/เบี้ยขยัน:\s*฿?([\d,]+)/)
-        if (m) {
-          dilAmt = Number(m[1].replace(/,/g, ''))
-          hasDilOverride = true
-        } else if (existingEntry.amount_diligence != null) {
-          dilAmt = Number(existingEntry.amount_diligence)
-          hasDilOverride = true
-        }
-      } else if (isDiligenceWaivedLocal) {
-        // Special case: When diligence is waived for foreign workers and no explicit override exists, force 0
-        dilAmt = 0
-        hasDilOverride = false
-      } else if (
-        existingEntry.amount_diligence != null &&
-        Number(existingEntry.amount_diligence) !== defaultDilLocal
-      ) {
-        dilAmt = Number(existingEntry.amount_diligence)
-        hasDilOverride = true
-      }
-      setOverrideDiligence(hasDilOverride ? dilAmt : null)
+      // Only an explicit saved override is manual; stale automatic amounts follow current eligibility.
+      const { amount: dilAmt, override: diligenceOverride } = resolveDiligence(defaultDilLocal, existingEntry)
+      setOverrideDiligence(diligenceOverride)
+      setDiligenceReason(diligenceOverride !== null ? diligenceOverrideReason(existingEntry) : '')
       setEditingDiligence(false)
       setEditingUniform(false)
       setEditingSafetyEquip(false)
@@ -581,6 +564,7 @@ export default function TpiPayrollEntry() {
       setOverrideShift(null)
       setOverrideSafety(null)
       setOverrideDiligence(null)
+      setDiligenceReason('')
       setEditingSafety(false)
       setEditingDiligence(false)
       setEditingUniform(false)
@@ -610,7 +594,7 @@ export default function TpiPayrollEntry() {
         override_shift: overrideShift,
       },
       extras: {
-        amount_diligence: extraEntries.amount_diligence,
+        amount_diligence: effectiveDiligence,
         amount_position: extraEntries.amount_position,
         amount_special: (extraEntries.amount_safety || 0) + (extraEntries.amount_other_special || 0),
         special_note: specialNote,
@@ -618,7 +602,7 @@ export default function TpiPayrollEntry() {
         deduct_uniform: extraEntries.deduct_uniform,
       },
     })
-  }, [selectedEmp, empShifts, empAdvances, currentPeriod, overrideNormal, overrideShift, extraEntries, specialNote])
+  }, [selectedEmp, empShifts, empAdvances, currentPeriod, overrideNormal, overrideShift, extraEntries, specialNote, effectiveDiligence])
 
   // ── Outdated Detection across all employees ──
   const [outdatedSet, outdatedReasonsMap] = useMemo(() => {
@@ -633,6 +617,11 @@ export default function TpiPayrollEntry() {
       const shifts = allTpiShifts.filter(s => s.employee_id === emp.id)
       const advances = allAdvances.filter(a => a.employee_id === emp.id)
 
+      const employeeHasAttendance = (attendanceByEmp.get(emp.id)?.length || 0) > 0
+      const employeeIsForeign = !!emp.nationality && emp.nationality !== 'ไทย'
+      const employeeDiligenceDefault = isEndMonth && !employeeHasAttendance
+        && !(currentPeriod.waive_foreign_diligence && employeeIsForeign) ? 300 : 0
+      const currentDiligence = resolveDiligence(employeeDiligenceDefault, entry).amount
       const result = calculateTpiPayroll({
         employee: emp,
         shifts,
@@ -643,7 +632,7 @@ export default function TpiPayrollEntry() {
           override_shift: entry.override_shift != null ? Number(entry.override_shift) : null,
         },
         extras: {
-          amount_diligence: Number(entry.amount_diligence || 0),
+          amount_diligence: currentDiligence,
           amount_position: Number(entry.amount_position || 0),
           amount_special: Number(entry.amount_special || 0),
           special_note: entry.special_note || '',
@@ -674,10 +663,8 @@ export default function TpiPayrollEntry() {
       if (Math.abs((result.amountSpecial || 0) - Number(entry.amount_special || 0)) > eps) {
         diffs.push(`เงินพิเศษ (คำนวณ ฿${result.amountSpecial} ≠ บันทึก ฿${Number(entry.amount_special || 0)})`)
       }
-      const isForeign = !!emp.nationality && emp.nationality !== 'ไทย'
-      const isWaived = isEndMonth && !!currentPeriod.waive_foreign_diligence && isForeign
-      if (isWaived && Number(entry.amount_diligence || 0) > eps && !entry.override_reason?.includes('เบี้ยขยัน')) {
-        diffs.push(`เบี้ยขยัน (ตั้งค่างดจ่ายพนักงานต่างชาติ แต่พบยอดบันทึก ฿${Number(entry.amount_diligence).toLocaleString()})`)
+      if (Math.abs(currentDiligence - Number(entry.amount_diligence || 0)) > eps) {
+        diffs.push(`เบี้ยขยัน (ตามเกณฑ์ ฿${currentDiligence.toLocaleString()} ≠ บันทึก ฿${Number(entry.amount_diligence || 0).toLocaleString()})`)
       }
 
       if (diffs.length > 0) {
@@ -686,7 +673,7 @@ export default function TpiPayrollEntry() {
       }
     }
     return [set, reasonsMap]
-  }, [allEntries, allTpiShifts, allAdvances, employees, currentPeriod])
+  }, [allEntries, allTpiShifts, allAdvances, employees, currentPeriod, attendanceByEmp, isEndMonth])
 
   const isOutdated = outdatedSet.has(selectedEmpId ?? '')
 
@@ -726,7 +713,7 @@ export default function TpiPayrollEntry() {
       if (overrideNormal !== null) overrideReasons.push(`ค่าจ้างปกติกะแรก: ฿${overrideNormal}`)
       if (overrideShift !== null) overrideReasons.push(`ค่ากะ: ฿${overrideShift}`)
       if (overrideSafety !== null) overrideReasons.push(`ค่า จป.: ฿${overrideSafety}`)
-      if (overrideDiligence !== null) overrideReasons.push(`เบี้ยขยัน: ฿${overrideDiligence}`)
+      if (overrideDiligence !== null) overrideReasons.push(formatDiligenceOverride(overrideDiligence, diligenceReason))
       const reasonStr = overrideReasons.join(', ')
 
       const payload = {
@@ -740,7 +727,7 @@ export default function TpiPayrollEntry() {
         amount_special: Math.round(calc.amountSpecial * 100) / 100,
         override_special: specAmt || null,
         special_note: note,
-        amount_diligence: extraEntries.amount_diligence,
+        amount_diligence: effectiveDiligence,
         amount_position: 0,
         deduct_social_security: Math.round(calc.deductSocialSecurity * 100) / 100,
         deduct_safety_equipment: extraEntries.deduct_safety_equipment,
@@ -749,6 +736,8 @@ export default function TpiPayrollEntry() {
         override_normal: overrideNormal,
         override_shift: overrideShift,
         override_reason: reasonStr,
+        entered_by: user?.id,
+        updated_at: new Date().toISOString(),
       }
 
       const { error } = await supabase
@@ -1237,11 +1226,7 @@ export default function TpiPayrollEntry() {
                   )
                   if (safeVal !== null) parts.push(`ค่า จป.: ฿${safeVal.toLocaleString()}`)
 
-                  const dilVal = overrideDiligence !== null ? overrideDiligence : (
-                    existingEntry?.override_reason?.includes('เบี้ยขยัน') && existingEntry.amount_diligence != null
-                      ? Number(existingEntry.amount_diligence)
-                      : null
-                  )
+                  const dilVal = overrideDiligence
                   if (dilVal !== null) parts.push(`เบี้ยขยัน: ฿${dilVal.toLocaleString()}`)
 
                   const hasOvr = norm !== null || shift !== null || safeVal !== null || dilVal !== null
@@ -1692,7 +1677,7 @@ export default function TpiPayrollEntry() {
                                     minWidth: 60,
                                     textAlign: 'right',
                                   }}>
-                                    ฿{monoNum(extraEntries.amount_diligence || 0)}
+                                    ฿{monoNum(effectiveDiligence)}
                                   </span>
                                   <button
                                     type="button"
@@ -1771,6 +1756,10 @@ export default function TpiPayrollEntry() {
                                   <button
                                     type="button"
                                     onClick={() => {
+                                      if (extraEntries.amount_diligence !== defaultDiligence && !diligenceReason.trim()) {
+                                        toast.error('กรุณาระบุเหตุผลที่แก้ไขเบี้ยขยัน')
+                                        return
+                                      }
                                       setEditingDiligence(false)
                                       if (extraEntries.amount_diligence === defaultDiligence) {
                                         setOverrideDiligence(null)
@@ -1798,6 +1787,7 @@ export default function TpiPayrollEntry() {
                                       onClick={() => {
                                         setExtraEntries(prev => ({ ...prev, amount_diligence: defaultDiligence }))
                                         setOverrideDiligence(null)
+                                        setDiligenceReason('')
                                         setEditingDiligence(false)
                                       }}
                                       title={`คืนค่าอัตโนมัติตามฐานข้อมูล (฿${defaultDiligence.toLocaleString()})`}
@@ -1821,6 +1811,27 @@ export default function TpiPayrollEntry() {
                             </div>
                           </div>
 
+                          {calc.isEndOfMonth && overrideDiligence !== null && (
+                            <div style={{ marginTop: 10 }}>
+                              <label htmlFor="diligence-override-reason" style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--vk-ink-2)', marginBottom: 5 }}>
+                                เหตุผลที่แก้ไขเบี้ยขยัน <span style={{ color: 'var(--vk-crimson)' }}>*</span>
+                              </label>
+                              <textarea
+                                id="diligence-override-reason"
+                                value={diligenceReason}
+                                onChange={e => setDiligenceReason(e.target.value)}
+                                rows={2}
+                                required
+                                aria-describedby="diligence-reason-help"
+                                placeholder="ระบุเหตุผลและข้อมูลประกอบการแก้ไข"
+                                style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical', padding: '8px 10px', border: '1px solid var(--vk-rule-soft)', borderRadius: 4, background: 'var(--vk-bone)', color: 'var(--vk-ink)', fontFamily: 'var(--vk-sans)', fontSize: 12, lineHeight: 1.5 }}
+                              />
+                              <div id="diligence-reason-help" style={{ marginTop: 4, fontSize: 11, color: diligenceReason.trim() ? 'var(--vk-ink-3)' : 'var(--vk-crimson)' }}>
+                                {diligenceReason.trim() ? 'เหตุผลจะถูกเก็บไว้กับรายการค่าจ้าง พร้อมผู้บันทึกและเวลาบันทึก' : 'ต้องระบุเหตุผลก่อนบันทึกยอด override'}
+                              </div>
+                            </div>
+                          )}
+
                           {/* Attendance audit logs */}
                           {calc.isEndOfMonth && (() => {
                             const selectedLogs = attendanceByEmp.get(selectedEmp?.id || '') || []
@@ -1842,9 +1853,6 @@ export default function TpiPayrollEntry() {
                                         {log.reason ? <span style={{ color: 'var(--vk-ink-3)' }}>– {log.reason}</span> : null}
                                       </div>
                                     ))}
-                                  </div>
-                                  <div style={{ marginTop: 5, paddingLeft: 19, fontSize: 10, color: 'var(--vk-ink-3)', fontStyle: 'italic' }}>
-                                    * ขึ้นอยู่กับดุลยพินิจของแอดมิน (สามารถคลิกปุ่ม "ตัดเป็น 0 บ." หรือกรอกแก้ไขตัวเลขได้ทันที)
                                   </div>
                                 </div>
                               )

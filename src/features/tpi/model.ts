@@ -60,6 +60,13 @@ export function isTpiJobCode(code?: string | null): boolean {
 }
 export function localDate(d = new Date()) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` }
 export function isJobAvailable(job: Job, date: string) { return job.active && (!job.valid_from || date >= job.valid_from) && (!job.expires_on || date <= job.expires_on) }
+export function jobAvailabilityError(job: Job, date: string): string | null {
+  if (!job.active) return `รหัสงาน ${job.code} ถูกปิดใช้งาน กรุณาตรวจสอบที่หน้าจัดการรหัสงาน`
+  if (job.valid_from && date < job.valid_from) return `รหัสงาน ${job.code} เริ่มใช้ ${job.valid_from} แต่วันที่บันทึกคือ ${date}`
+  if (job.expires_on && date > job.expires_on) return `รหัสงาน ${job.code} หมดอายุ ${job.expires_on} แต่วันที่บันทึกคือ ${date} กรุณาตรวจสอบวันหมดอายุที่หน้าจัดการรหัสงาน`
+  return null
+}
+
 export function wageTier(profile: WageProfile | undefined, date: string): RateTier { return profile?.rate_tier === 'skilled' && profile.skilled_from && profile.skilled_from <= date ? 'skilled' : 'normal' }
 export function calculateEntryOt(
   otHours: number | undefined,
@@ -137,7 +144,7 @@ export function isClerkJob(job?: { job_group?: string; code?: string; descriptio
 export function entryRate(entry: Entry, jobs: Job[], profiles: WageProfile[], date: string, employees?: Employee[]): number | null {
   if (entry.rate_snapshot !== undefined) {
     const r = Number(entry.rate_snapshot)
-    return entry.is_half_shift ? r / 2 : r
+    return r
   }
   const job = jobs.find(j => j.id === entry.job_id)
   if (!job) return null
@@ -168,7 +175,8 @@ export function entryRate(entry: Entry, jobs: Job[], profiles: WageProfile[], da
 
   const baseRate = isSkilledApplicable ? job.skilled_rate : job.normal_rate
   if (baseRate === null || baseRate === undefined) return null
-  return entry.is_half_shift ? baseRate / 2 : baseRate
+  if (entry.is_half_shift) return baseRate / 2
+  return baseRate - Math.ceil(baseRate / 8) * (8 - (entry.actual_hours ?? (entry.is_half_shift ? 4 : 8)))
 }
 
 export function getJobBaseRate(
@@ -205,6 +213,7 @@ export function validateEntries(entries: Entry[]) {
   const empEntries = new Map<string, Entry[]>()
   for (const e of entries) {
     if (!e.employee_id || !e.job_id || !Number.isInteger(e.shift_index) || e.shift_index < 0 || e.shift_index > 2) return 'กรุณาระบุพนักงาน รหัสงาน และกะให้ครบ'
+    if (e.actual_hours !== undefined && (!Number.isInteger(e.actual_hours) || e.actual_hours < 1 || e.actual_hours > 8)) return 'จำนวนชั่วโมงต้องเป็นจำนวนเต็ม 1 ถึง 8'
     const slots = people.get(e.employee_id) || new Set<number>()
     if (slots.has(e.shift_index)) return 'พนักงานหนึ่งคนทำได้เพียงงานเดียวต่อกะ'
     slots.add(e.shift_index); people.set(e.employee_id, slots)

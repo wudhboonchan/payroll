@@ -1,3 +1,4 @@
+import { diligenceOverrideReason } from '../features/tpi/diligence'
 import { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useOutletContext, useNavigate } from 'react-router-dom'
@@ -5,7 +6,7 @@ import { supabase } from '../lib/supabase'
 import { useAppStore } from '../store/useAppStore'
 import { TopBar } from '../components/layout/TopBar'
 import { toast } from 'sonner'
-import { Plus, CheckCircle, XCircle, Pencil, Check, X, Trash2, ArrowUpDown, ArrowUp, ArrowDown, ShieldAlert, ShieldCheck, AlertTriangle, ExternalLink } from 'lucide-react'
+import { Plus, CheckCircle, XCircle, Pencil, Check, X, Trash2, ArrowUpDown, ArrowUp, ArrowDown, ShieldAlert, ShieldCheck, AlertTriangle, ExternalLink, Clock } from 'lucide-react'
 import { filterActivePeriods, formatPeriodLabel } from '../lib/formatters'
 import { checkPeriodApprovalStatus } from '../lib/periodApprovalCheck'
 import { isEndOfMonthPeriod } from '../features/tpi/payrollCalc'
@@ -33,7 +34,12 @@ function formatOverrideSummary(row: any) {
     parts.push(`เงินพิเศษ ฿${Number(row.override_special).toLocaleString()}`)
   }
   if (row.override_reason && String(row.override_reason).trim() !== '') {
-    const reasonParts = String(row.override_reason).split(',').map((s: string) => s.trim()).filter(Boolean)
+    const diligenceReason = diligenceOverrideReason(row)
+    // Keep the free-text reason intact, including any commas typed by the user.
+    const summaryReason = diligenceReason
+      ? String(row.override_reason).replace(/(?:^|,\s*)เหตุผลแก้ไขเบี้ยขยัน:[\s\S]*$/, '')
+      : String(row.override_reason)
+    const reasonParts = summaryReason.split(',').map((s: string) => s.trim()).filter(Boolean)
     for (const p of reasonParts) {
       if (p.startsWith('ค่าตำแหน่ง:') || p.startsWith('ค่า จป.:') || p.startsWith('ค่าจ้างปกติกะแรก:') || p.startsWith('ค่ากะ:') || p.startsWith('เบี้ยขยัน:')) {
         const itemLabel = p.split(':')[0].trim()
@@ -44,6 +50,7 @@ function formatOverrideSummary(row: any) {
         parts.push(`เหตุผล: "${p}"`)
       }
     }
+    if (diligenceReason) parts.push(`เหตุผล: ${diligenceReason}`)
   }
   return parts.length > 0 ? parts.join(' · ') : 'มีการแก้ไขยอดเงิน'
 }
@@ -102,6 +109,18 @@ export default function Dashboard() {
       return count ?? 0
     },
     enabled: !!user?.factory_id,
+    staleTime: 0,
+  })
+
+  const { data: pendingAttendanceCount = 0 } = useQuery({
+    queryKey: ['tpi-pending-attendance', user?.factory_id],
+    enabled: isTpi && !!user?.factory_id,
+    queryFn: async () => {
+      const { count, error } = await (supabase as any).from('tpi_attendance_logs')
+        .select('id', { count: 'exact', head: true }).eq('factory_id', user!.factory_id).eq('workflow_status', 'pending')
+      if (error) throw error
+      return count ?? 0
+    },
     staleTime: 0,
   })
 
@@ -643,7 +662,7 @@ export default function Dashboard() {
               type="button"
               className="vk-btn vk-btn--primary"
               style={{ fontSize: 12, height: 32 }}
-              onClick={() => navigate(isTpi ? '/tpi-payroll-entry' : '/payroll-entry')}
+              onClick={() => navigate('/payroll')}
             >
               ไปยังหน้าบันทึกค่าแรง →
             </button>
@@ -714,6 +733,18 @@ export default function Dashboard() {
                     {completionPct === 100 ? 'บันทึกครบทุกวันแล้ว ✓' : `เหลืออีก ${(stats?.totalDays ?? 0) - (stats?.uniqueDays ?? 0)} วัน`}
                   </div>
 
+                  {isTpi && pendingAttendanceCount > 0 && (
+                    <div role="alert" className="vk-dashboard-pending-attendance">
+                      <Clock size={17} aria-hidden="true" className="vk-dashboard-pending-attendance__icon" />
+                      <div className="vk-dashboard-pending-attendance__content">
+                        <div className="vk-dashboard-pending-attendance__header">
+                          <strong>รอกรอกเหตุผลขาดลามาสาย</strong>
+                          <button type="button" onClick={() => navigate('/tpi-attendance')}>ไปบันทึกเหตุผล →</button>
+                        </div>
+                        <p>มีรายการหักชั่วโมง <strong>{pendingAttendanceCount} รายการ</strong> ที่ยังไม่เสร็จ กรุณาเลือกประเภทและกรอกเหตุผลให้ครบ</p>
+                      </div>
+                    </div>
+                  )}
                   {/* Pending profile alert */}
                   {pendingProfileCount > 0 && (
                     <div
@@ -1222,7 +1253,7 @@ export default function Dashboard() {
                 style={{ flex: 1 }}
                 onClick={() => {
                   setShowBlockApprovalModal(false)
-                  navigate(isTpi ? '/tpi-payroll-entry' : '/payroll-entry')
+                  navigate('/payroll')
                 }}
               >
                 ไปยังหน้าบันทึกค่าแรง →

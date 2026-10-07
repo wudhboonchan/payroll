@@ -12,6 +12,9 @@ export interface AttendanceLog {
   leave_type: LeaveType | null
   minutes_late: number | null
   reason: string | null
+  workflow_status?: 'pending' | 'completed'
+  source?: 'manual' | 'shift'
+  deducted_hours?: number
   created_at?: string
   updated_at?: string
   employee?: {
@@ -103,9 +106,7 @@ export async function saveAttendanceLog(payload: {
  */
 export async function deleteAttendanceLog(id: string): Promise<void> {
   const { error } = await (supabase as any)
-    .from('tpi_attendance_logs')
-    .delete()
-    .eq('id', id)
+    .rpc('tpi_delete_attendance_log', { p_id: id })
 
   if (error) throw error
 }
@@ -176,6 +177,7 @@ export async function updateAttendanceLog(
     .from('tpi_attendance_logs')
     .update({
       ...payload,
+      ...(payload.reason?.trim() ? { workflow_status: 'completed' } : {}),
       updated_at: new Date().toISOString()
     })
     .eq('id', id)
