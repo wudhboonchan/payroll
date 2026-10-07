@@ -338,6 +338,7 @@ export type Database = {
           period_start: string
           social_security_rate: number | null
           status: string | null
+          waive_foreign_diligence?: boolean | null
         }
         Insert: {
           approved_at?: string | null
@@ -350,6 +351,7 @@ export type Database = {
           period_start: string
           social_security_rate?: number | null
           status?: string | null
+          waive_foreign_diligence?: boolean | null
         }
         Update: {
           approved_at?: string | null
@@ -362,6 +364,7 @@ export type Database = {
           period_start?: string
           social_security_rate?: number | null
           status?: string | null
+          waive_foreign_diligence?: boolean | null
         }
         Relationships: [
           {

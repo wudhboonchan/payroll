@@ -40,6 +40,7 @@ export interface TpiPayrollInput {
     period_start: string
     period_end: string
     social_security_rate?: number
+    waive_foreign_diligence?: boolean | null
   }
   overrides?: {
     override_normal?: number | null
@@ -114,6 +115,7 @@ export interface TpiPayrollCalculationResult {
 
   // Additional allowances
   isEndOfMonth: boolean
+  isForeignDiligenceWaived: boolean
   amountDiligence: number
   amountPosition: number
   amountSpecial: number
@@ -146,6 +148,17 @@ export function isEndOfMonthPeriod(periodEnd: string): boolean {
   const parts = periodEnd.split('-')
   const day = parts.length === 3 ? parseInt(parts[2], 10) : 0
   return day >= 25
+}
+
+/**
+ * Helper to identify foreign workers in TPI
+ * Thai employees: nationality is null/empty or 'ไทย'
+ * Foreign employees: nationality is specified and not 'ไทย' (e.g. 'พม่า', 'เมียนมา', 'กัมพูชา', 'ลาว')
+ */
+export function isForeignEmployee(emp?: { nationality?: string | null } | null): boolean {
+  if (!emp || !emp.nationality) return false
+  const nat = emp.nationality.trim()
+  return nat !== '' && nat !== 'ไทย'
 }
 
 /**
@@ -317,18 +330,23 @@ export function calculateTpiPayroll(input: TpiPayrollInput): TpiPayrollCalculati
     specialNote = specialNote ? `${specialNote}, ค่า จป. 500 บาท` : 'ค่า จป. 500 บาท'
   }
 
-  // Diligence allowance: 300 THB/month paid only in end-of-month period
-  const amountDiligence = extras?.amount_diligence !== undefined
-    ? Number(extras.amount_diligence)
-    : (isEndMonth ? 300 : 0)
-
-  const totalIncome = effectiveNormal + effectiveShift + effectiveOt + amountDiligence + amountPosition + amountSpecial
-
-  // ── Social Security (ปกส 5%) ──
+  // ── Social Security (ปกส 5%) & Nationality Check ──
   // Rule 1: Thai employees are deducted by default unless exempt_social_security is explicitly checked
   // Rule 2: Foreign employees are deducted ONLY if they have a social security number (stored in national_id or legacy social_security_number) AND data_complete is true (and not exempt)
   // Rule 3: Calculated strictly on First Shift normal wage (effectiveNormal), excluding Second Shift (effectiveShift)
   const isThai = !employee.nationality || employee.nationality === 'ไทย'
+  const isForeigner = !isThai
+
+  // Diligence allowance: 300 THB/month paid only in end-of-month period
+  // Special use case (TPI): If waive_foreign_diligence is enabled for this period and worker is foreign, default is 0 THB
+  const isForeignDiligenceWaived = isEndMonth && !!period.waive_foreign_diligence && isForeigner
+  const defaultDiligenceForEmp = (isEndMonth && !isForeignDiligenceWaived) ? 300 : 0
+  const amountDiligence = extras?.amount_diligence !== undefined
+    ? Number(extras.amount_diligence)
+    : defaultDiligenceForEmp
+
+  const totalIncome = effectiveNormal + effectiveShift + effectiveOt + amountDiligence + amountPosition + amountSpecial
+
   const isExempt = !!employee.exempt_social_security
   const hasSsNumber = !isThai
     ? !!(employee.national_id?.trim() || employee.social_security_number?.trim())
@@ -376,6 +394,7 @@ export function calculateTpiPayroll(input: TpiPayrollInput): TpiPayrollCalculati
     overrideOt,
     effectiveOt,
     isEndOfMonth: isEndMonth,
+    isForeignDiligenceWaived,
     amountDiligence,
     amountPosition,
     amountSpecial,

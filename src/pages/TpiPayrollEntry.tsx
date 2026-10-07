@@ -488,14 +488,18 @@ export default function TpiPayrollEntry() {
   const isEndMonth = isEndOfMonthPeriod(currentPeriod?.period_end || '')
   const defaultSafety = (isEndMonth && selectedEmp?.is_safety_officer) ? 500 : 0
   const empAttendanceLogs = attendanceByEmp.get(selectedEmp?.id || '') || []
-  const defaultDiligence = (isEndMonth && empAttendanceLogs.length === 0) ? 300 : 0
+  const isForeigner = !!selectedEmp?.nationality && selectedEmp.nationality !== 'ไทย'
+  const isDiligenceWaived = isEndMonth && !!currentPeriod?.waive_foreign_diligence && isForeigner
+  const defaultDiligence = (isEndMonth && empAttendanceLogs.length === 0 && !isDiligenceWaived) ? 300 : 0
   const monthCycle = formatMonthlyCycleRange(currentPeriod?.period_end)
 
   useEffect(() => {
     const isEndMonthLocal = isEndOfMonthPeriod(currentPeriod?.period_end || '')
     const defaultSafeLocal = (isEndMonthLocal && selectedEmp?.is_safety_officer) ? 500 : 0
     const empLogsLocal = attendanceByEmp.get(selectedEmp?.id || '') || []
-    const defaultDilLocal = (isEndMonthLocal && empLogsLocal.length === 0) ? 300 : 0
+    const isForeignerLocal = !!selectedEmp?.nationality && selectedEmp.nationality !== 'ไทย'
+    const isDiligenceWaivedLocal = isEndMonthLocal && !!currentPeriod?.waive_foreign_diligence && isForeignerLocal
+    const defaultDilLocal = (isEndMonthLocal && empLogsLocal.length === 0 && !isDiligenceWaivedLocal) ? 300 : 0
 
     if (existingEntry) {
       setOverrideNormal(existingEntry.override_normal != null ? Number(existingEntry.override_normal) : null)
@@ -548,6 +552,10 @@ export default function TpiPayrollEntry() {
           dilAmt = Number(existingEntry.amount_diligence)
           hasDilOverride = true
         }
+      } else if (isDiligenceWaivedLocal) {
+        // Special case: When diligence is waived for foreign workers and no explicit override exists, force 0
+        dilAmt = 0
+        hasDilOverride = false
       } else if (
         existingEntry.amount_diligence != null &&
         Number(existingEntry.amount_diligence) !== defaultDilLocal
@@ -587,7 +595,7 @@ export default function TpiPayrollEntry() {
         deduct_uniform: 0,
       })
     }
-  }, [existingEntry, selectedEmpId, selectedEmp?.position, selectedEmp?.is_safety_officer, currentPeriod?.period_end, attendanceByEmp])
+  }, [existingEntry, selectedEmpId, selectedEmp?.position, selectedEmp?.is_safety_officer, selectedEmp?.nationality, currentPeriod?.period_end, currentPeriod?.waive_foreign_diligence, attendanceByEmp])
 
   // ── Main Calculation for Selected Employee ──
   const calc = useMemo(() => {
@@ -665,6 +673,11 @@ export default function TpiPayrollEntry() {
       }
       if (Math.abs((result.amountSpecial || 0) - Number(entry.amount_special || 0)) > eps) {
         diffs.push(`เงินพิเศษ (คำนวณ ฿${result.amountSpecial} ≠ บันทึก ฿${Number(entry.amount_special || 0)})`)
+      }
+      const isForeign = !!emp.nationality && emp.nationality !== 'ไทย'
+      const isWaived = isEndMonth && !!currentPeriod.waive_foreign_diligence && isForeign
+      if (isWaived && Number(entry.amount_diligence || 0) > eps && !entry.override_reason?.includes('เบี้ยขยัน')) {
+        diffs.push(`เบี้ยขยัน (ตั้งค่างดจ่ายพนักงานต่างชาติ แต่พบยอดบันทึก ฿${Number(entry.amount_diligence).toLocaleString()})`)
       }
 
       if (diffs.length > 0) {
@@ -756,6 +769,83 @@ export default function TpiPayrollEntry() {
       toast.success('บันทึกข้อมูลค่าจ้างสำเร็จ')
     },
     onError: (e: Error) => toast.error('บันทึกไม่สำเร็จ', { description: e.message }),
+  })
+
+  const toggleWaiveMutation = useMutation({
+    mutationFn: async (waive: boolean) => {
+      if (!currentPeriod?.id) return
+      // 1. Update payroll_periods
+      const { error: periodErr } = await supabase
+        .from('payroll_periods')
+        .update({ waive_foreign_diligence: waive } as any)
+        .eq('id', currentPeriod.id)
+
+      if (periodErr) {
+        if (periodErr.message?.includes('waive_foreign_diligence') || (periodErr as any).code === '42703') {
+          throw new Error('กรุณารันไฟล์ migration_tpi_waive_foreign_diligence.sql บน Supabase ก่อนใช้งาน')
+        }
+        throw periodErr
+      }
+
+      // 2. Bulk-update payroll_entries for foreign employees
+      const { data: foreignEmps, error: empErr } = await supabase
+        .from('employees')
+        .select('id, nationality')
+        .eq('factory_id', user?.factory_id ?? '')
+        .neq('nationality', 'ไทย')
+        .not('nationality', 'is', null)
+
+      if (!empErr && foreignEmps && foreignEmps.length > 0) {
+        const foreignEmpIds = foreignEmps.map(e => e.id)
+        if (waive) {
+          await supabase
+            .from('payroll_entries')
+            .update({ amount_diligence: 0 } as any)
+            .eq('period_id', currentPeriod.id)
+            .in('employee_id', foreignEmpIds)
+        } else {
+          if (monthlyScanRange) {
+            const { data: logs } = await supabase
+              .from('tpi_attendance_logs' as any)
+              .select('employee_id')
+              .eq('factory_id', user?.factory_id ?? '')
+              .gte('work_date', monthlyScanRange.startDate)
+              .lte('work_date', monthlyScanRange.endDate)
+
+            const infractedEmpIds = new Set((logs || []).map((l: any) => l.employee_id))
+            const eligibleForeignEmpIds = foreignEmpIds.filter(id => !infractedEmpIds.has(id))
+
+            if (eligibleForeignEmpIds.length > 0) {
+              await supabase
+                .from('payroll_entries')
+                .update({ amount_diligence: 300 } as any)
+                .eq('period_id', currentPeriod.id)
+                .in('employee_id', eligibleForeignEmpIds)
+            }
+          }
+        }
+      }
+    },
+    onSuccess: (_, waive) => {
+      queryClient.invalidateQueries({ queryKey: ['periods'] })
+      queryClient.invalidateQueries({ queryKey: ['all-payroll-entries'] })
+      queryClient.invalidateQueries({ queryKey: ['v2-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['payment-channel-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['period-approval-readiness'] })
+      queryClient.invalidateQueries({ queryKey: ['superuser-overrides'] })
+      if (waive) {
+        toast.success('ตั้งค่างดจ่ายเบี้ยขยันพนักงานต่างชาติเรียบร้อยแล้ว', {
+          description: 'งวดสิ้นเดือนนี้จะไม่จ่ายค่าเบี้ยขยัน 300 บ. ให้พนักงานต่างชาติทุกคน',
+        })
+      } else {
+        toast.success('ยกเลิกการงดจ่ายเบี้ยขยันพนักงานต่างชาติแล้ว', {
+          description: 'คืนค่าสิทธิ์เบี้ยขยันตามเกณฑ์ปกติของงวดสิ้นเดือนเรียบร้อยแล้ว',
+        })
+      }
+    },
+    onError: (e: Error) => {
+      toast.error('ตั้งค่าไม่สำเร็จ', { description: e.message })
+    },
   })
 
   const monoNum = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -905,6 +995,56 @@ export default function TpiPayrollEntry() {
                 <span>
                   <strong>ยังส่งอนุมัติงวดไม่ได้:</strong> ต้องบันทึกให้เป็นสถานะสีเขียวครบทุกคนก่อน
                 </span>
+              </div>
+            )}
+
+            {/* TPI End-of-month foreign diligence toggle */}
+            {isEndMonth && (
+              <div style={{
+                marginBottom: 8,
+                padding: '6px 10px',
+                borderRadius: 6,
+                background: currentPeriod?.waive_foreign_diligence ? '#fffbeb' : '#f8fafc',
+                border: `1px solid ${currentPeriod?.waive_foreign_diligence ? '#fde68a' : '#e2e8f0'}`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 8,
+                fontSize: 11,
+              }}>
+                <label
+                  htmlFor="tpi-waive-foreign-sidebar-check"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    cursor: currentPeriod?.status === 'approved' || toggleWaiveMutation.isPending ? 'not-allowed' : 'pointer',
+                    minWidth: 0,
+                  }}
+                >
+                  <span style={{ fontWeight: 600, color: 'var(--vk-ink)' }}>งดเบี้ยขยันต่างชาติ</span>
+                  <span style={{
+                    fontSize: 9,
+                    fontWeight: 700,
+                    padding: '1px 5px',
+                    borderRadius: 4,
+                    background: currentPeriod?.waive_foreign_diligence ? '#fef3c7' : '#e2e8f0',
+                    color: currentPeriod?.waive_foreign_diligence ? '#b45309' : '#64748b',
+                  }}>
+                    {currentPeriod?.waive_foreign_diligence ? 'งดจ่าย (กรณีพิเศษ)' : 'จ่ายปกติ'}
+                  </span>
+                </label>
+                <input
+                  id="tpi-waive-foreign-sidebar-check"
+                  type="checkbox"
+                  disabled={currentPeriod?.status === 'approved' || toggleWaiveMutation.isPending}
+                  checked={Boolean(currentPeriod?.waive_foreign_diligence)}
+                  onChange={e => toggleWaiveMutation.mutate(e.target.checked)}
+                  style={{
+                    accentColor: '#d97706',
+                    cursor: currentPeriod?.status === 'approved' || toggleWaiveMutation.isPending ? 'not-allowed' : 'pointer',
+                  }}
+                />
               </div>
             )}
 
@@ -1510,16 +1650,22 @@ export default function TpiPayrollEntry() {
                                   borderRadius: 4,
                                   background: !calc.isEndOfMonth
                                     ? '#f3f4f6'
-                                    : (empAttendanceLogs.length > 0 ? '#fee2e2' : '#ecfdf5'),
+                                    : isDiligenceWaived
+                                      ? '#fef3c7'
+                                      : (empAttendanceLogs.length > 0 ? '#fee2e2' : '#ecfdf5'),
                                   color: !calc.isEndOfMonth
                                     ? '#7a6f60'
-                                    : (empAttendanceLogs.length > 0 ? '#b91c1c' : '#047857')
+                                    : isDiligenceWaived
+                                      ? '#b45309'
+                                      : (empAttendanceLogs.length > 0 ? '#b91c1c' : '#047857')
                                 }}>
                                   {!calc.isEndOfMonth
                                     ? 'งวดต้นเดือน (จ่ายงวดสิ้นเดือน)'
-                                    : (empAttendanceLogs.length > 0
-                                        ? `ไม่ผ่านเกณฑ์ (พบประวัติ ${empAttendanceLogs.length} ครั้ง)`
-                                        : 'ดึงจากฐานข้อมูล (300 บ.)')}
+                                    : isDiligenceWaived
+                                      ? 'งดจ่ายต่างชาติ (กรณีพิเศษ)'
+                                      : (empAttendanceLogs.length > 0
+                                          ? `ไม่ผ่านเกณฑ์ (พบประวัติ ${empAttendanceLogs.length} ครั้ง)`
+                                          : 'ดึงจากฐานข้อมูล (300 บ.)')}
                                 </span>
                               </div>
                             </div>
@@ -1700,6 +1846,14 @@ export default function TpiPayrollEntry() {
                                   <div style={{ marginTop: 5, paddingLeft: 19, fontSize: 10, color: 'var(--vk-ink-3)', fontStyle: 'italic' }}>
                                     * ขึ้นอยู่กับดุลยพินิจของแอดมิน (สามารถคลิกปุ่ม "ตัดเป็น 0 บ." หรือกรอกแก้ไขตัวเลขได้ทันที)
                                   </div>
+                                </div>
+                              )
+                            }
+                            if (isDiligenceWaived) {
+                              return (
+                                <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 6, padding: '6px 10px', fontSize: 11, color: '#92400e', marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  <AlertTriangle style={{ width: 13, height: 13, color: '#d97706', flexShrink: 0 }} />
+                                  <span>งวดสิ้นเดือนนี้ตั้งค่างดจ่ายค่าเบี้ยขยันสำหรับพนักงานต่างชาติเป็นกรณีพิเศษ (เบี้ยขยัน = 0 บ.)</span>
                                 </div>
                               )
                             }

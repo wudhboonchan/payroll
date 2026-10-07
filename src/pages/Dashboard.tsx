@@ -8,9 +8,10 @@ import { toast } from 'sonner'
 import { Plus, CheckCircle, XCircle, Pencil, Check, X, Trash2, ArrowUpDown, ArrowUp, ArrowDown, ShieldAlert, ShieldCheck, AlertTriangle, ExternalLink } from 'lucide-react'
 import { filterActivePeriods, formatPeriodLabel } from '../lib/formatters'
 import { checkPeriodApprovalStatus } from '../lib/periodApprovalCheck'
+import { isEndOfMonthPeriod } from '../features/tpi/payrollCalc'
 import '../styles/tokens.css'
 
-interface PayrollPeriod { id: string; label: string; period_start: string; period_end: string; status: string; social_security_rate: number; approved_by: string | null; approver?: { full_name: string | null } | null }
+interface PayrollPeriod { id: string; label: string; period_start: string; period_end: string; status: string; social_security_rate: number; approved_by: string | null; approver?: { full_name: string | null } | null; waive_foreign_diligence?: boolean | null }
 
 function fmt(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
@@ -369,6 +370,89 @@ export default function Dashboard() {
     onError: (e: Error) => toast.error('อัปเดตไม่สำเร็จ', { description: e.message }),
   })
 
+  const toggleWaiveForeignDiligenceMutation = useMutation({
+    mutationFn: async (waive: boolean) => {
+      if (!activePeriod?.id) return
+      // 1. Update payroll_periods
+      const { error: periodErr } = await supabase
+        .from('payroll_periods')
+        .update({ waive_foreign_diligence: waive } as any)
+        .eq('id', activePeriod.id)
+
+      if (periodErr) {
+        if (periodErr.message?.includes('waive_foreign_diligence') || (periodErr as any).code === '42703') {
+          throw new Error('กรุณารันไฟล์ migration_tpi_waive_foreign_diligence.sql บน Supabase ก่อนใช้งาน')
+        }
+        throw periodErr
+      }
+
+      // 2. Bulk-update payroll_entries for foreign employees in this period if entries already exist
+      if (isTpi) {
+        const { data: foreignEmps, error: empErr } = await supabase
+          .from('employees')
+          .select('id, nationality')
+          .eq('factory_id', user?.factory_id ?? '')
+          .neq('nationality', 'ไทย')
+          .not('nationality', 'is', null)
+
+        if (!empErr && foreignEmps && foreignEmps.length > 0) {
+          const foreignEmpIds = foreignEmps.map(e => e.id)
+          if (waive) {
+            // Set amount_diligence = 0 for foreign employees in this period
+            await supabase
+              .from('payroll_entries')
+              .update({ amount_diligence: 0 } as any)
+              .eq('period_id', activePeriod.id)
+              .in('employee_id', foreignEmpIds)
+          } else {
+            // Restore 300 only if employee has 0 attendance infractions in the month
+            const parts = activePeriod.period_end.split('-')
+            if (parts.length >= 2) {
+              const startOfMonth = `${parts[0]}-${parts[1]}-01`
+              const { data: logs } = await supabase
+                .from('tpi_attendance_logs' as any)
+                .select('employee_id')
+                .eq('factory_id', user?.factory_id ?? '')
+                .gte('work_date', startOfMonth)
+                .lte('work_date', activePeriod.period_end)
+
+              const infractedEmpIds = new Set((logs || []).map((l: any) => l.employee_id))
+              const eligibleForeignEmpIds = foreignEmpIds.filter(id => !infractedEmpIds.has(id))
+
+              if (eligibleForeignEmpIds.length > 0) {
+                await supabase
+                  .from('payroll_entries')
+                  .update({ amount_diligence: 300 } as any)
+                  .eq('period_id', activePeriod.id)
+                  .in('employee_id', eligibleForeignEmpIds)
+              }
+            }
+          }
+        }
+      }
+    },
+    onSuccess: (_, waive) => {
+      queryClient.invalidateQueries({ queryKey: ['periods'] })
+      queryClient.invalidateQueries({ queryKey: ['all-payroll-entries'] })
+      queryClient.invalidateQueries({ queryKey: ['v2-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['payment-channel-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['period-approval-readiness'] })
+      queryClient.invalidateQueries({ queryKey: ['superuser-overrides'] })
+      if (waive) {
+        toast.success('ตั้งค่างดจ่ายเบี้ยขยันพนักงานต่างชาติเรียบร้อยแล้ว', {
+          description: 'งวดสิ้นเดือนนี้จะไม่จ่ายค่าเบี้ยขยัน 300 บ. ให้พนักงานต่างชาติทุกคน',
+        })
+      } else {
+        toast.success('ยกเลิกการงดจ่ายเบี้ยขยันพนักงานต่างชาติแล้ว', {
+          description: 'คืนค่าสิทธิ์เบี้ยขยันตามเกณฑ์ปกติของงวดสิ้นเดือนเรียบร้อยแล้ว',
+        })
+      }
+    },
+    onError: (e: Error) => {
+      toast.error('ตั้งค่าไม่สำเร็จ', { description: e.message })
+    },
+  })
+
   const deletePeriodMutation = useMutation({
     mutationFn: async () => {
       if (!activePeriod) throw new Error('ไม่พบงวด')
@@ -724,6 +808,67 @@ export default function Dashboard() {
                       </div>
                     )}
                   </div>
+
+                  {/* TPI End-of-month special toggle: งดจ่ายเบี้ยขยันพนักงานต่างชาติ */}
+                  {isTpi && isEndOfMonthPeriod(activePeriod?.period_end || '') && (
+                    <div style={{
+                      marginTop: 4,
+                      marginBottom: 4,
+                      padding: '10px 12px',
+                      borderRadius: 8,
+                      background: activePeriod?.waive_foreign_diligence ? '#fffbeb' : '#f8fafc',
+                      border: `1px solid ${activePeriod?.waive_foreign_diligence ? '#fde68a' : '#e2e8f0'}`,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 10,
+                      transition: 'all 0.2s ease',
+                    }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          <span style={{ fontFamily: 'var(--vk-sans)', fontSize: 13, fontWeight: 600, color: 'var(--vk-ink)' }}>
+                            งดจ่ายเบี้ยขยันพนักงานต่างชาติ
+                          </span>
+                          <span style={{
+                            fontSize: 10,
+                            fontWeight: 700,
+                            padding: '1px 6px',
+                            borderRadius: 4,
+                            background: activePeriod?.waive_foreign_diligence ? '#fef3c7' : '#e2e8f0',
+                            color: activePeriod?.waive_foreign_diligence ? '#b45309' : '#64748b',
+                          }}>
+                            {activePeriod?.waive_foreign_diligence ? 'งดจ่าย (กรณีพิเศษ)' : 'จ่ายตามปกติ'}
+                          </span>
+                        </div>
+                        <span style={{ fontFamily: 'var(--vk-sans)', fontSize: 11, color: 'var(--vk-ink-3)', lineHeight: 1.3 }}>
+                          เฉพาะงวดสิ้นเดือนนี้ · งดจ่ายเบี้ยขยัน 300 บ. ให้พนักงานต่างชาติทุกคน
+                        </span>
+                      </div>
+                      <label
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          cursor: isApproved || toggleWaiveForeignDiligenceMutation.isPending ? 'not-allowed' : 'pointer',
+                          opacity: isApproved ? 0.6 : 1,
+                          flexShrink: 0,
+                        }}
+                        title={isApproved ? 'งวดได้รับการอนุมัติแล้ว ไม่สามารถแก้ไขได้' : 'ติ๊กเพื่อเลือกงดจ่ายเบี้ยขยันพนักงานต่างชาติในงวดนี้'}
+                      >
+                        <input
+                          type="checkbox"
+                          disabled={isApproved || toggleWaiveForeignDiligenceMutation.isPending}
+                          checked={Boolean(activePeriod?.waive_foreign_diligence)}
+                          onChange={e => toggleWaiveForeignDiligenceMutation.mutate(e.target.checked)}
+                          style={{
+                            width: 18,
+                            height: 18,
+                            accentColor: '#d97706',
+                            cursor: isApproved || toggleWaiveForeignDiligenceMutation.isPending ? 'not-allowed' : 'pointer',
+                          }}
+                        />
+                      </label>
+                    </div>
+                  )}
 
                   {/* SS deduction summary */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

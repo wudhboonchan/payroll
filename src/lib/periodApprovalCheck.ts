@@ -147,6 +147,7 @@ export async function checkPeriodApprovalStatus(
           period_start: period.period_start,
           period_end: period.period_end,
           social_security_rate: period.social_security_rate,
+          waive_foreign_diligence: (period as any).waive_foreign_diligence,
         },
         overrides: {
           override_normal: entry.override_normal != null ? Number(entry.override_normal) : null,
