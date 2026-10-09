@@ -11,7 +11,6 @@ import { formatPeriodLabel, formatEmployeeFullName, compareEmployeeCode, filterA
 import { isTpiCompany } from '../features/tpi/model'
 import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
-import { calculatePayroll } from '../lib/payrollCalc'
 import '../styles/tokens.css'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -122,9 +121,6 @@ function buildEmployeeSummaryPdfHtml(
 
   const periodIncomeRowsHtml = [
     clerkPeriodBase > 0 ? `<tr><td style="padding:5px 8px;border-bottom:1px solid #eee">ค่าจ้างพื้นฐาน (ครึ่งเดือน)</td><td style="padding:5px 8px;border-bottom:1px solid #eee">เงินเดือน ÷ 2</td><td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:right;font-family:monospace">฿${monoNum(clerkPeriodBase)}</td></tr>` : '',
-    stats.entryDiligence > 0 ? `<tr><td style="padding:5px 8px;border-bottom:1px solid #eee">เบี้ยขยัน</td><td style="padding:5px 8px;border-bottom:1px solid #eee">เบี้ยขยันประจำงวด</td><td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:right;font-family:monospace">฿${monoNum(stats.entryDiligence)}</td></tr>` : '',
-    stats.entryPosition > 0 ? `<tr><td style="padding:5px 8px;border-bottom:1px solid #eee">ค่าตำแหน่ง</td><td style="padding:5px 8px;border-bottom:1px solid #eee">ค่าตำแหน่งประจำงวด</td><td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:right;font-family:monospace">฿${monoNum(stats.entryPosition)}</td></tr>` : '',
-    stats.entrySpecial > 0 ? `<tr><td style="padding:5px 8px;border-bottom:1px solid #eee">เงินพิเศษ / ปรับปรุง</td><td style="padding:5px 8px;border-bottom:1px solid #eee">${emp.special_note || 'บันทึกในงวดนี้'}</td><td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:right;font-family:monospace">฿${monoNum(stats.entrySpecial)}</td></tr>` : '',
   ].join('')
 
   const deductionRowsHtml = [
@@ -489,7 +485,7 @@ export default function EmployeeSummary() {
 
       const woodExcess = isUnpaid ? 0 : Number(shift.wood_excess || 0)
       const filmAmount = isUnpaid ? 0 : Number(shift.film_amount || 0)
-      const crossPay = isUnpaid ? 0 : Number(shift.cross_position_extra_pay || 0)
+      const crossPay = isUnpaid ? 0 : (shift.is_cross_position ? Number(shift.cross_position_extra_pay || 0) : 0)
       const crossTitle = isUnpaid ? '' : (shift.cross_position_title || '')
 
       const totalEarned = baseWage + shiftAllowance + otPay + woodExcess + filmAmount + crossPay
@@ -533,12 +529,9 @@ export default function EmployeeSummary() {
     const estFilm = dailyEstimates.reduce((s, d) => s + d.filmAmount, 0)
     const estCross = dailyEstimates.reduce((s, d) => s + d.crossPay, 0)
 
-    // Period-wide bonuses from payroll entry
-    const entryDiligence = Number(empEntry?.amount_diligence || 0)
-    const entryPosition = Number(empEntry?.amount_position || 0)
-    const entrySpecial = Number(empEntry?.amount_special || 0) + Number(empEntry?.override_special || 0)
-
-    const grossEarnings = clerkPeriodBase + estBaseWages + estShiftAllowances + estOtPay + estWood + estFilm + estCross + entryDiligence + entryPosition + entrySpecial
+    // Income comes from payable shifts only. Saved special income already contains
+    // cross-position pay and must never be added to the daily totals again.
+    const grossEarnings = clerkPeriodBase + estBaseWages + estShiftAllowances + estOtPay + estWood + estFilm + estCross
 
     // Deductions
     const entrySS = Number(empEntry?.deduct_social_security || 0)
@@ -549,7 +542,7 @@ export default function EmployeeSummary() {
     const totalDeductions = entrySS + totalAdvances + entrySafety + entryUniform
     const netEarnings = grossEarnings - totalDeductions
 
-    const totalSpecialAllowances = estWood + estFilm + estCross + entryDiligence + entryPosition + entrySpecial
+    const totalSpecialAllowances = estWood + estFilm + estCross
 
     return {
       totalDaysWorked,
@@ -561,9 +554,6 @@ export default function EmployeeSummary() {
       estWood,
       estFilm,
       estCross,
-      entryDiligence,
-      entryPosition,
-      entrySpecial,
       grossEarnings,
       entrySS,
       totalAdvances,
@@ -750,9 +740,6 @@ export default function EmployeeSummary() {
       rows.push(['ประเภทรายการ', 'รายละเอียด / หมายเหตุ', 'จำนวนเงิน (บาท)'])
 
       if (clerkPeriodBase > 0) rows.push(['รายได้', 'ค่าจ้างพื้นฐาน (ครึ่งเดือน)', clerkPeriodBase])
-      if (stats.entryDiligence > 0) rows.push(['รายได้', 'เบี้ยขยันประจำงวด', stats.entryDiligence])
-      if (stats.entryPosition > 0) rows.push(['รายได้', 'ค่าตำแหน่งประจำงวด', stats.entryPosition])
-      if (stats.entrySpecial > 0) rows.push(['รายได้', `เงินพิเศษ / ปรับปรุง (${empEntry?.special_note || ''})`, stats.entrySpecial])
 
       if (stats.entrySS > 0) rows.push(['รายการหัก', 'ประกันสังคม', -stats.entrySS])
       empAdvances.forEach((adv, i) => {
@@ -1115,7 +1102,7 @@ export default function EmployeeSummary() {
               </div>
 
               {/* ── D. Period-level income (clerk base + bonuses) ── */}
-              {(clerkPeriodBase > 0 || stats.entryDiligence > 0 || stats.entryPosition > 0 || stats.entrySpecial > 0) && (
+              {(clerkPeriodBase > 0) && (
                 <div style={{ borderTop: '2px solid var(--vk-rule)', background: 'var(--vk-paper)' }}>
                   <div style={{ padding: '10px 32px 7px', display: 'flex', alignItems: 'center', gap: 8 }}>
                     <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--vk-jade)' }}>รายได้ประจำงวด</div>
@@ -1129,17 +1116,6 @@ export default function EmployeeSummary() {
                       <div style={{ textAlign: 'right', fontFamily: 'var(--vk-mono)', fontSize: 13, fontWeight: 700, color: 'var(--vk-jade)' }}>฿{monoNum(clerkPeriodBase)}</div>
                     </div>
                   )}
-                  {[
-                    { label: 'เบี้ยขยัน', val: stats.entryDiligence, note: '' },
-                    { label: 'ค่าตำแหน่งงาน', val: stats.entryPosition, note: '' },
-                    { label: 'เงินพิเศษ / ปรับปรุง', val: stats.entrySpecial, note: empEntry?.special_note || '' },
-                  ].filter(x => x.val > 0).map((item, i) => (
-                    <div key={i} style={{ display: 'grid', gridTemplateColumns: '130px 90px 1fr 90px', gap: 8, padding: '8px 32px', borderTop: '1px solid var(--vk-rule-soft)', alignItems: 'center', borderLeft: '3px solid var(--vk-jade)' }}>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--vk-ink)', gridColumn: '1 / 3' }}>{item.label}</div>
-                      <div style={{ fontSize: 11, color: 'var(--vk-ink-3)', fontStyle: item.note ? 'normal' : 'italic' }}>{item.note || 'บันทึกในงวดนี้'}</div>
-                      <div style={{ textAlign: 'right', fontFamily: 'var(--vk-mono)', fontSize: 13, fontWeight: 700, color: 'var(--vk-jade)' }}>+฿{monoNum(item.val)}</div>
-                    </div>
-                  ))}
                 </div>
               )}
 

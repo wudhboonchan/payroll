@@ -11,7 +11,7 @@ import { toast } from 'sonner'
 import { Save, CheckCircle2, AlertCircle, Search, X, AlertTriangle, Pencil, Trash2 } from 'lucide-react'
 import { calculatePayroll } from '../lib/payrollCalc'
 import type { PayrollCalculationInput } from '../lib/payrollCalc'
-import { compareEmployeeCode, formatThaiDateDDMMYYYY, formatMonthlyCycleRange, filterActivePeriods } from '../lib/formatters'
+import { compareEmployeeCode, formatThaiDateDDMMYYYY, filterActivePeriods } from '../lib/formatters'
 import '../styles/tokens.css'
 
 interface Employee {
@@ -86,7 +86,6 @@ export default function PayrollEntry() {
     }
     return defaultPeriod
   }, [periods, selectedPeriodId, defaultPeriod])
-  const monthCycle = formatMonthlyCycleRange(currentPeriod?.period_end)
 
   const { data: employees = [] } = useQuery<Employee[]>({
     queryKey: ['employees-payroll', user?.factory_id],
@@ -172,33 +171,23 @@ export default function PayrollEntry() {
 
   // ── local overrides ──
   const [overrideNormal, setOverrideNormal] = useState<number | null>(null)
-  const [overrideSpecial, setOverrideSpecial] = useState<number | null>(null)
   const [editingUniform, setEditingUniform] = useState(false)
   const [editingSafetyEquip, setEditingSafetyEquip] = useState(false)
-  const [specialNote, setSpecialNote] = useState('')
-  const [extraEntries, setExtraEntries] = useState({ amount_diligence: 0, amount_position: 0, amount_special: 0, deduct_safety_equipment: 0, deduct_uniform: 0 })
+  const [extraEntries, setExtraEntries] = useState({ deduct_safety_equipment: 0, deduct_uniform: 0 })
 
   useEffect(() => {
     if (existingEntry) {
       setOverrideNormal(existingEntry.override_normal != null ? Number(existingEntry.override_normal) : null)
-      setOverrideSpecial(existingEntry.override_special != null ? Number(existingEntry.override_special) : null)
       setEditingUniform(false)
       setEditingSafetyEquip(false)
-      setSpecialNote(existingEntry.special_note || '')
-      const savedSpecial = existingEntry.override_special != null
-        ? Number(existingEntry.override_special)
-        : Number(existingEntry.amount_special || 0)
       setExtraEntries({
-        amount_diligence: Number(existingEntry.amount_diligence || 0),
-        amount_position: Number(existingEntry.amount_position || 0),
-        amount_special: savedSpecial,
         deduct_safety_equipment: Number(existingEntry.deduct_safety_equipment || 0),
         deduct_uniform: Number(existingEntry.deduct_uniform || 0),
       })
     } else {
-      setOverrideNormal(null); setOverrideSpecial(null); setSpecialNote('')
+      setOverrideNormal(null)
       setEditingUniform(false); setEditingSafetyEquip(false)
-      setExtraEntries({ amount_diligence: 0, amount_position: 0, amount_special: 0, deduct_safety_equipment: 0, deduct_uniform: 0 })
+      setExtraEntries({ deduct_safety_equipment: 0, deduct_uniform: 0 })
     }
   }, [existingEntry, selectedEmpId])
 
@@ -289,9 +278,9 @@ export default function PayrollEntry() {
       override_special: null,
       amount_wood_excess: isClerk ? 0 : autoW,
       amount_film: isClerk ? 0 : autoF,
-      amount_special: autoSp + extraEntries.amount_special,
-      amount_diligence: extraEntries.amount_diligence,
-      amount_position: extraEntries.amount_position,
+      amount_special: autoSp,
+      amount_diligence: 0,
+      amount_position: 0,
       social_security_rate: ssRateForEmp,
       deduct_advance: advTotal,
       deduct_safety_equipment: extraEntries.deduct_safety_equipment,
@@ -304,7 +293,7 @@ export default function PayrollEntry() {
     const clerkDaily = rate / 30
     const clerkHourly = clerkDaily / 8
     return { calc: calculatePayroll(input), totalAdvance: advTotal, regAdv, scanAdv, discAdv, safetyAdv, regAdvTotal, scanAdvTotal, discAdvTotal, safetyAdvTotal, autoWood: autoW, autoFilm: autoF, autoSpecial: autoSp, autoSpecialNote: autoSpNote, crossPositions, isClerk, clerkOtHours: clerkOt, clerkOt1xHours: clerkOt1x, clerkOtDays, clerkWeekdayDays: clerkNormDays, clerkWeekendDays: clerkWeekendShifts.length, shiftPayDays: normDays, holidayOtFullDays: holFull, holidayOtHalfDays: holHalf, baseNormal, baseShift, clerkDaily, clerkHourly, holFull, holHalf }
-  }, [selectedEmp, empShifts, empAdvances, overrideNormal, overrideSpecial, extraEntries, ssRate, isThai])
+  }, [selectedEmp, empShifts, empAdvances, overrideNormal, extraEntries, ssRate, isThai])
 
   // ── outdated detection — computed for ALL employees upfront ──
   // So dots update immediately without requiring the user to click each employee.
@@ -365,11 +354,14 @@ export default function PayrollEntry() {
         [advTotal,                     Number(entry.deduct_advance)],
         [c.deduct_social_security,     Number(entry.deduct_social_security)],
       ]
-      const specDiff = Math.min(
-        Math.abs((autoSp + Number(entry.override_special || 0)) - Number(entry.amount_special)),
-        Math.abs(autoSp - Number(entry.amount_special))
+      // Tra Phet income is derived from shifts only. Flag legacy duplicate income for resaving.
+      checks.push(
+        [autoSp, Number(entry.amount_special)],
+        [0, Number(entry.override_special || 0)],
+        [0, Number(entry.amount_diligence || 0)],
+        [0, Number(entry.amount_position || 0)],
       )
-      if (checks.some(([a, b]) => Math.abs(a - b) > eps) || specDiff > eps) set.add(emp.id)
+      if (checks.some(([a, b]) => Math.abs(a - b) > eps)) set.add(emp.id)
     }
     return set
   }, [allEntries, allShifts, allAdvances, employees, currentPeriod])
@@ -409,11 +401,11 @@ export default function PayrollEntry() {
         amount_ot: Math.round((calc.amount_ot + calc.amount_ot_1x) * 100) / 100,
         amount_wood_excess: Math.round(autoWood * 100) / 100,
         amount_film: Math.round(autoFilm * 100) / 100,
-        amount_special: Math.round((autoSpecial + (extraEntries.amount_special || 0)) * 100) / 100,
-        override_special: extraEntries.amount_special || null,
-        special_note: (specialNote || autoSpecialNote || '').trim(),
-        amount_diligence: extraEntries.amount_diligence,
-        amount_position: extraEntries.amount_position,
+        amount_special: Math.round(autoSpecial * 100) / 100,
+        override_special: null,
+        special_note: autoSpecialNote.trim(),
+        amount_diligence: 0,
+        amount_position: 0,
         deduct_social_security: Math.round(calc.deduct_social_security * 100) / 100,
         deduct_safety_equipment: extraEntries.deduct_safety_equipment,
         deduct_uniform: extraEntries.deduct_uniform,
@@ -777,25 +769,6 @@ export default function PayrollEntry() {
                           ))}
                         </div>
                       )}
-
-                      {/* Income input fields */}
-                      <div style={{ marginTop: 14, borderTop: '1px solid var(--vk-rule-soft)', paddingTop: 14, paddingBottom: 20, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                        <div className="vk-eyebrow" style={{ marginBottom: 2 }}>รายการรายได้เพิ่มเติม</div>
-                        {[
-                          { key: 'amount_diligence', label: `เบี้ยขยัน ${monthCycle ? `(${monthCycle})` : ''} (฿)` },
-                          { key: 'amount_position',  label: `ค่าตำแหน่ง ${monthCycle ? `(${monthCycle})` : ''} (฿)` },
-                          { key: 'amount_special',   label: 'เงินพิเศษ (฿)' },
-                        ].map(f => (
-                          <div key={f.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                            <label style={{ fontSize: 12, color: 'var(--vk-ink-2)' }}>{f.label}</label>
-                            <input type="number" min="0"
-                              value={extraEntries[f.key as keyof typeof extraEntries] || ''}
-                              onChange={e => setExtraEntries(prev => ({ ...prev, [f.key]: Number(e.target.value) || 0 }))}
-                              style={{ width: 90, fontFamily: 'var(--vk-mono)', fontSize: 13, textAlign: 'right', border: '1px solid var(--vk-rule)', background: 'var(--vk-paper)', padding: '4px 8px' }}
-                              placeholder="0" />
-                          </div>
-                        ))}
-                      </div>
 
                       <div style={{ display: 'flex', justifyContent: 'space-between', padding: '14px 0 0', marginTop: 'auto', borderTop: '2px solid var(--vk-rule)' }}>
                         <div className="vk-eyebrow">รวมรายได้</div>
