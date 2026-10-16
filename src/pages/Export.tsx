@@ -21,6 +21,7 @@ import {
   getDatesInRange
 } from '../features/tpi/tpiSummaryExport'
 import { FactoryBillingModal } from '../features/tpi/FactoryBillingModal'
+import { buildSsoExportRows, type SsoExportEntry } from '../lib/ssoExport'
 import '../styles/tokens.css'
 
 interface PayrollPeriod { id: string; period_start: string; period_end: string; status: string | null }
@@ -851,7 +852,7 @@ export default function Export() {
 
       // 4. Fetch all active employees for this factory
       const { data: allEmps = [] } = await supabase.from('employees')
-        .select('id, employee_code, first_name, last_name, position, payment_method, bank_name, bank_account, status, rate_per_12h, wage_type, nationality, exempt_social_security, is_safety_officer, has_position_allowance')
+        .select('id, employee_code, first_name, last_name, position, payment_method, bank_name, bank_account, status, rate_per_12h, wage_type, nationality, exempt_social_security, is_safety_officer, has_position_allowance, national_id, social_security_number, data_complete')
         .eq('factory_id', user?.factory_id ?? '')
       const empMap = new Map<string, any>(allEmps.map((e: any) => [e.id, e]))
 
@@ -935,7 +936,10 @@ export default function Export() {
           } else {
             const isEmpClerk = emp.position === 'clerk'
             const empIsThai = !emp.nationality || emp.nationality === 'ไทย'
-            const empSsRate = empIsThai && !emp.exempt_social_security ? (Number((periodObj as any)?.social_security_rate ?? 0.05)) : 0
+            const empHasSsNumber = !empIsThai ? !!(emp.national_id?.trim() || emp.social_security_number?.trim()) : true
+            const empProfileComplete = !!emp.data_complete
+            const empSsEligible = !emp.exempt_social_security && (empIsThai || (empHasSsNumber && empProfileComplete))
+            const empSsRate = empSsEligible ? (Number((periodObj as any)?.social_security_rate ?? 0.05)) : 0
 
             const isUnpaid = (s: any) => Number(s.actual_hours) === -1
             const payableShifts = empShifts.filter((s: any) => !isUnpaid(s))
@@ -1212,26 +1216,35 @@ export default function Export() {
     try {
       const XLSX = await import('xlsx')
       const { data, error } = await supabase.from('payroll_entries').select(`
-        amount_normal,override_normal,deduct_social_security,
-        employee:employees(national_id,prefix,first_name,last_name,nationality,status)
+        employee_id,amount_normal,override_normal,deduct_social_security,
+        employee:employees(id,employee_code,national_id,social_security_number,prefix,first_name,last_name,nationality,status,exempt_social_security)
       `).in('period_id', ids).limit(10000)
       if (error) throw error; if (!data?.length) { toast.error('ไม่พบข้อมูล'); return }
-      const map: Record<string,any> = {}
-      ;(data as any[]).filter(r => r.employee && (r.employee.nationality || 'ไทย') === 'ไทย').forEach(r => {
-        const k = r.employee.national_id || r.employee.first_name
-        if (!map[k]) map[k] = { emp: r.employee, n: 0, ss: 0 }
-        const normalVal = r.override_normal != null ? Number(r.override_normal) : (r.amount_normal || 0)
-        map[k].n += normalVal
-        map[k].ss += r.deduct_social_security || 0
-      })
-      const rows=Object.values(map).map((x:any)=>({'เลขบัตรประชาชน':x.emp.national_id||'','คำนำหน้า':x.emp.prefix||'','ชื่อ':x.emp.first_name||'','สกุล':x.emp.last_name||'','ค่าจ้าง':x.n,'เงินสมทบ':Math.abs(x.ss)}))
-      if(!rows.length){toast.error('ไม่พบพนักงานสัญชาติไทย');return}
-      const label=getExportLabel(); const wb=XLSX.utils.book_new(); const ws=XLSX.utils.json_to_sheet(rows)
-      XLSX.utils.book_append_sheet(wb,ws,'ประกันสังคม')
-      XLSX.writeFile(wb,`SSO_${label.replace(/[\s/*?:[\]]/g,'_')}.xlsx`)
+      const rows = buildSsoExportRows(data as unknown as SsoExportEntry[])
+      if (!rows.length) {
+        toast.error('ไม่พบข้อมูลพนักงานที่ส่งเงินสมทบประกันสังคม')
+        return
+      }
+
+      const label = getExportLabel()
+      const wb = XLSX.utils.book_new()
+      const ws = XLSX.utils.json_to_sheet(rows)
+      ws['!cols'] = [
+        { wch: 20 }, // เลขบัตรประชาชน
+        { wch: 10 }, // คำนำหน้า
+        { wch: 18 }, // ชื่อ
+        { wch: 18 }, // สกุล
+        { wch: 14 }, // ค่าจ้าง
+        { wch: 14 }, // เงินสมทบ
+      ]
+      XLSX.utils.book_append_sheet(wb, ws, 'ประกันสังคม')
+      XLSX.writeFile(wb, `SSO_${label.replace(/[\s/*?:[\]]/g, '_')}.xlsx`)
       toast.success('ดาวน์โหลดฟอร์มประกันสังคมสำเร็จ')
-    } catch(e:any){toast.error('เกิดข้อผิดพลาด',{description:e.message})}
-    finally{setIsExportingSSO(false)}
+    } catch(e: any) {
+      toast.error('เกิดข้อผิดพลาด', { description: e.message })
+    } finally {
+      setIsExportingSSO(false)
+    }
   }
 
   // ── Employee Database Excel ────────────────────────────────────────────────
