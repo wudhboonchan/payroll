@@ -207,3 +207,69 @@ test('prefers override_normal over amount_normal when present', () => {
   assert.equal(rows[0]['ค่าจ้าง'], 9000)
   assert.equal(rows[0]['เงินสมทบ'], 450)
 })
+
+test('Diamond factory (isTpi: false) strictly excludes foreign employees even if SSO is deducted', () => {
+  const entries = [
+    {
+      employee_id: 'emp-thai-drt',
+      amount_normal: 10000,
+      override_normal: null,
+      deduct_social_security: 500,
+      employee: {
+        id: 'emp-thai-drt',
+        employee_code: 'TH-DRT',
+        national_id: '1100500123456',
+        first_name: 'สมชาย',
+        last_name: 'ใจดี',
+        nationality: 'ไทย',
+        exempt_social_security: false,
+      },
+    },
+    {
+      employee_id: 'emp-foreign-drt',
+      amount_normal: 9000,
+      override_normal: null,
+      deduct_social_security: 450,
+      employee: {
+        id: 'emp-foreign-drt',
+        employee_code: 'MY-DRT',
+        national_id: '0012345678901',
+        social_security_number: '0012345678901',
+        first_name: 'Kyaw',
+        last_name: 'Zayar',
+        nationality: 'เมียนมา',
+        exempt_social_security: false,
+      },
+    },
+  ]
+
+  const rows = buildSsoExportRows(entries, { isTpi: false })
+  assert.equal(rows.length, 1)
+  assert.equal(rows[0]['ชื่อ'], 'สมชาย')
+  assert.equal(rows[0]['เงินสมทบ'], 500)
+})
+
+test('TPI factory (isTpi: true) includes foreign employees with SSO deducted', () => {
+  const entries = [
+    {
+      employee_id: 'emp-foreign-tpi',
+      amount_normal: 9000,
+      override_normal: null,
+      deduct_social_security: 450,
+      employee: {
+        id: 'emp-foreign-tpi',
+        employee_code: 'MY-TPI',
+        national_id: '0012345678901',
+        first_name: 'Kyaw',
+        last_name: 'Zayar',
+        nationality: 'เมียนมา',
+        exempt_social_security: false,
+      },
+    },
+  ]
+
+  const rows = buildSsoExportRows(entries, { isTpi: true })
+  assert.equal(rows.length, 1)
+  assert.equal(rows[0]['ชื่อ'], 'Kyaw')
+  assert.equal(rows[0]['เงินสมทบ'], 450)
+})

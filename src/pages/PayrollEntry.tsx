@@ -164,9 +164,8 @@ export default function PayrollEntry() {
   const ssRate = currentPeriod?.social_security_rate ?? 0.05
   const isThai = !selectedEmp?.nationality || selectedEmp.nationality === 'ไทย'
   const isExempt = !!selectedEmp?.exempt_social_security
-  const hasSsNumber = !isThai ? !!(selectedEmp?.national_id?.trim() || (selectedEmp as any)?.social_security_number?.trim()) : true
-  const isProfileComplete = !!(selectedEmp as any)?.data_complete
-  const isSsEligible = !isExempt && (isThai || (hasSsNumber && isProfileComplete))
+  // ตราเพชร: หักเฉพาะคนไทยเท่านั้นแม้ว่าจะลงทะเบียนพร้อมหักแล้วก็ตาม (ยกเว้นชาวต่างชาติเป็นกรณีพิเศษ)
+  const isSsEligible = !isExempt && isThai
   const ssRateForEmp = isSsEligible ? ssRate : 0
 
   // ── local overrides ──
@@ -307,9 +306,8 @@ export default function PayrollEntry() {
       const advances = allAdvances.filter(a => a.employee_id === emp.id)
       const isEmpClerk = emp.position === 'clerk'
       const empIsThai  = !emp.nationality || emp.nationality === 'ไทย'
-      const empHasSsNumber = !empIsThai ? !!(emp.national_id?.trim() || (emp as any)?.social_security_number?.trim()) : true
-      const empProfileComplete = !!(emp as any)?.data_complete
-      const empSsEligible = !emp.exempt_social_security && (empIsThai || (empHasSsNumber && empProfileComplete))
+      // ตราเพชร: หักเฉพาะคนไทยเท่านั้นแม้ว่าจะลงทะเบียนพร้อมหักแล้วก็ตาม (ยกเว้นชาวต่างชาติเป็นกรณีพิเศษ)
+      const empSsEligible = !emp.exempt_social_security && empIsThai
       const empSsRate  = empSsEligible ? (currentPeriod?.social_security_rate ?? 0.05) : 0
       const isUnpaidShift = (s: any) => Number(s.actual_hours) === -1
       const payableShifts = shifts.filter(s => !isUnpaidShift(s))
@@ -780,7 +778,7 @@ export default function PayrollEntry() {
                     <div className="vk-deduct-col" style={{ padding: '20px 24px', background: 'var(--vk-bone)', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
                       <div className="vk-eyebrow" style={{ color: 'var(--vk-crimson)', marginBottom: 14 }}>DEDUCT · รายการหัก</div>
                       {[
-                        { label: selectedEmp?.exempt_social_security ? 'ประกันสังคม (ยกเว้น)' : `ประกันสังคม ${(ssRate*100).toFixed(0)}%`, value: calc.deduct_social_security, showAlways: true },
+                        { label: selectedEmp?.exempt_social_security ? 'ประกันสังคม (ยกเว้น)' : (!isThai ? 'ประกันสังคม (ยกเว้น - นโยบายตราเพชร)' : `ประกันสังคม ${(ssRate*100).toFixed(0)}%`), value: calc.deduct_social_security, showAlways: true },
                         { label: 'เบิกล่วงหน้า', value: regAdvTotal, sub: regAdv.length > 0 ? `${regAdv.length} รายการเบิกเงินล่วงหน้า` : null, showAlways: true },
                         { label: 'หักสแกนหน้าไม่ผ่าน', value: scanAdvTotal, sub: scanAdv.length > 0 ? `${scanAdv.length} รายการสแกนหน้าไม่สำเร็จ` : null, showAlways: false },
                         { label: 'หักลงโทษขาดงานไม่มีคนแทน', value: discAdvTotal, sub: discAdv.length > 0 ? `${discAdv.length} รายการลงโทษขาดงาน (2 เท่า)` : null, showAlways: false },

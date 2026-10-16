@@ -444,7 +444,8 @@ function calcEmpSummaryStats(emp: any, period: any, shifts: any[], entry: any, a
 
   const grossEarnings = clerkPeriodBase + estBaseWages + estShiftAllowances + estOtPay + estWood + estFilm + estCross + entryDiligence + entryPosition + entrySpecial
 
-  const entrySS = Number(entry?.deduct_social_security || 0)
+  const isThai = !emp?.nationality || emp?.nationality === 'ไทย'
+  const entrySS = isThai ? Number(entry?.deduct_social_security || 0) : 0
   const totalAdvances = advances.reduce((s, a) => s + Number(a.amount || 0), 0)
   const entrySafety = Number(entry?.deduct_safety_equipment || 0)
   const entryUniform = Number(entry?.deduct_uniform || 0)
@@ -892,7 +893,9 @@ export default function Export() {
         map[k].sp += specialVal
         map[k].d += Number(r.amount_diligence || 0)
         map[k].p += Number(r.amount_position || 0)
-        map[k].ss += Math.abs(Number(r.deduct_social_security || 0))
+        const empIsThai = !r.employee.nationality || r.employee.nationality === 'ไทย'
+        const ssDeduct = (!isTpi && !empIsThai) ? 0 : Math.abs(Number(r.deduct_social_security || 0))
+        map[k].ss += ssDeduct
         map[k].adv += Math.abs(Number(r.deduct_advance || 0))
         map[k].safe += Math.abs(Number(r.deduct_safety_equipment || 0))
         map[k].uni += Math.abs(Number(r.deduct_uniform || 0))
@@ -936,9 +939,8 @@ export default function Export() {
           } else {
             const isEmpClerk = emp.position === 'clerk'
             const empIsThai = !emp.nationality || emp.nationality === 'ไทย'
-            const empHasSsNumber = !empIsThai ? !!(emp.national_id?.trim() || emp.social_security_number?.trim()) : true
-            const empProfileComplete = !!emp.data_complete
-            const empSsEligible = !emp.exempt_social_security && (empIsThai || (empHasSsNumber && empProfileComplete))
+            // ตราเพชร: หักเฉพาะคนไทยเท่านั้นแม้ว่าจะลงทะเบียนพร้อมหักแล้วก็ตาม (ยกเว้นชาวต่างชาติเป็นกรณีพิเศษ)
+            const empSsEligible = !emp.exempt_social_security && empIsThai
             const empSsRate = empSsEligible ? (Number((periodObj as any)?.social_security_rate ?? 0.05)) : 0
 
             const isUnpaid = (s: any) => Number(s.actual_hours) === -1
@@ -1004,8 +1006,10 @@ export default function Export() {
       }
 
       const items = Object.values(map).map((x: any) => {
+        const empIsThai = !x.emp?.nationality || x.emp?.nationality === 'ไทย'
+        const effectiveSs = (!isTpi && !empIsThai) ? 0 : x.ss
         const income = x.n + x.s + x.ot + x.w + x.f + x.sp + x.d + (isTpi ? 0 : x.p)
-        const deduct = x.ss + x.adv + x.safe + x.uni
+        const deduct = effectiveSs + x.adv + x.safe + x.uni
         const payMethod = x.emp.payment_method === 'bank_transfer' ? 'โอนธนาคาร' : (x.emp.payment_method === 'cash' ? 'เงินสด' : (x.emp.payment_method || '-'))
         const bankName = x.emp.payment_method === 'bank_transfer' ? (x.emp.bank_name || '-') : '-'
         const bankAccount = x.emp.payment_method === 'bank_transfer' ? (x.emp.bank_account || '-') : '-'
@@ -1023,7 +1027,7 @@ export default function Export() {
           'OT': x.ot,
           'เงินพิเศษ': x.sp,
           'เบี้ยขยัน': x.d,
-          'ประกันสังคม': x.ss,
+          'ประกันสังคม': effectiveSs,
           'เบิกล่วงหน้า': x.adv,
           'ค่าอุปกรณ์ความปลอดภัย': x.safe,
           'ค่าเสื้อพนักงาน': x.uni,
@@ -1043,7 +1047,7 @@ export default function Export() {
           'เงินพิเศษ': x.sp,
           'เบี้ยขยัน': x.d,
           'ค่าตำแหน่ง': x.p,
-          'ประกันสังคม': x.ss,
+          'ประกันสังคม': effectiveSs,
           'เบิกล่วงหน้า': x.adv,
           'ค่าอุปกรณ์ความปลอดภัย': x.safe,
           'ค่าเสื้อพนักงาน': x.uni,
@@ -1220,7 +1224,7 @@ export default function Export() {
         employee:employees(id,employee_code,national_id,social_security_number,prefix,first_name,last_name,nationality,status,exempt_social_security)
       `).in('period_id', ids).limit(10000)
       if (error) throw error; if (!data?.length) { toast.error('ไม่พบข้อมูล'); return }
-      const rows = buildSsoExportRows(data as unknown as SsoExportEntry[])
+      const rows = buildSsoExportRows(data as unknown as SsoExportEntry[], { isTpi })
       if (!rows.length) {
         toast.error('ไม่พบข้อมูลพนักงานที่ส่งเงินสมทบประกันสังคม')
         return
@@ -1298,7 +1302,10 @@ export default function Export() {
         row['ธนาคาร'] = bankName
         row['เลขที่บัญชี'] = bankAccount
         row['เลขประจำตัวผู้เสียภาษี/ประกันสังคม'] = emp.social_security_number || emp.national_id || '-'
-        row['ยกเว้นประกันสังคม'] = emp.exempt_social_security ? 'ยกเว้น' : 'หัก ปกส.'
+        const isThaiEmp = !emp.nationality || emp.nationality === 'ไทย'
+        row['ยกเว้นประกันสังคม'] = (!isTpi && !isThaiEmp)
+          ? 'ยกเว้น (นโยบายตราเพชร)'
+          : (emp.exempt_social_security ? 'ยกเว้น' : 'หัก ปกส.')
         row['เจ้าหน้าที่ จป.'] = emp.is_safety_officer ? 'เป็น จป.' : '-'
         if (!isTpi) {
           row['ค่าตำแหน่ง'] = emp.has_position_allowance ? 'มี' : '-'

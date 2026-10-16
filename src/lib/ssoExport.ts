@@ -26,13 +26,24 @@ export interface SsoExportRow {
   'เงินสมทบ': number
 }
 
+export interface SsoExportOptions {
+  /**
+   * If false, Diamond (ตราเพชร) factory rules apply: foreigners are strictly excluded.
+   * If true or undefined, TPI factory / general rules apply: foreigners with SSO deduction are included.
+   */
+  isTpi?: boolean
+}
+
 /**
  * Builds rows for Social Security Fund (สปส. 1-10) Excel export.
- * - Includes Thai employees (unless explicitly exempt).
- * - Includes foreign employees who have Social Security deducted.
- * - Excludes foreign employees without Social Security deductions.
+ * - Diamond factory (isTpi: false): Includes ONLY Thai employees not exempt. Foreigners are NEVER included.
+ * - TPI factory (isTpi: true / default):
+ *   - Includes Thai employees (unless explicitly exempt).
+ *   - Includes foreign employees who have Social Security deducted.
+ *   - Excludes foreign employees without Social Security deductions.
  */
-export function buildSsoExportRows(entries: SsoExportEntry[]): SsoExportRow[] {
+export function buildSsoExportRows(entries: SsoExportEntry[], options?: SsoExportOptions): SsoExportRow[] {
+  const isTpi = options?.isTpi !== false
   const map: Record<string, { emp: SsoExportEntry['employee']; idNumber: string; n: number; ss: number }> = {}
 
   entries.forEach(r => {
@@ -40,6 +51,11 @@ export function buildSsoExportRows(entries: SsoExportEntry[]): SsoExportRow[] {
     const isThai = !r.employee.nationality || r.employee.nationality === 'ไทย'
     const ssAmt = Number(r.deduct_social_security || 0)
     const hasSsDeduction = Math.abs(ssAmt) > 0
+
+    // For Diamond factory (not TPI), foreigners must NOT be deducted or exported
+    if (!isTpi && !isThai) {
+      return
+    }
 
     // Include any employee with SSO deduction, or Thai employees not exempt from SSO
     if (!hasSsDeduction && (!isThai || r.employee.exempt_social_security)) {
@@ -57,7 +73,11 @@ export function buildSsoExportRows(entries: SsoExportEntry[]): SsoExportRow[] {
   })
 
   return Object.values(map)
-    .filter(x => Math.abs(x.ss) > 0 || (!x.emp.exempt_social_security && (!x.emp.nationality || x.emp.nationality === 'ไทย')))
+    .filter(x => {
+      const isThai = !x.emp.nationality || x.emp.nationality === 'ไทย'
+      if (!isTpi && !isThai) return false
+      return Math.abs(x.ss) > 0 || (!x.emp.exempt_social_security && isThai)
+    })
     .map(x => ({
       'เลขบัตรประชาชน': x.idNumber || x.emp.national_id?.trim() || x.emp.social_security_number?.trim() || '',
       'คำนำหน้า': x.emp.prefix || '',

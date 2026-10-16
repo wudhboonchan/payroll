@@ -498,9 +498,8 @@ export default function PaySlip() {
       return Math.round((e.getTime() - s.getTime()) / 86400000) + 1
     })()
     const isExempt = !!selectedEmp?.exempt_social_security
-    const hasSsNumber = !isThai ? !!(selectedEmp?.national_id?.trim() || selectedEmp?.social_security_number?.trim()) : true
-    const isProfileComplete = !!selectedEmp?.data_complete
-    const isSsEligible = !isExempt && (isThai || (hasSsNumber && isProfileComplete))
+    // ตราเพชร: หักเฉพาะคนไทยเท่านั้นแม้ว่าจะลงทะเบียนพร้อมหักแล้วก็ตาม (ยกเว้นชาวต่างชาติเป็นกรณีพิเศษ)
+    const isSsEligible = !isExempt && isThai
     return calculatePayroll({
       position: selectedEmp.position as 'worker' | 'clerk',
       wage_type: selectedEmp.wage_type as 'daily' | 'monthly',
@@ -717,7 +716,9 @@ export default function PaySlip() {
     // 2. Fallback to live calculated value from payroll engine if DB is 0 or null (e.g. stale cache or updated profile)
     const dbSs = Number(entry.deduct_social_security || 0)
     const calcSs = isTpi ? Number(tpiCalc?.deductSocialSecurity || 0) : Number(stdCalc?.deduct_social_security || 0)
-    const ssVal = dbSs > 0 ? dbSs : (calcSs > 0 ? calcSs : 0)
+    // ตราเพชร: ไม่หัก ปกส ชาวต่างชาติ
+    const effectiveDbSs = (!isTpi && !isThai) ? 0 : dbSs
+    const ssVal = effectiveDbSs > 0 ? effectiveDbSs : (calcSs > 0 ? calcSs : 0)
 
     if (ssVal > 0) {
       list.push({ label: 'ประกันสังคม', value: ssVal })

@@ -534,7 +534,8 @@ export default function EmployeeSummary() {
     const grossEarnings = clerkPeriodBase + estBaseWages + estShiftAllowances + estOtPay + estWood + estFilm + estCross
 
     // Deductions
-    const entrySS = Number(empEntry?.deduct_social_security || 0)
+    const isThai = typeof selectedEmp !== 'undefined' && selectedEmp ? (!selectedEmp.nationality || selectedEmp.nationality === 'ไทย') : true
+    const entrySS = isThai ? Number(empEntry?.deduct_social_security || 0) : 0
     const totalAdvances = empAdvances.reduce((s, a) => s + Number(a.amount || 0), 0)
     const entrySafety = Number(empEntry?.deduct_safety_equipment || 0)
     const entryUniform = Number(empEntry?.deduct_uniform || 0)
