@@ -16,6 +16,8 @@ export type Database = {
     Tables: {
       advance_payments: {
         Row: {
+          is_carryover: boolean
+          advance_number: number | null
           amount: number
           created_at: string | null
           employee_id: string
@@ -26,6 +28,8 @@ export type Database = {
           request_date: string | null
         }
         Insert: {
+          is_carryover?: boolean
+          advance_number?: number | null
           amount: number
           created_at?: string | null
           employee_id: string
@@ -36,6 +40,8 @@ export type Database = {
           request_date?: string | null
         }
         Update: {
+          is_carryover?: boolean
+          advance_number?: number | null
           amount?: number
           created_at?: string | null
           employee_id?: string

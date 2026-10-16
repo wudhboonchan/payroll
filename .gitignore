@@ -30,3 +30,6 @@ scratch/
 *.xls
 /*.jpg
 /*.png
+
+# Supabase CLI temp files
+supabase/.temp/

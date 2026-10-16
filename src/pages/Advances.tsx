@@ -4,7 +4,8 @@ import { supabase } from '../lib/supabase'
 import { useAppStore } from '../store/useAppStore'
 import { TopBar } from '../components/layout/TopBar'
 import { useState, useMemo } from 'react'
-import { Plus, Trash2, Pencil, AlertTriangle, Search, X, Camera, ShieldAlert, UserX } from 'lucide-react'
+import { Plus, Trash2, Pencil, AlertTriangle, Search, X, Camera, ShieldAlert, UserX, Upload } from 'lucide-react'
+import AdvanceImportModal from './AdvanceImportModal'
 import { toast } from 'sonner'
 import type { Job, WageProfile } from '../features/tpi/model'
 import { localDate, isTpiCompany } from '../features/tpi/model'
@@ -152,11 +153,13 @@ export default function Advances() {
   const isTpi = isTpiCompany(currentFactoryName)
 
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [importPeriod, setImportPeriod] = useState<{ id: string; label: string; factoryId: string } | null>(null)
   const [modalMode, setModalMode] = useState<'advance' | 'carryover'>('advance')
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingEmp, setEditingEmp] = useState<{ employee_code: string; first_name: string; last_name: string; nationality?: string | null } | null>(null)
-  const [form, setForm] = useState({ employee_id: '', amount: '', notes: '' })
+  const [form, setForm] = useState({ employee_id: '', amount: '', notes: '', advance_number: 1 })
+  const [editingRegularAdvance, setEditingRegularAdvance] = useState(true)
   const [empSearch, setEmpSearch] = useState('')
 
   // ── Scan failure deduction (สแกนหน้าไม่สำเร็จ) state ──
@@ -210,7 +213,8 @@ export default function Advances() {
   const openCreate = (mode: 'advance' | 'carryover' = 'advance') => {
     setEditingId(null)
     setModalMode(mode)
-    setForm({ employee_id: '', amount: '', notes: mode === 'carryover' ? 'ยอดเบิกเกินค้างจากงวดก่อน' : '' })
+    setEditingRegularAdvance(mode === 'advance')
+    setForm({ employee_id: '', amount: '', notes: mode === 'carryover' ? 'ยอดเบิกเกินค้างจากงวดก่อน' : '', advance_number: 1 })
     setIsModalOpen(true)
   }
 
@@ -218,7 +222,8 @@ export default function Advances() {
     setEditingId(a.id)
     setModalMode(a.is_carryover ? 'carryover' : 'advance')
     const empId = a.employee_id || ''
-    setForm({ employee_id: empId, amount: String(a.amount), notes: a.notes || '' })
+    setEditingRegularAdvance(a.advance_number != null)
+    setForm({ employee_id: empId, amount: String(a.amount), notes: a.notes || '', advance_number: a.advance_number || 1 })
     setEditingEmp(a.employee as any)
     setIsModalOpen(true)
   }
@@ -228,7 +233,7 @@ export default function Advances() {
     setEditingId(null)
     setEditingEmp(null)
     setModalMode('advance')
-    setForm({ employee_id: '', amount: '', notes: '' })
+    setForm({ employee_id: '', amount: '', notes: '', advance_number: 1 })
     setEmpSearch('')
   }
 
@@ -257,7 +262,7 @@ export default function Advances() {
     queryFn: async () => {
       if (!currentPeriod) return []
       const [advRes, shiftRes] = await Promise.all([
-        supabase.from('advance_payments').select('id,employee_id,amount,notes,request_date,is_carryover,created_at,employee:employees(employee_code,first_name,last_name,nationality)').eq('period_id', currentPeriod.id).order('is_carryover', { ascending: false }).order('created_at', { ascending: false }),
+        supabase.from('advance_payments').select('id,employee_id,amount,notes,request_date,is_carryover,advance_number,created_at,employee:employees(employee_code,first_name,last_name,nationality)').eq('period_id', currentPeriod.id).order('is_carryover', { ascending: false }).order('created_at', { ascending: false }),
         supabase.from('shift_assignments').select('employee_id,work_date').eq('period_id', currentPeriod.id)
       ])
       if (advRes.error) throw advRes.error
@@ -732,16 +737,17 @@ export default function Advances() {
       if (!form.amount) throw new Error('กรุณากรอกจำนวนเงิน')
       if (isEdit) {
         const { error } = await supabase.from('advance_payments')
-          .update({ amount: parseFloat(form.amount), notes: form.notes || null })
+          .update({ amount: parseFloat(form.amount), notes: form.notes || null, ...(editingRegularAdvance ? { advance_number: form.advance_number } : {}) })
           .eq('id', editingId!)
-        if (error) throw error
+        if (error) throw new Error(error.code === '23505' ? 'พนักงานนี้มีรายการเบิกครั้งที่เลือกในงวดนี้แล้ว' : error.message)
       } else {
         const { error } = await supabase.from('advance_payments').insert({
           period_id: currentPeriod.id, employee_id: form.employee_id,
           amount: parseFloat(form.amount), notes: form.notes || null,
           is_carryover: modalMode === 'carryover',
+          advance_number: modalMode === 'carryover' ? null : form.advance_number,
         })
-        if (error) throw error
+        if (error) throw new Error(error.code === '23505' ? 'พนักงานนี้มีรายการเบิกครั้งที่เลือกในงวดนี้แล้ว' : error.message)
       }
     },
     onSuccess: async () => {
@@ -804,6 +810,7 @@ export default function Advances() {
   return (
     <div className="vk-root" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
       <TopBar title="เบิกล่วงหน้า" subtitle={currentPeriod?.label} onMenuClick={onMenuClick} />
+      {importPeriod && importPeriod.factoryId === user?.factory_id && <AdvanceImportModal period={importPeriod} factoryId={importPeriod.factoryId} onClose={() => setImportPeriod(null)} />}
 
       {/* ── Sticky header (never scrolls) ─────────────────────────── */}
       <div style={{ flexShrink: 0, padding: '24px 36px 0', maxWidth: 1136, width: '100%', margin: '0 auto', boxSizing: 'border-box' }}>
@@ -868,6 +875,9 @@ export default function Advances() {
                 </button>
               </>
             )}
+            <button className="vk-btn vk-btn--ghost" disabled={!currentPeriod || !user?.factory_id} onClick={() => {
+              if (currentPeriod && user?.factory_id) setImportPeriod({ id: currentPeriod.id, label: currentPeriod.label, factoryId: user.factory_id })
+            }}><Upload style={{ width: 15, height: 15 }} /> นำเข้าจาก Excel</button>
             <button className="vk-btn vk-btn--primary" onClick={() => openCreate('advance')} disabled={!currentPeriod}>
               <Plus style={{ width: 15, height: 15 }} /> เพิ่มรายการเบิก
             </button>
@@ -1003,7 +1013,7 @@ export default function Advances() {
                   <td style={{ padding: '13px 14px', fontWeight: 600, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {emp?.first_name} {emp?.last_name}{fmtNationality(emp?.nationality) ? ` (${fmtNationality(emp?.nationality)})` : ''}
                   </td>
-                  <td style={{ padding: '13px 14px', fontSize: 13, color: 'var(--vk-ink-3)', wordBreak: 'break-word' }}>{renderNotes(a.notes)}</td>
+                  <td style={{ padding: '13px 14px', fontSize: 13, color: 'var(--vk-ink-3)', wordBreak: 'break-word' }}>{a.advance_number != null && <div style={{ fontSize: 11, color: 'var(--vk-persimmon)', marginBottom: 4 }}>เบิกครั้งที่ {a.advance_number}</div>}{renderNotes(a.notes)}</td>
                   <td style={{ padding: '13px 14px', textAlign: 'right', fontFamily: 'var(--vk-mono)', fontSize: 14, fontVariantNumeric: 'tabular-nums', color: 'var(--vk-crimson)', whiteSpace: 'nowrap' }}>
                     – {Number(a.amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                   </td>
@@ -1133,6 +1143,13 @@ export default function Advances() {
                 <label className="vk-eyebrow" style={{ display: 'block', marginBottom: 5 }}>จำนวนเงิน (บาท)</label>
                 <input className="vk-input vk-input--mono" type="number" placeholder="0.00" value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} />
               </div>
+              {modalMode === 'advance' && editingRegularAdvance && <div>
+                <label htmlFor="advance-number" className="vk-eyebrow" style={{ display: 'block', marginBottom: 5 }}>ครั้งที่เบิก</label>
+                <select id="advance-number" className="vk-input" value={form.advance_number} onChange={event => setForm(previous => ({ ...previous, advance_number: Number(event.target.value) }))}>
+                  <option value={1}>ครั้งที่ 1</option>
+                  <option value={2}>ครั้งที่ 2</option>
+                </select>
+              </div>}
               <div>
                 <label className="vk-eyebrow" style={{ display: 'block', marginBottom: 5 }}>หมายเหตุ</label>
                 <input className="vk-input" placeholder="เช่น ค่ารักษาพยาบาล" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
