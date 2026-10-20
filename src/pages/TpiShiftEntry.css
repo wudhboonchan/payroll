@@ -298,6 +298,13 @@
 
 .vk-tpi-dept-block:last-child {
   border-bottom: 0;
+  border-radius: 0 0 7px 7px;
+}
+
+/* Match the last row background to the section's inner corners without
+   clipping wage tooltips or other content that extends beyond the section. */
+.vk-tpi-group-section > .vk-tpi-dept-block:last-child > .vk-tpi-row:last-child {
+  border-radius: 0 0 7px 7px;
 }
 
 .vk-tpi-dept-bar {
@@ -1568,3 +1575,68 @@
   font-weight: 400;
   color: var(--vk-ink-3);
 }
+
+/* TPI non-billable work, explicitly scoped classes. */
+.vk-tpi-group-banner.banner-non-billable { background: #f7e8ed; color: #800020; border-color: #b77b8a; }
+.banner-non-billable h2 { color: #800020; }
+.tpi-non-billable-panel { background: #f7e8ed; color: #800020; border: 1px solid #b77b8a; border-radius: 6px; padding: 8px 10px; display: grid; gap: 8px; font-family: var(--vk-sans, sans-serif); font-size: 11px; line-height: 1.5; }
+.tpi-non-billable-panel summary { font-family: inherit; font-size: 11px; font-weight: 600; cursor: pointer; overflow-wrap: anywhere; }
+.tpi-non-billable-panel summary svg { display: inline-block; vertical-align: -2px; margin-right: 4px; }
+.tpi-non-billable-panel label { display: grid; gap: 4px; margin-top: 6px; font-family: inherit; font-size: 11px; font-weight: 400; }
+.tpi-non-billable-panel .vk-input { width: 100%; min-width: 0; box-sizing: border-box; padding: 6px 8px; font-family: inherit; font-size: 12px; line-height: 1.5; }
+
+/* All original job columns stay visible, with compact grouped rate headers. */
+.tpi-job-management { min-width: 0; width: 100%; }
+.tpi-job-management > div { min-width: 0; }
+.tpi-job-management .tpi-job-table-wrap { width: 100%; max-width: 1380px; overflow: hidden; border: 1px solid var(--vk-rule-soft); border-radius: 8px; background: #fff; }
+.tpi-job-management .tpi-job-codes-table { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: 12px; }
+.tpi-job-management .tpi-job-codes-table th,
+.tpi-job-management .tpi-job-codes-table td { padding: 10px 6px; border-bottom: 1px solid var(--vk-rule-soft); overflow-wrap: anywhere; }
+.tpi-job-management .tpi-job-codes-table th { background: #f5f2eb; font-size: 11px; font-weight: 600; text-align: center; vertical-align: middle; line-height: 1.5; }
+.tpi-job-management .tpi-job-codes-table td { vertical-align: middle; line-height: 1.6; }
+.tpi-job-management .tpi-job-codes-table thead tr:first-child th:nth-child(-n+3) { text-align: left; }
+.tpi-job-management .tpi-job-codes-table thead tr:first-child th { padding-top: 10px; padding-bottom: 5px; }
+.tpi-job-management .tpi-job-codes-table thead tr:last-child th { padding-top: 4px; padding-bottom: 8px; color: var(--vk-ink-3); }
+.tpi-job-management .tpi-job-group-head,
+.tpi-job-management .tpi-job-group-start { border-left: 1px solid var(--vk-rule-soft); }
+.tpi-job-management .tpi-job-codes-table tbody tr:last-child td { border-bottom: 0; }
+.tpi-job-management .tpi-job-codes-table tbody tr:hover { background: #fcfaf6; }
+.tpi-job-management .tpi-job-description p { margin: 0; }
+.tpi-job-management .tpi-job-description small { display: block; margin-top: 4px; color: #a16207; font-size: 10px; }
+.tpi-job-management .tpi-job-code { font-size: 11px; font-family: var(--vk-mono); }
+.tpi-job-management .tpi-job-center { text-align: center; font-size: 11px; }
+.tpi-job-management .tpi-job-number { text-align: center; font-variant-numeric: tabular-nums; font-weight: 600; font-size: 12px; }
+.tpi-job-management .tpi-job-billing { color: #1e40af; }
+.tpi-job-margin { color: #15803d; }
+.tpi-job-margin.is-negative { color: #dc2626; }
+.tpi-job-margin small { display: block; font-size: 10px; font-weight: 400; }
+.tpi-job-unit { display: inline; color: var(--vk-ink-3); font-size: 10px; }
+.tpi-job-muted { color: var(--vk-ink-3); }
+.tpi-job-type, .tpi-job-clerk, .tpi-job-general, .tpi-job-status { display: inline-block; padding: 3px 5px; border-radius: 4px; font-size: 10px; font-weight: 600; line-height: 1.5; }
+.tpi-job-type-regular { background: #fef3c7; color: #92400e; }
+.tpi-job-type-temporary { background: #dbeafe; color: #1e40af; }
+.tpi-job-type-non_billable { background: #f7e8ed; color: #800020; }
+.tpi-job-clerk { background: #e0e7ff; color: #3730a3; }
+.tpi-job-general { background: #f1f5f9; color: #475569; }
+.tpi-job-status { background: #fee2e2; color: #dc2626; }
+.tpi-job-status.is-active { background: #dcfce7; color: #15803d; }
+.tpi-job-inactive { opacity: .65; }
+.tpi-job-management .tpi-job-edit { padding: 4px; font-size: 11px; min-width: 0; max-width: 100%; }
+@media (max-width: 600px) {
+  .tpi-job-management > div > div { padding-left: 10px !important; padding-right: 10px !important; }
+  .tpi-job-management .vk-field-group { min-width: 0; }
+  .tpi-job-management .vk-modal-container { width: calc(100vw - 24px); }
+}
+
+.tpi-job-management .tpi-job-quota { white-space: nowrap; }
+.tpi-job-management .tpi-job-codes-table thead tr:last-child th { text-align: center; }
+.tpi-job-management .tpi-job-filter-group { display: flex; flex-wrap: wrap; align-items: center; box-sizing: border-box; min-height: 34px; padding: 2px; background: var(--vk-paper); border: 1px solid var(--vk-rule-soft); border-radius: 6px; }
+.tpi-job-management .tpi-job-filter-group button { box-sizing: border-box; height: 28px; line-height: 20px; white-space: nowrap; }
+.tpi-job-filter-item { display: inline-flex; align-items: center; }
+.tpi-job-filter-separator { padding: 0 8px; color: #b9b1a5; white-space: pre; }
+.tpi-job-type-filters button { border: 0; border-radius: 4px; padding: 4px 10px; font: inherit; font-size: 12px; font-weight: 600; color: var(--vk-ink-3); background: transparent; cursor: pointer; }
+.tpi-job-type-filters button[aria-pressed="true"] { background: white; color: var(--vk-ink); box-shadow: 0 1px 3px #0000000d; }
+.tpi-job-type-filters button[data-kind="regular"][aria-pressed="true"] { background: #fef3c7; color: #92400e; }
+.tpi-job-type-filters button[data-kind="temporary"][aria-pressed="true"] { background: #dbeafe; color: #1e40af; }
+.tpi-job-type-filters button[data-kind="non_billable"][aria-pressed="true"] { background: #f7e8ed; color: #800020; }
+.tpi-job-management .tpi-job-add-non-billable { color: #800020; border: 1px solid #b77b8a; background: #fff; display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }

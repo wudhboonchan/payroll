@@ -2,7 +2,7 @@ export type RateTier = 'normal' | 'skilled'
 export type JobGroup = 'clerk' | 'general'
 export type Job = {
   id: string; factory_id: string; code: string; department: string; description: string
-  job_type: 'regular' | 'temporary'; valid_from: string | null; expires_on: string | null
+  job_type: 'regular' | 'temporary' | 'non_billable'; morning_only?: boolean; reference_job_id?: string | null; cost_owner?: string; non_billable_reason?: string; valid_from: string | null; expires_on: string | null
   job_group?: JobGroup
   quota: number; planned_morning: number | null; planned_afternoon: number | null; planned_night: number | null
   normal_rate: number; skilled_rate: number | null; billing_normal_rate?: number | null; billing_skilled_rate?: number | null; billing_rate?: number | null; active: boolean; notes: string; updated_at: string
@@ -41,6 +41,13 @@ export type Entry = {
   is_ot_before_shift?: boolean
   ot_job_id?: string | null
   ot_job_code_snapshot?: string | null
+  full_rate_snapshot?: number | null
+  non_billable?: boolean
+  non_billable_rate?: number | null
+  non_billable_reason?: string
+  cost_owner?: string
+  position_snapshot?: string
+  reference_code_snapshot?: string | null
   is_pending?: boolean
 }
 export type ShiftDay = { revision: number; is_holiday?: boolean; entries: Entry[] }
@@ -142,6 +149,10 @@ export function isClerkJob(job?: { job_group?: string; code?: string; descriptio
 }
 
 export function entryRate(entry: Entry, jobs: Job[], profiles: WageProfile[], date: string, employees?: Employee[]): number | null {
+  if (entry.non_billable_rate != null) {
+    const full = Number(entry.non_billable_rate)
+    return entry.is_half_shift ? full / 2 : full - Math.ceil(full / 8) * (8 - (entry.actual_hours ?? 8))
+  }
   if (entry.rate_snapshot !== undefined) {
     const r = Number(entry.rate_snapshot)
     return r
@@ -151,6 +162,7 @@ export function entryRate(entry: Entry, jobs: Job[], profiles: WageProfile[], da
   const profile = profiles.find(p => p.employee_id === entry.employee_id)
   const emp = employees?.find(e => e.id === entry.employee_id)
   const isSkilledTier = wageTier(profile, date) === 'skilled'
+  const referenceJob = job.job_type === 'non_billable' ? jobs.find(j => j.id === job.reference_job_id) : undefined
 
   // Clerk group jobs (692021, 692032, 692041, 692050):
   // Skilled clerk employees receive skilled_rate (377) on any clerk job without single-job lock.
@@ -164,8 +176,8 @@ export function entryRate(entry: Entry, jobs: Job[], profiles: WageProfile[], da
     // General jobs: skilled rate applies if this is the employee's regular assigned job
     isSkilledApplicable = isSkilledTier && (
       (!profile?.job_id && !profile?.job_code && !emp?.job_title) ||
-      (profile?.job_id && profile.job_id === entry.job_id) ||
-      (profile?.job_code && job.code.trim().toLowerCase() === profile.job_code.trim().toLowerCase()) ||
+      (profile?.job_id && (profile.job_id === entry.job_id || profile.job_id === referenceJob?.id)) ||
+      (profile?.job_code && [job.code, referenceJob?.code].some(code => code?.trim().toLowerCase() === profile.job_code!.trim().toLowerCase())) ||
       (emp?.job_title && (
         job.code.trim().toLowerCase() === emp.job_title.trim().toLowerCase() ||
         emp.job_title === entry.job_id
@@ -198,7 +210,7 @@ export function getJobBaseRate(
   const isSkilledApplicable =
     isSkilledTier &&
     ((!profile?.job_id && !profile?.job_code && !emp?.job_title) ||
-      (profile?.job_id && profile.job_id === job.id) ||
+      (profile?.job_id && (profile.job_id === job.id || (job.job_type === 'non_billable' && profile.job_id === job.reference_job_id))) ||
       (profile?.job_code && job.code.trim().toLowerCase() === profile.job_code.trim().toLowerCase()) ||
       (emp?.job_title &&
         (job.code.trim().toLowerCase() === emp.job_title.trim().toLowerCase() ||
@@ -250,4 +262,13 @@ export function getJobQuotaStatus(job: Job, assignedCount: number, customTarget?
   if (assignedCount === target) return 'completed'
   if (assignedCount < target) return 'incomplete'
   return 'exceeded'
+}
+
+export function specialWorkError(entries: Entry[], jobs: Job[]): string | null {
+  for (const e of entries) {
+    const job = jobs.find(j => j.id === e.job_id)
+    if (job?.job_type === 'non_billable' && job.morning_only && (e.shift_index !== 0 || entries.filter(row => row.employee_id === e.employee_id).length !== 1 || Number(e.ot_hours || 0) > 0)) return 'งานนี้กำหนดให้ทำกะเช้าเพียงกะเดียวต่อวัน และไม่มี OT'
+    if (e.non_billable_rate != null && (!Number.isFinite(e.non_billable_rate) || e.non_billable_rate < 0)) return 'ค่าแรงต้องเป็นตัวเลขตั้งแต่ 0 ขึ้นไป'
+  }
+  return null
 }

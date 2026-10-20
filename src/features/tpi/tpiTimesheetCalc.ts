@@ -1,4 +1,4 @@
-import { thaiBahtText } from './thaiBahtText'
+import { thaiBahtText } from './thaiBahtText.ts'
 import type { BillingShiftEntry, BillingEmployee } from './tpiBillingCalc'
 
 export interface TimesheetDayCol {
@@ -141,7 +141,7 @@ export function calculateEmployeeTimesheetReport(
   // Group shifts by employee
   const empShiftsMap = new Map<string, BillingShiftEntry[]>()
   for (const s of shifts) {
-    if (!dateIndexMap.has(s.work_date)) continue
+    if (s.non_billable || !dateIndexMap.has(s.work_date)) continue
     const list = empShiftsMap.get(s.employee_id) || []
     list.push(s)
     empShiftsMap.set(s.employee_id, list)

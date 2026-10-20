@@ -1,3 +1,6 @@
+import { jobSaveErrorMessage } from '../features/tpi/jobSaveError'
+import { JobCodeTable } from '../features/tpi/JobCodeTable'
+import { TpiOnly } from '../features/tpi/TpiOnly'
 import { useState, useMemo } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -11,27 +14,27 @@ import {
   Layers,
   Clock,
   CheckCircle2,
-  Edit2,
   X,
   Save,
 } from 'lucide-react'
 import type { Job } from '../features/tpi/model'
 import { demoJobs } from '../features/tpi/demoData'
 import { cleanJobNotes } from '../features/tpi/referenceJobs'
-import { formatThaiBuddhistDate } from '../lib/formatters'
 import { ThaiDatePicker } from '../components/common/ThaiDatePicker'
 import { toast } from 'sonner'
 import '../styles/tokens.css'
 import './TpiShiftEntry.css'
 
-export default function TpiJobManagement() {
+export default function TpiJobManagement() { return <TpiOnly><TpiJobManagementContent /></TpiOnly> }
+
+function TpiJobManagementContent() {
   const outletContext = useOutletContext<{ onMenuClick?: () => void }>()
   const onMenuClick = outletContext?.onMenuClick || (() => {})
   const { user, companyContext } = useAppStore()
   const queryClient = useQueryClient()
 
   const [searchTerm, setSearchTerm] = useState('')
-  const [typeFilter, setTypeFilter] = useState<'all' | 'regular' | 'temporary'>('all')
+  const [typeFilter, setTypeFilter] = useState<'all' | Job['job_type']>('all')
   const [groupFilter, setGroupFilter] = useState<'all' | 'clerk' | 'general'>('all')
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
 
@@ -264,6 +267,10 @@ export default function TpiJobManagement() {
         department: (payload.department || '').trim(),
         description: (payload.description || '').trim(),
         job_type: payload.job_type || 'regular',
+        morning_only: payload.job_type === 'non_billable' && !!payload.morning_only,
+        reference_job_id: payload.job_type === 'non_billable' ? (payload.reference_job_id || null) : null,
+        cost_owner: payload.job_type === 'non_billable' ? (payload.cost_owner || 'หจก.วิราญกร') : '',
+        non_billable_reason: payload.job_type === 'non_billable' ? (payload.non_billable_reason || 'บริษัทรับต้นทุนเอง') : '',
         job_group: jobGroup,
         quota,
         planned_morning: isPlanValid ? pm : null,
@@ -271,9 +278,9 @@ export default function TpiJobManagement() {
         planned_night: isPlanValid ? pn : null,
         normal_rate: Number(payload.normal_rate) || 357,
         skilled_rate: skilledRate,
-        billing_normal_rate: billingNormalRate,
-        billing_skilled_rate: billingSkilledRate,
-        billing_rate: billingNormalRate,
+        billing_normal_rate: payload.job_type === 'non_billable' ? 0 : billingNormalRate,
+        billing_skilled_rate: payload.job_type === 'non_billable' ? 0 : billingSkilledRate,
+        billing_rate: payload.job_type === 'non_billable' ? 0 : billingNormalRate,
         valid_from: payload.valid_from || null,
         expires_on: payload.expires_on || null,
         active: payload.active ?? true,
@@ -337,12 +344,7 @@ export default function TpiJobManagement() {
       setIsModalOpen(false)
     },
     onError: (err: any) => {
-      const msg = err?.message || ''
-      if (msg.includes('tpi_job_codes') && msg.includes('schema cache')) {
-        toast.error('ยังไม่ได้สร้างตาราง tpi_job_codes ใน Supabase กรุณารัน SQL migration_tpi_phase2.sql ใน Supabase SQL Editor')
-      } else {
-        toast.error(`เกิดข้อผิดพลาด: ${msg || 'ไม่สามารถบันทึกได้'}`)
-      }
+      toast.error(jobSaveErrorMessage(err || {}))
     },
   })
 
@@ -370,12 +372,12 @@ export default function TpiJobManagement() {
   }
 
   return (
-    <div className="vk-root" style={{ background: 'var(--vk-paper)', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+    <div className="vk-root tpi-job-management" style={{ background: 'var(--vk-paper)', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
       {/* 1. Header Bar */}
       <TopBar title="จัดการรหัสงาน" onMenuClick={onMenuClick} />
 
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-        <div style={{ padding: '16px 24px 60px', maxWidth: 1400, width: '100%', margin: '0 auto' }}>
+        <div style={{ padding: '16px 24px 60px', maxWidth: 1428, width: '100%', minWidth: 0, boxSizing: 'border-box', margin: '0 auto' }}>
         {/* Page Title & Main Actions */}
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16, marginBottom: 20 }}>
           <div>
@@ -390,6 +392,10 @@ export default function TpiJobManagement() {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <button type="button" className="vk-btn tpi-job-add-non-billable" onClick={() => {
+              handleOpenCreate()
+              setFormData(prev => ({ ...prev, job_type: 'non_billable', department: 'งานไม่ตั้งเบิก', cost_owner: 'หจก.วิราญกร', non_billable_reason: 'บริษัทรับต้นทุนเอง' }))
+            }}><Plus style={{ width: 16, height: 16 }} />เพิ่มงานไม่ตั้งเบิก</button>
             <button
               type="button"
               className="vk-btn vk-btn--primary"
@@ -470,62 +476,22 @@ export default function TpiJobManagement() {
 
           {/* Filter Pills */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', background: 'var(--vk-paper)', border: '1px solid var(--vk-rule-soft)', borderRadius: 6, padding: 2 }}>
-              <button
-                type="button"
-                onClick={() => setTypeFilter('all')}
-                style={{
-                  padding: '4px 10px',
-                  borderRadius: 4,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  border: 'none',
-                  cursor: 'pointer',
-                  background: typeFilter === 'all' ? '#ffffff' : 'transparent',
-                  color: typeFilter === 'all' ? 'var(--vk-ink)' : 'var(--vk-ink-3)',
-                  boxShadow: typeFilter === 'all' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
-                }}
-              >
-                ทุกประเภท ({jobs.length})
-              </button>
-              <button
-                type="button"
-                onClick={() => setTypeFilter('regular')}
-                style={{
-                  padding: '4px 10px',
-                  borderRadius: 4,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  border: 'none',
-                  cursor: 'pointer',
-                  background: typeFilter === 'regular' ? '#ffffff' : 'transparent',
-                  color: typeFilter === 'regular' ? 'var(--vk-ink)' : 'var(--vk-ink-3)',
-                  boxShadow: typeFilter === 'regular' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
-                }}
-              >
-                1. งานประจำ ({stats.regularJobsCount})
-              </button>
-              <button
-                type="button"
-                onClick={() => setTypeFilter('temporary')}
-                style={{
-                  padding: '4px 10px',
-                  borderRadius: 4,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  border: 'none',
-                  cursor: 'pointer',
-                  background: typeFilter === 'temporary' ? '#ffffff' : 'transparent',
-                  color: typeFilter === 'temporary' ? 'var(--vk-ink)' : 'var(--vk-ink-3)',
-                  boxShadow: typeFilter === 'temporary' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
-                }}
-              >
-                2. งานชั่วคราว ({stats.tempJobsCount})
-              </button>
+            <div className="tpi-job-filter-group tpi-job-type-filters" role="group" aria-label="ประเภทงาน">
+              {([
+                { value: 'all', label: 'ทุกประเภท', count: jobs.length },
+                { value: 'regular', label: '1. งานประจำ', count: stats.regularJobsCount },
+                { value: 'temporary', label: '2. งานชั่วคราว', count: stats.tempJobsCount },
+                { value: 'non_billable', label: '3. งานไม่ตั้งเบิก', count: jobs.filter(j => j.job_type === 'non_billable').length },
+              ] as const).map((item, index) => (
+                <span className="tpi-job-filter-item" key={item.value}>
+                  {index > 0 && <span className="tpi-job-filter-separator" aria-hidden="true"> | </span>}
+                  <button type="button" aria-pressed={typeFilter === item.value} data-kind={item.value} onClick={() => setTypeFilter(item.value)}>{item.label} ({item.count})</button>
+                </span>
+              ))}
             </div>
 
             {/* Filter: Job Group */}
-            <div style={{ display: 'flex', background: 'var(--vk-paper)', border: '1px solid var(--vk-rule-soft)', borderRadius: 6, padding: 2 }}>
+            <div className="tpi-job-filter-group">
               <button
                 type="button"
                 onClick={() => setGroupFilter('all')}
@@ -583,7 +549,7 @@ export default function TpiJobManagement() {
             </div>
 
             {/* Filter: Active Status */}
-            <div style={{ display: 'flex', background: 'var(--vk-paper)', border: '1px solid var(--vk-rule-soft)', borderRadius: 6, padding: 2 }}>
+            <div className="tpi-job-filter-group">
               <button
                 type="button"
                 onClick={() => setStatusFilter('all')}
@@ -642,232 +608,7 @@ export default function TpiJobManagement() {
           </div>
         </div>
 
-        {/* 4. Jobs Table */}
-        <div style={{ background: '#ffffff', border: '1px solid var(--vk-rule-soft)', borderRadius: 8, overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13, tableLayout: 'auto' }}>
-              <thead>
-                <tr style={{ background: 'var(--vk-paper)', borderBottom: '1px solid var(--vk-rule-soft)', color: 'var(--vk-ink-2)', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                  <th style={{ padding: '10px 14px', width: 95, whiteSpace: 'nowrap' }}>รหัสงาน</th>
-                  <th style={{ padding: '10px 14px', width: 140, whiteSpace: 'nowrap' }}>แผนก / ฝ่าย</th>
-                  <th style={{ padding: '10px 14px', minWidth: 220 }}>รายละเอียดงาน</th>
-                  <th style={{ padding: '10px 12px', width: 95, textAlign: 'center', whiteSpace: 'nowrap' }}>ประเภท</th>
-                  <th style={{ padding: '10px 12px', width: 95, textAlign: 'center', whiteSpace: 'nowrap' }}>กลุ่มงาน</th>
-                  <th style={{ padding: '10px 12px', width: 85, textAlign: 'center', whiteSpace: 'nowrap' }}>ยอดเต็ม</th>
-                  <th style={{ padding: '10px 10px', width: 95, textAlign: 'right', whiteSpace: 'nowrap', color: '#1e40af' }} title="ค่าแรงตั้งเบิก TPI เรทปกติ (บาท/กะ)">ตั้งเบิกปกติ</th>
-                  <th style={{ padding: '10px 10px', width: 95, textAlign: 'right', whiteSpace: 'nowrap', color: '#1e40af' }} title="ค่าแรงตั้งเบิก TPI เรทฝีมือ (บาท/กะ)">ตั้งเบิกฝีมือ</th>
-                  <th style={{ padding: '10px 10px', width: 90, textAlign: 'right', whiteSpace: 'nowrap' }}>จ่ายปกติ</th>
-                  <th style={{ padding: '10px 10px', width: 90, textAlign: 'right', whiteSpace: 'nowrap' }}>จ่ายฝีมือ</th>
-                  <th style={{ padding: '10px 10px', width: 105, textAlign: 'right', whiteSpace: 'nowrap', color: '#15803d' }} title="กำไรส่วนต่างต่อกะเรทปกติ = ตั้งเบิกปกติ - จ่ายปกติ">ส่วนต่างปกติ</th>
-                  <th style={{ padding: '10px 10px', width: 105, textAlign: 'right', whiteSpace: 'nowrap', color: '#15803d' }} title="กำไรส่วนต่างต่อกะเรทฝีมือ = ตั้งเบิกฝีมือ - จ่ายฝีมือ">ส่วนต่างฝีมือ</th>
-                  <th style={{ padding: '10px 12px', width: 110, textAlign: 'center', whiteSpace: 'nowrap' }}>วันหมดอายุ</th>
-                  <th style={{ padding: '10px 12px', width: 85, textAlign: 'center', whiteSpace: 'nowrap' }}>สถานะ</th>
-                  <th style={{ padding: '10px 14px', width: 80, textAlign: 'center', whiteSpace: 'nowrap' }}>จัดการ</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredJobs.length === 0 ? (
-                  <tr>
-                    <td colSpan={15} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--vk-ink-3)' }}>
-                      ไม่พบรหัสงานที่ตรงกับเงื่อนไขการค้นหา
-                    </td>
-                  </tr>
-                ) : (
-                  filteredJobs.map((job) => {
-                    const isClerk = job.job_group === 'clerk' || ['692021', '692032', '692041', '692050'].includes(job.code.trim())
-                    const bNormal = job.billing_normal_rate ?? job.billing_rate ?? null
-                    const bSkilled = job.billing_skilled_rate ?? null
-                    return (
-                      <tr
-                        key={job.id}
-                        style={{
-                          borderBottom: '1px solid var(--vk-rule-soft)',
-                          background: job.active ? '#ffffff' : '#fafafa',
-                          opacity: job.active ? 1 : 0.65,
-                        }}
-                        className="hover:bg-[#fcfbf9]"
-                      >
-                        {/* รหัสงาน */}
-                        <td style={{ padding: '12px 14px', fontWeight: 700, fontFamily: 'var(--vk-mono)', whiteSpace: 'nowrap' }}>
-                          <span className="vk-tpi-code-tag" style={{ fontSize: 12, padding: '2px 7px' }}>
-                            {job.code}
-                          </span>
-                        </td>
-
-                        {/* แผนก */}
-                        <td style={{ padding: '12px 14px', fontWeight: 600, color: 'var(--vk-ink)', fontSize: 12 }}>
-                          {job.department}
-                        </td>
-
-                        {/* รายละเอียด */}
-                        <td style={{ padding: '12px 14px', color: 'var(--vk-ink-2)' }}>
-                          <div style={{ lineHeight: 1.4 }}>{job.description}</div>
-                          {cleanJobNotes(job.notes) ? (
-                            <div style={{ fontSize: 11, color: '#b45309', marginTop: 3 }}>
-                              {cleanJobNotes(job.notes)}
-                            </div>
-                          ) : null}
-                        </td>
-
-                        {/* ประเภท */}
-                        <td style={{ padding: '12px 12px', textAlign: 'center', whiteSpace: 'nowrap' }}>
-                          <span
-                            style={{
-                              fontSize: 11,
-                              fontWeight: 700,
-                              padding: '2px 8px',
-                              borderRadius: 4,
-                              background: job.job_type === 'regular' ? '#fef3c7' : '#dbeafe',
-                              color: job.job_type === 'regular' ? '#92400e' : '#1e40af',
-                            }}
-                          >
-                            {job.job_type === 'regular' ? 'งานประจำ' : 'งานชั่วคราว'}
-                          </span>
-                        </td>
-
-                        {/* กลุ่มงาน */}
-                        <td style={{ padding: '12px 12px', textAlign: 'center', whiteSpace: 'nowrap' }}>
-                          {isClerk ? (
-                            <span
-                              style={{
-                                fontSize: 11,
-                                fontWeight: 700,
-                                padding: '2px 8px',
-                                borderRadius: 4,
-                                background: '#e0e7ff',
-                                color: '#3730a3',
-                                border: '1px solid #c7d2fe',
-                              }}
-                            >
-                              🏢 เสมียน
-                            </span>
-                          ) : (
-                            <span
-                              style={{
-                                fontSize: 11,
-                                fontWeight: 600,
-                                padding: '2px 8px',
-                                borderRadius: 4,
-                                background: '#f1f5f9',
-                                color: '#475569',
-                              }}
-                            >
-                              🏭 ทั่วไป
-                            </span>
-                          )}
-                        </td>
-
-                        {/* ยอดเต็ม */}
-                        <td style={{ padding: '12px 12px', textAlign: 'center', fontWeight: 800, fontFamily: 'var(--vk-mono)', fontSize: 13, whiteSpace: 'nowrap' }}>
-                          {job.quota} <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--vk-ink-3)' }}>คน</span>
-                        </td>
-
-                        {/* ตั้งเบิกปกติ */}
-                        <td style={{ padding: '12px 10px', textAlign: 'right', fontFamily: 'var(--vk-mono)', fontWeight: 700, color: '#1e40af', whiteSpace: 'nowrap' }}>
-                          {bNormal ? (
-                            <span>฿{bNormal.toLocaleString()}</span>
-                          ) : (
-                            <span style={{ color: 'var(--vk-ink-3)', fontWeight: 400, fontSize: 12 }}>—</span>
-                          )}
-                        </td>
-
-                        {/* ตั้งเบิกฝีมือ */}
-                        <td style={{ padding: '12px 10px', textAlign: 'right', fontFamily: 'var(--vk-mono)', fontWeight: 700, color: '#1e40af', whiteSpace: 'nowrap' }}>
-                          {bSkilled ? (
-                            <span>฿{bSkilled.toLocaleString()}</span>
-                          ) : (
-                            <span style={{ color: 'var(--vk-ink-3)', fontWeight: 400, fontSize: 12 }}>—</span>
-                          )}
-                        </td>
-
-                        {/* จ่ายปกติ */}
-                        <td style={{ padding: '12px 10px', textAlign: 'right', fontFamily: 'var(--vk-mono)', fontWeight: 700, color: 'var(--vk-ink)', whiteSpace: 'nowrap' }}>
-                          ฿{job.normal_rate.toLocaleString()}
-                        </td>
-
-                        {/* จ่ายฝีมือ */}
-                        <td style={{ padding: '12px 10px', textAlign: 'right', fontFamily: 'var(--vk-mono)', fontWeight: 700, whiteSpace: 'nowrap' }}>
-                          {job.skilled_rate ? (
-                            <span style={{ color: '#15803d' }}>฿{job.skilled_rate.toLocaleString()}</span>
-                          ) : (
-                            <span style={{ color: 'var(--vk-ink-3)', fontWeight: 400 }}>—</span>
-                          )}
-                        </td>
-
-                        {/* ส่วนต่างปกติ */}
-                        <td style={{ padding: '12px 10px', textAlign: 'right', whiteSpace: 'nowrap' }}>
-                          {bNormal ? (() => {
-                            const diff = bNormal - job.normal_rate
-                            const pct = bNormal > 0 ? (diff / bNormal) * 100 : 0
-                            return (
-                              <div style={{ fontFamily: 'var(--vk-mono)', fontWeight: 700, color: diff >= 0 ? '#15803d' : '#dc2626', fontSize: 12 }}>
-                                {diff >= 0 ? `+฿${diff.toLocaleString()}` : `-฿${Math.abs(diff).toLocaleString()}`}
-                                <span style={{ fontSize: 10, fontWeight: 500, marginLeft: 3, opacity: 0.85 }}>
-                                  ({pct.toFixed(0)}%)
-                                </span>
-                              </div>
-                            )
-                          })() : (
-                            <span style={{ color: 'var(--vk-ink-3)', fontSize: 12 }}>—</span>
-                          )}
-                        </td>
-
-                        {/* ส่วนต่างฝีมือ */}
-                        <td style={{ padding: '12px 10px', textAlign: 'right', whiteSpace: 'nowrap' }}>
-                          {bSkilled && job.skilled_rate ? (() => {
-                            const diff = bSkilled - job.skilled_rate
-                            const pct = bSkilled > 0 ? (diff / bSkilled) * 100 : 0
-                            return (
-                              <div style={{ fontFamily: 'var(--vk-mono)', fontWeight: 700, color: diff >= 0 ? '#15803d' : '#dc2626', fontSize: 12 }}>
-                                {diff >= 0 ? `+฿${diff.toLocaleString()}` : `-฿${Math.abs(diff).toLocaleString()}`}
-                                <span style={{ fontSize: 10, fontWeight: 500, marginLeft: 3, opacity: 0.85 }}>
-                                  ({pct.toFixed(0)}%)
-                                </span>
-                              </div>
-                            )
-                          })() : (
-                            <span style={{ color: 'var(--vk-ink-3)', fontSize: 12 }}>—</span>
-                          )}
-                        </td>
-
-                        {/* หมดอายุ */}
-                        <td style={{ padding: '12px 12px', textAlign: 'center', fontSize: 12, color: job.expires_on ? '#b45309' : 'var(--vk-ink-3)', whiteSpace: 'nowrap', fontFamily: job.expires_on ? 'var(--vk-mono)' : 'inherit' }}>
-                          {formatThaiBuddhistDate(job.expires_on, 'ไม่มีกำหนด')}
-                        </td>
-
-                        {/* สถานะ */}
-                        <td style={{ padding: '12px 12px', textAlign: 'center', whiteSpace: 'nowrap' }}>
-                          {job.active ? (
-                            <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 6px', borderRadius: 4, background: '#dcfce7', color: '#15803d' }}>
-                              เปิดใช้งาน
-                            </span>
-                          ) : (
-                            <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 6px', borderRadius: 4, background: '#fee2e2', color: '#dc2626' }}>
-                              ยกเลิกรหัสงาน
-                            </span>
-                          )}
-                        </td>
-
-                        {/* ปุ่มจัดการ */}
-                        <td style={{ padding: '12px 14px', textAlign: 'center', whiteSpace: 'nowrap' }}>
-                          <button
-                            type="button"
-                            className="vk-btn vk-btn-secondary"
-                            style={{ padding: '4px 8px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}
-                            onClick={() => handleOpenEdit(job)}
-                          >
-                            <Edit2 style={{ width: 12, height: 12 }} />
-                            แก้ไข
-                          </button>
-                        </td>
-                      </tr>
-                    )
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <JobCodeTable jobs={filteredJobs} onEdit={handleOpenEdit} />
       </div>
       </div>
 
@@ -889,7 +630,7 @@ export default function TpiJobManagement() {
             <div className="vk-modal-header" style={{ padding: '16px 20px', background: '#ffffff', borderBottom: '1px solid var(--vk-rule-soft)' }}>
               <div className="vk-modal-header-left">
                 <div className="vk-modal-title" style={{ fontSize: 16, fontWeight: 700, color: 'var(--vk-ink)' }}>
-                  {editingJob ? `แก้ไขรหัสงาน: ${editingJob.code}` : 'เพิ่มรหัสงานใหม่'}
+                  {editingJob ? `แก้ไขรหัสงาน: ${editingJob.code}` : formData.job_type === 'non_billable' ? 'เพิ่มงานไม่ตั้งเบิก' : 'เพิ่มรหัสงานใหม่'}
                 </div>
                 <div className="vk-modal-subtitle" style={{ fontSize: 12, color: 'var(--vk-ink-3)', marginTop: 2 }}>
                   กำหนดข้อมูลรหัสงาน ความต้องการแรงงาน และอัตราค่าจ้าง
@@ -1000,9 +741,23 @@ export default function TpiJobManagement() {
                     >
                       <option value="regular">1. งานประจำ (Regular)</option>
                       <option value="temporary">2. งานชั่วคราว (Temporary)</option>
+                      <option value="non_billable">3. งานไม่ตั้งเบิก</option>
                     </select>
                   </div>
                 </div>
+
+                {formData.job_type === 'non_billable' && <div className="tpi-non-billable-panel">
+                  <strong>ค่าแรงส่วนนี้บริษัทรับต้นทุนเอง</strong>
+                  <label><span><input type="checkbox" checked={!!formData.morning_only} onChange={e => setFormData({ ...formData, morning_only: e.target.checked })} /> ทำเฉพาะกะเช้า วันละ 1 กะ ไม่มี OT</span></label>
+                  <label>อ้างอิงตำแหน่ง / รหัสงานเดิม (ไม่เพิ่มจำนวนคนในงานต้นฉบับ)
+                    <select className="vk-input" value={formData.reference_job_id || ''} onChange={e => {
+                      const ref = jobs.find(j => j.id === e.target.value)
+                      setFormData({ ...formData, reference_job_id: ref?.id || null, ...(ref ? { description: ref.description, normal_rate: ref.normal_rate, skilled_rate: ref.skilled_rate, job_group: ref.job_group } : {}) })
+                    }}><option value="">ระบุตำแหน่งและเรทเอง</option>{dbJobs.filter(j => j.job_type !== 'non_billable').map(j => <option key={j.id} value={j.id}>{j.code} · {j.description}</option>)}</select>
+                  </label>
+                  <label>ผู้รับต้นทุน<input required className="vk-input" value={formData.cost_owner ?? 'หจก.วิราญกร'} onChange={e => setFormData({ ...formData, cost_owner: e.target.value })} /></label>
+                  <label>เหตุผลไม่ตั้งเบิก<input required className="vk-input" value={formData.non_billable_reason ?? 'บริษัทรับต้นทุนเอง'} onChange={e => setFormData({ ...formData, non_billable_reason: e.target.value })} /></label>
+                </div>}
 
                 {/* Line 4: Quota */}
                 <div className="vk-field-group">
@@ -1031,7 +786,7 @@ export default function TpiJobManagement() {
                   {/* Section A: อัตราตั้งเบิกจาก TPI (เงินรับ) */}
                   <div>
                     <div style={{ fontSize: 12, fontWeight: 700, color: '#1e40af', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span>🏢 1. อัตราตั้งเบิกจากทีพีไอ (เรียกเก็บ TPI)</span>
+                      <span>1. อัตราตั้งเบิก</span>
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                       <div className="vk-field-group">
@@ -1043,7 +798,8 @@ export default function TpiJobManagement() {
                           min={0}
                           step={1}
                           placeholder="เช่น 420, 450"
-                          value={formData.billing_normal_rate ?? ''}
+                          disabled={formData.job_type === 'non_billable'}
+                          value={formData.job_type === 'non_billable' ? 0 : (formData.billing_normal_rate ?? '')}
                           onChange={(e) => {
                             const val = e.target.value === '' ? null : Number(e.target.value)
                             setFormData({ ...formData, billing_normal_rate: val, billing_rate: val })
@@ -1063,7 +819,8 @@ export default function TpiJobManagement() {
                           min={0}
                           step={1}
                           placeholder="เช่น 480, 500 (ถ้ามี)"
-                          value={formData.billing_skilled_rate ?? ''}
+                          disabled={formData.job_type === 'non_billable'}
+                          value={formData.job_type === 'non_billable' ? 0 : (formData.billing_skilled_rate ?? '')}
                           onChange={(e) => setFormData({ ...formData, billing_skilled_rate: e.target.value === '' ? null : Number(e.target.value) })}
                           className="vk-input"
                           style={{ background: '#ffffff', borderColor: '#93c5fd', fontFamily: 'var(--vk-mono)', fontWeight: 700, color: '#1e40af' }}
@@ -1117,7 +874,7 @@ export default function TpiJobManagement() {
                   </div>
 
                   {/* Real-time Profit Margin Preview */}
-                  {(formData.billing_normal_rate || formData.billing_skilled_rate) ? (() => {
+                  {formData.job_type === 'non_billable' ? <p style={{ color: '#800020' }}>บริษัทรับต้นทุนเอง ไม่รวมในยอดตั้งเบิก</p> : (formData.billing_normal_rate || formData.billing_skilled_rate) ? (() => {
                     const bNormal = formData.billing_normal_rate ? Number(formData.billing_normal_rate) : null
                     const bSkilled = formData.billing_skilled_rate ? Number(formData.billing_skilled_rate) : null
                     const nRate = Number(formData.normal_rate) || 357

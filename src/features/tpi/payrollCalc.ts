@@ -13,6 +13,15 @@ export interface TpiShiftRow {
   actual_hours: number
   ot_hours: number
   ot_pay: number
+  is_pending?: boolean
+  non_billable_base_rate?: number | null
+  non_billable?: boolean
+  non_billable_reason?: string
+  cost_owner?: string
+  position_snapshot?: string
+  reference_code_snapshot?: string | null
+  non_billable_rate?: number | null
+  full_rate_snapshot?: number | null
   is_holiday_ot?: boolean
 }
 
@@ -62,6 +71,15 @@ export interface DailyShiftAudit {
   date: string
   isHoliday: boolean
   shifts: {
+    nonBillable?: boolean
+    reason?: string
+    costOwner?: string
+    position?: string
+    referenceCode?: string | null
+    entryId?: string
+    baseRate?: number | null
+    fullRate?: number | null
+    overrideRate?: number | null
     shiftIndex: number
     shiftName: string
     jobCode: string
@@ -182,7 +200,7 @@ export function calculateTpiPayroll(input: TpiPayrollInput): TpiPayrollCalculati
   const isClerk = employee.position === 'clerk'
 
   // Sort shifts chronologically by date and shift_index
-  const sortedShifts = [...shifts].sort((a, b) => {
+  const sortedShifts = shifts.filter(s => !s.non_billable || !s.is_pending).sort((a, b) => {
     if (a.work_date !== b.work_date) return a.work_date.localeCompare(b.work_date)
     return a.shift_index - b.shift_index
   })
@@ -272,6 +290,15 @@ export function calculateTpiPayroll(input: TpiPayrollInput): TpiPayrollCalculati
       const shiftName = SHIFTS[s.shift_index]?.name || `กะ ${s.shift_index + 1}`
 
       return {
+        nonBillable: !!s.non_billable,
+        reason: s.non_billable_reason,
+        costOwner: s.cost_owner,
+        position: s.position_snapshot,
+        referenceCode: s.reference_code_snapshot,
+        entryId: s.id,
+        baseRate: s.non_billable_base_rate,
+        fullRate: s.full_rate_snapshot,
+        overrideRate: s.non_billable_rate,
         shiftIndex: s.shift_index,
         shiftName,
         jobCode: s.job_code_snapshot || '-',

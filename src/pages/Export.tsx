@@ -1,3 +1,4 @@
+import { wageCostSplit } from '../features/tpi/nonBillableLedger'
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
@@ -820,7 +821,7 @@ export default function Export() {
           const PAGE_SHIFT = 1000
           while (true) {
             const { data: sData, error: sErr } = await supabase.from('tpi_shift_entries' as any)
-              .select('id,work_date,employee_id,shift_index,job_id,job_code_snapshot,rate_tier,rate_snapshot,is_half_shift,actual_hours,ot_hours,ot_pay,is_holiday_ot')
+              .select('*')
               .eq('factory_id', user?.factory_id ?? '')
               .gte('work_date', minStart)
               .lte('work_date', maxEnd)
@@ -1015,6 +1016,8 @@ export default function Export() {
         const bankAccount = x.emp.payment_method === 'bank_transfer' ? (x.emp.bank_account || '-') : '-'
         const channel = x.emp.payment_method === 'cash' ? 'เงินสด' : ((x.emp.bank_name || '').trim() || 'ไม่ระบุธนาคาร')
 
+        const tpiCost = isTpi ? wageCostSplit(allShifts.filter(s => s.employee_id === x.emp.id && (periods as PayrollPeriod[]).some(p => ids.includes(p.id) && s.work_date >= p.period_start && s.work_date <= p.period_end))) : null
+
         const row = isTpi ? {
           'รหัสพนักงาน': x.emp.employee_code,
           'ชื่อ-นามสกุล': `${x.emp.first_name} ${x.emp.last_name}`.trim(),
@@ -1031,7 +1034,11 @@ export default function Export() {
           'เบิกล่วงหน้า': x.adv,
           'ค่าอุปกรณ์ความปลอดภัย': x.safe,
           'ค่าเสื้อพนักงาน': x.uni,
-          'รวม': income - deduct
+          'รวม': income - deduct,
+          'ค่าแรงจากกะก่อนปรับยอด': tpiCost!.total,
+          'ค่าแรงส่วนที่ตั้งเบิก': tpiCost!.billable,
+          'ค่าแรงไม่ตั้งเบิก': tpiCost!.nonBillable,
+          'วันทำงานไม่ตั้งเบิก': tpiCost!.nonBillableDays
         } : {
           'รหัสพนักงาน': x.emp.employee_code,
           'ชื่อ-นามสกุล': `${x.emp.first_name} ${x.emp.last_name}`.trim(),
@@ -1083,6 +1090,10 @@ export default function Export() {
             'ค่าอุปกรณ์ความปลอดภัย': sum('ค่าอุปกรณ์ความปลอดภัย'),
             'ค่าเสื้อพนักงาน': sum('ค่าเสื้อพนักงาน'),
             'รวม': sum('รวม'),
+            'ค่าแรงจากกะก่อนปรับยอด': sum('ค่าแรงจากกะก่อนปรับยอด'),
+            'ค่าแรงส่วนที่ตั้งเบิก': sum('ค่าแรงส่วนที่ตั้งเบิก'),
+            'ค่าแรงไม่ตั้งเบิก': sum('ค่าแรงไม่ตั้งเบิก'),
+            'วันทำงานไม่ตั้งเบิก': sum('วันทำงานไม่ตั้งเบิก'),
           }
         }
         return {
@@ -1112,7 +1123,8 @@ export default function Export() {
         { wch: 14 }, { wch: 24 }, { wch: 14 }, { wch: 16 }, { wch: 18 },
         { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 12 },
         { wch: 14 }, { wch: 12 }, { wch: 14 },
-        { wch: 14 }, { wch: 20 }, { wch: 16 }, { wch: 16 }
+        { wch: 14 }, { wch: 20 }, { wch: 16 }, { wch: 16 },
+        { wch: 26 }, { wch: 24 }, { wch: 24 }, { wch: 24 }
       ] : [
         { wch: 14 }, { wch: 24 }, { wch: 14 }, { wch: 16 }, { wch: 18 },
         { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 12 },
@@ -1459,7 +1471,7 @@ export default function Export() {
           const PAGE_SHIFT = 1000
           while (true) {
             const { data, error } = await supabase.from('tpi_shift_entries' as any)
-              .select('id,work_date,employee_id,shift_index,job_id,job_code_snapshot,rate_tier,rate_snapshot,is_half_shift,actual_hours,ot_hours,ot_pay,is_holiday_ot')
+              .select('*')
               .eq('factory_id', user?.factory_id ?? '')
               .in('employee_id', empIds)
               .gte('work_date', minStart)
@@ -1708,7 +1720,7 @@ body>div>div{border:none!important;box-shadow:none!important;border-bottom:1px s
           const PAGE_SHIFT = 1000
           while (true) {
             const { data: sData, error: sErr } = await supabase.from('tpi_shift_entries' as any)
-              .select('id,work_date,employee_id,shift_index,job_id,job_code_snapshot,rate_tier,rate_snapshot,is_half_shift,actual_hours,ot_hours,ot_pay,is_holiday_ot')
+              .select('*')
               .eq('factory_id', user?.factory_id ?? '')
               .gte('work_date', minStart)
               .lte('work_date', maxEnd)

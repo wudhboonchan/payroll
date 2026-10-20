@@ -1,3 +1,6 @@
+import { specialWorkError } from '../features/tpi/model'
+import { NonBillableRates } from '../features/tpi/NonBillableRates'
+import { TpiOnly } from '../features/tpi/TpiOnly'
 import { invalidateTpiAttendanceAndShifts } from '../features/tpi/attendanceCache'
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useOutletContext, useNavigate } from 'react-router-dom'
@@ -28,6 +31,7 @@ import type { AttendanceLog } from '../features/tpi/attendanceApi'
 import { loadDailyAttendance, formatAttendanceSummary } from '../features/tpi/attendanceApi'
 import {
   SHIFTS,
+  entryRate,
   isJobAvailable,
   isClerkJob,
   wageTier,
@@ -40,7 +44,7 @@ import {
 import { getMainDepartment, cleanJobNotes } from '../features/tpi/referenceJobs'
 import { employeeWageForm } from '../features/tpi/employeeWageForm'
 import { demoJobs, demoEmployees, demoWageProfiles, demoInitialEntries } from '../features/tpi/demoData'
-import { loadDay, saveDay, preassignShifts, errorMessage } from '../features/tpi/api'
+import { loadDay, saveDay, preassignShifts, errorMessage, tpiDb } from '../features/tpi/api'
 import { formatThaiBuddhistDate, compareEmployeeCode, formatPeriodLabel, filterActivePeriods } from '../lib/formatters'
 import { ThaiDatePicker } from '../components/common/ThaiDatePicker'
 import type { SafetyIncident } from '../features/tpi/safetyFines'
@@ -125,7 +129,7 @@ const formatJobForDb = (ref: Job, factoryId: string) => {
     code: ref.code.trim(),
     department: ref.department ? ref.department.trim() : '',
     description: ref.description ? ref.description.trim() : '',
-    job_type: (isTemp ? 'temporary' : 'regular') as 'temporary' | 'regular',
+    job_type: ref.job_type,
     job_group: ref.job_group || (['692021', '692032', '692041', '692050'].includes(ref.code.trim()) ? 'clerk' : 'general'),
     quota,
     planned_morning: isPlanValid ? pm : null,
@@ -242,7 +246,9 @@ export const JobCodeBadge: React.FC<{
   )
 }
 
-export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
+export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = (props) => props.preview ? <TpiShiftEntryContent {...props} /> : <TpiOnly><TpiShiftEntryContent {...props} /></TpiOnly>
+
+const TpiShiftEntryContent: React.FC<TpiShiftEntryProps> = ({
   preview = false,
   initialDate,
 }) => {
@@ -418,7 +424,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
   const { data: dbWageProfiles = [] } = useQuery({
     queryKey: ['tpi-profiles', user?.factory_id],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data, error } = await tpiDb
         .from('tpi_employee_wage_profiles')
         .select('*')
         .eq('factory_id', user?.factory_id ?? '')
@@ -443,8 +449,9 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
     for (const customDbJob of dbMap.values()) {
       merged.push(customDbJob)
     }
+    if (preview) merged.push({ ...demoJobs[0], id: 'preview-non-billable-foreman', code: 'NB-FOREMAN', description: 'โฟร์แมน', department: 'งานไม่ตั้งเบิก', job_type: 'non_billable', morning_only: true, quota: 1, planned_morning: 1, planned_afternoon: 0, planned_night: 0, normal_rate: 357, skilled_rate: null, billing_rate: 0, billing_normal_rate: 0, billing_skilled_rate: 0, cost_owner: 'หจก.วิราญกร', non_billable_reason: 'บริษัทรับต้นทุนเอง' })
     return merged
-  }, [dbJobs])
+  }, [dbJobs, preview])
   const employees = useMemo(() => {
     const list = [...(preview ? demoEmployees : dbEmployees)]
     return list.sort((a, b) => compareEmployeeCode(a.employee_code, b.employee_code))
@@ -524,7 +531,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
         console.warn('loadDay fallback:', e)
         const { data } = await supabase
           .from('tpi_shift_entries')
-          .select('employee_id, shift_index, job_id, rate_tier, rate_snapshot, job_code_snapshot, is_half_shift, actual_hours, ot_hours, ot_pay, is_holiday_ot, is_ot_before_shift, ot_job_id, ot_job_code_snapshot, is_pending')
+          .select('*')
           .eq('factory_id', user.factory_id)
           .eq('work_date', activeDateStr)
         const hasDbHoliday = (data || []).some((e: any) => !!e.is_holiday_ot)
@@ -764,6 +771,10 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
   const temporaryJobs = useMemo(() => {
     return availableJobs.filter((j) => j.job_type === 'temporary')
   }, [availableJobs])
+
+  const nonBillableJobs = useMemo(() => availableJobs.filter(j => j.job_type === 'non_billable'), [availableJobs])
+  const nonBillableGroups = useMemo(() => [{ department: 'บริษัทรับต้นทุนเอง', jobs: nonBillableJobs }], [nonBillableJobs])
+  const nonBillableTargetTotal = nonBillableJobs.reduce((sum, j) => sum + j.quota, 0)
 
   const regularGroups = useMemo(() => {
     const map = new Map<string, Job[]>()
@@ -1264,6 +1275,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
     const updatedEntries = entries.filter((e) => e.employee_id !== modalEmp.id)
     const newEmpEntries: Entry[] = [
       {
+        ...entries.find(e => e.employee_id === modalEmp.id && e.shift_index === modalShift1Index && e.job_id === modalShift1JobId),
         employee_id: modalEmp.id,
         job_id: modalShift1JobId,
         shift_index: modalShift1Index,
@@ -1297,6 +1309,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
       }
 
       newEmpEntries.push({
+        ...entries.find(e => e.employee_id === modalEmp.id && e.shift_index === modalShift2Index && e.job_id === modalShift2JobId),
         employee_id: modalEmp.id,
         job_id: modalShift2JobId,
         shift_index: modalShift2Index,
@@ -1309,7 +1322,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
     }
 
     const candidateEntries = [...updatedEntries, ...newEmpEntries]
-    const err = validateEntries(candidateEntries)
+    const err = specialWorkError(candidateEntries, jobs) || validateEntries(candidateEntries)
     if (err) {
       toast.error(`ไม่สามารถบันทึกได้: ${err}`)
       return
@@ -1325,6 +1338,8 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
 
   const canAssign = useCallback(
     (empId: string, shiftIndex: number, currentJobId?: string) => {
+      const specialError = specialWorkError([...entries, { employee_id: empId, shift_index: shiftIndex, job_id: currentJobId || '' }], jobs)
+      if (specialError) return { ok: false, reason: specialError }
       const u = empUsageMap.get(empId)
       if (!u) return { ok: true }
       if (u.shifts.has(shiftIndex)) {
@@ -1345,7 +1360,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
       }
       return { ok: true }
     },
-    [empUsageMap, entries]
+    [empUsageMap, entries, jobs]
   )
 
   const handleAssignSelected = (jobId: string, shiftIndex: number) => {
@@ -2898,18 +2913,22 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
             </div>
 
             {/* Section 2: ประเภทงานชั่วคราว (Temporary Jobs) */}
-            <div className="vk-tpi-group-section">
-              <div className="vk-tpi-group-banner banner-temp">
+            {[
+              { sectionType: 'temporary', sectionTitle: '2. ประเภทงานชั่วคราว (Temporary Jobs)', sectionTarget: tempTargetTotal, sectionJobs: temporaryJobs, sectionGroups: temporaryGroups },
+              { sectionType: 'non_billable', sectionTitle: '3. งานไม่ตั้งเบิก', sectionTarget: nonBillableTargetTotal, sectionJobs: nonBillableJobs, sectionGroups: nonBillableGroups },
+            ].map(({ sectionType, sectionTitle, sectionTarget, sectionJobs, sectionGroups }) => (
+            <div className="vk-tpi-group-section" key={sectionType}>
+              <div className={`vk-tpi-group-banner ${sectionType === 'non_billable' ? 'banner-non-billable' : 'banner-temp'}`}>
                 <div className="vk-tpi-banner-title">
-                  <h2>2. ประเภทงานชั่วคราว (Temporary Jobs)</h2>
-                  <span className="vk-tpi-banner-tag">เป้าหมายรวม: {tempTargetTotal} คน</span>
+                  <h2>{sectionTitle}</h2>
+                  <span className="vk-tpi-banner-tag">เป้าหมายรวม: {sectionTarget} คน</span>
                 </div>
                 <div className="vk-tpi-banner-stat">
-                  จัดแล้ว: <strong>{entries.filter((e) => temporaryJobs.some((j) => j.id === e.job_id)).length}</strong> / {tempTargetTotal} คน
+                  จัดแล้ว: <strong>{entries.filter((e) => sectionJobs.some((j) => j.id === e.job_id)).length}</strong> / {sectionTarget} คน
                 </div>
               </div>
 
-              {temporaryGroups.map((group) => {
+              {sectionGroups.map((group) => {
                 const deptTarget = group.jobs.reduce((sum, j) => {
                   const t = getShiftTargets(j)
                   return sum + t[0] + t[1] + t[2]
@@ -2972,6 +2991,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                               )}
                             </div>
                             <div className="vk-tpi-desc">{job.description}</div>
+                            {job.job_type === 'non_billable' && <NonBillableRates entries={entries.filter(e => e.job_id === job.id)} job={job} employeeNames={new Map(Array.from(empMap.values()).map(e => [e.id, `${e.first_name} ${e.last_name}`]))} resolveRate={e => entryRate({ ...e, rate_snapshot: undefined, non_billable_rate: null, actual_hours: 8, is_half_shift: false }, jobs, wageProfiles, activeDateStr, employees) ?? job.normal_rate} onChange={entry => setEntries(prev => prev.map(e => e.employee_id === entry.employee_id && e.shift_index === entry.shift_index ? entry : e))} />}
                             <div className="vk-tpi-quota-line">
                               <span className="vk-tpi-quota-label">ยอดที่ต้องใช้:</span>
                               <strong>{todayTarget}</strong> คน
@@ -3175,6 +3195,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                 )
               })}
             </div>
+            ))}
           </div>
         </div>
       </div>
@@ -3308,6 +3329,7 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                         onChange={(e) => setModalShift1JobId(e.target.value)}
                       >
                         <optgroup label="1. ประเภทงานประจำ">
+                          {nonBillableJobs.map(j => <option key={j.id} value={j.id}>{j.code} · {j.description} (ไม่ตั้งเบิก)</option>)}
                           {regularJobs.map((j) => (
                             <option key={j.id} value={j.id}>
                               {isClerkJob(j) ? '🏢 [เสมียน] ' : ''}{j.code} - {j.description.substring(0, 32)}... (ปกติ ฿{j.normal_rate ?? 357}{j.skilled_rate != null ? ` | ฝีมือ ฿${j.skilled_rate}` : ''})
@@ -3497,7 +3519,8 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                             style={{ borderColor: '#fdba74', background: '#ffffff', fontSize: 12 }}
                           >
                             <optgroup label="1. ประเภทงานประจำ">
-                              {regularJobs.map((j) => (
+                              {nonBillableJobs.map(j => <option key={j.id} value={j.id}>{j.code} · {j.description} (ไม่ตั้งเบิก)</option>)}
+                          {regularJobs.map((j) => (
                                 <option key={j.id} value={j.id}>
                                   {isClerkJob(j) ? '🏢 [เสมียน] ' : ''}{j.code} - {j.description.substring(0, 32)}... (ปกติ ฿{j.normal_rate ?? 357}{j.skilled_rate != null ? ` | ฝีมือ ฿${j.skilled_rate}` : ''})
                                 </option>
@@ -3682,7 +3705,8 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                             onChange={(e) => setModalShift2JobId(e.target.value)}
                           >
                             <optgroup label="1. ประเภทงานประจำ">
-                              {regularJobs.map((j) => (
+                              {nonBillableJobs.map(j => <option key={j.id} value={j.id}>{j.code} · {j.description} (ไม่ตั้งเบิก)</option>)}
+                          {regularJobs.map((j) => (
                                 <option key={j.id} value={j.id}>
                                   {isClerkJob(j) ? '🏢 [เสมียน] ' : ''}{j.code} - {j.description.substring(0, 32)}... (ปกติ ฿{j.normal_rate ?? 357}{j.skilled_rate != null ? ` | ฝีมือ ฿${j.skilled_rate}` : ''})
                                 </option>
@@ -4434,11 +4458,11 @@ export const TpiShiftEntry: React.FC<TpiShiftEntryProps> = ({
                                 fontWeight: 700,
                                 padding: '2px 6px',
                                 borderRadius: 4,
-                                background: job.job_type === 'regular' ? '#fef3c7' : '#dbeafe',
-                                color: job.job_type === 'regular' ? '#92400e' : '#1e40af',
+                                background: job.job_type === 'non_billable' ? '#f7e8ed' : job.job_type === 'regular' ? '#fef3c7' : '#dbeafe',
+                                color: job.job_type === 'non_billable' ? '#800020' : job.job_type === 'regular' ? '#92400e' : '#1e40af',
                               }}
                             >
-                              {job.job_type === 'regular' ? 'ประจำ' : 'ชั่วคราว'}
+                              {job.job_type === 'non_billable' ? 'ไม่ตั้งเบิก' : job.job_type === 'regular' ? 'ประจำ' : 'ชั่วคราว'}
                             </span>
                           </td>
 

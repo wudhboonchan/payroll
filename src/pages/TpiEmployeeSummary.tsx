@@ -1,3 +1,4 @@
+import { TpiOnly } from '../features/tpi/TpiOnly'
 import React, { useState, useEffect, useMemo } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
@@ -69,7 +70,9 @@ function thaiDateTimeNow() {
 // ── PDF / Print HTML Builder for TPI ─────────────────────────────────────────
 const buildTpiEmployeeSummaryPdfHtml = buildTpiEmployeeSummaryFullHtml
 
-export default function TpiEmployeeSummary() {
+export default function TpiEmployeeSummary() { return <TpiOnly><TpiEmployeeSummaryContent /></TpiOnly> }
+
+function TpiEmployeeSummaryContent() {
   const { onMenuClick } = useOutletContext<{ onMenuClick: () => void }>()
   const { user } = useAppStore()
   const [selectedEmpId, setSelectedEmpId] = useState<string | null>(null)
@@ -174,7 +177,7 @@ export default function TpiEmployeeSummary() {
         try {
           const { data, error } = await supabase
             .from('tpi_shift_entries' as any)
-            .select('id,work_date,employee_id,shift_index,job_id,job_code_snapshot,rate_tier,rate_snapshot,is_half_shift,actual_hours,ot_hours,ot_pay,is_holiday_ot')
+            .select('*')
             .eq('factory_id', user?.factory_id ?? '')
             .gte('work_date', currentPeriod.period_start)
             .lte('work_date', currentPeriod.period_end)
@@ -416,7 +419,9 @@ export default function TpiEmployeeSummary() {
 
       ws['!cols'] = [
         { wch: 14 }, { wch: 18 }, { wch: 18 }, { wch: 22 }, { wch: 18 },
-        { wch: 14 }, { wch: 10 }, { wch: 14 }, { wch: 18 }
+        { wch: 14 }, { wch: 10 }, { wch: 14 }, { wch: 18 },
+        { wch: 20 }, { wch: 20 }, { wch: 20 }, { wch: 24 }, { wch: 18 },
+        { wch: 40 }, { wch: 24 }, { wch: 38 }, { wch: 20 }, { wch: 20 }
       ]
 
       XLSX.utils.book_append_sheet(wb, ws, 'TPI Summary')
