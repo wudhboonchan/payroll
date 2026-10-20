@@ -1,5 +1,5 @@
-import { formatEmployeeFullName } from '../../lib/formatters'
-import { isTpiJobCode } from './model'
+import { formatEmployeeFullName } from '../../lib/formatters.ts'
+import { isTpiJobCode } from './model.ts'
 import type { TpiPayrollCalculationResult } from './payrollCalc'
 
 export function fmtNationality(n: string | null | undefined): string | null {
@@ -284,7 +284,7 @@ export function buildTpiEmployeeSummaryExcelRows(
   rows.push([])
 
   rows.push(['รหัสพนักงาน', emp.employee_code, 'ชื่อ-นามสกุล', `${formatEmployeeFullName(emp, true)}${isSkilled ? ' ⭐' : ''}`])
-  rows.push(['ตำแหน่ง', posLabel, 'ระดับอัตราค่าจ้าง', isSkilled ? '฿377/กะ (เรทฝีมือ ⭐)' : '฿357/กะ (เรทปกติ)'])
+  rows.push(['ตำแหน่ง', posLabel, 'ระดับอัตราค่าจ้าง', isSkilled ? 'ฝีมือ ⭐ ดูเรทจริงในรายการกะ' : 'ปกติ ดูเรทจริงในรายการกะ'])
   rows.push(['วิธีการรับเงิน', payMethodLabel, 'ธนาคาร', bankName, 'เลขที่บัญชี', bankAccount])
   rows.push([])
 
@@ -293,8 +293,13 @@ export function buildTpiEmployeeSummaryExcelRows(
   rows.push(['รายได้รวม (บาท)', stats.totalIncome, 'รายการหักรวม (บาท)', stats.totalDeductions, 'สุทธิรับจริง NET PAY (บาท)', stats.netPay])
   rows.push([])
 
+  const wageRows = dailyAudit.flatMap(day => day.shifts || [])
+  const nonBillableWage = wageRows.reduce((sum: number, s: any) => sum + (s.nonBillable ? s.totalShiftWage + (s.otPay || 0) : 0), 0)
+  const allWage = wageRows.reduce((sum: number, s: any) => sum + s.totalShiftWage + (s.otPay || 0), 0)
+  rows.push(['ค่าแรงจากกะก่อนปรับยอด', allWage, 'ค่าแรงส่วนที่ตั้งเบิก', allWage - nonBillableWage, 'ค่าแรงไม่ตั้งเบิก', nonBillableWage])
+  rows.push(['หมายเหตุ', 'ยอดนี้เป็นค่าแรงจากกะ ไม่ใช่ยอดใบตั้งเบิกหรือยอดรับสุทธิ การปรับยอดรายงวดแสดงแยกในรายได้รวม'])
   rows.push(['1. บันทึกรายวัน (Daily Log)'])
-  rows.push(['วันที่', 'ประเภทวัน', 'กะ / ลำดับ', 'รหัสงาน (Job Code)', 'ระดับเรท', 'ค่าจ้างกะ (บาท)', 'OT (ชม.)', 'ค่า OT (บาท)', 'รวมรายได้วัน (บาท)'])
+  rows.push(['วันที่', 'ประเภทวัน', 'กะ / ลำดับ', 'รหัสงาน (Job Code)', 'ระดับเรท', 'ค่าจ้างกะ (บาท)', 'OT (ชม.)', 'ค่า OT (บาท)', 'รวมรายได้วัน (บาท)', 'สถานะตั้งเบิก', 'ค่าแรงส่วนที่ตั้งเบิก', 'ค่าแรงไม่ตั้งเบิก', 'ตำแหน่ง', 'งานอ้างอิง', 'เหตุผล', 'ผู้รับต้นทุน', 'เลขรายการ', 'เรทเต็มกะที่ใช้', 'เรทอ้างอิงก่อนแก้'])
 
   dailyAudit.forEach(day => {
     const isWorked = day.shifts && day.shifts.length > 0
@@ -311,11 +316,15 @@ export function buildTpiEmployeeSummaryExcelRows(
           dayTypeLabel,
           s.shiftName + (s.isHalf ? ' (ครึ่งกะ)' : ''),
           s.jobCode + jName,
-          s.tier === 'skilled' ? 'ฝีมือ (฿377) ⭐' : 'ปกติ (฿357)',
+          s.tier === 'skilled' ? 'ฝีมือ ⭐' : 'ปกติ',
           s.totalShiftWage,
           s.otHours || 0,
           s.otPay || 0,
-          s.totalShiftWage + (s.otPay || 0)
+          s.totalShiftWage + (s.otPay || 0),
+          s.nonBillable ? 'ไม่ตั้งเบิก' : 'ตั้งเบิก',
+          s.nonBillable ? 0 : s.totalShiftWage + (s.otPay || 0),
+          s.nonBillable ? s.totalShiftWage + (s.otPay || 0) : 0,
+          s.position || '', s.referenceCode || '', s.reason || '', s.costOwner || '', s.entryId || '', s.fullRate ?? '', s.baseRate ?? ''
         ])
       })
     }

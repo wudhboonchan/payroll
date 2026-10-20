@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { supabase } from '../../lib/supabase'
 import type { Json } from '../../types/database'
-import { jobAvailabilityError, type Job, type WageProfile, type Entry, type ShiftDay } from './model'
+import { specialWorkError, jobAvailabilityError, type Job, type WageProfile, type Entry, type ShiftDay } from './model'
 type Table<Row> = { Row: Row; Insert: Partial<Row>; Update: Partial<Row>; Relationships: [] }
 type TpiDatabase = { public: {
   Tables: { tpi_job_codes: Table<Job>; tpi_employee_wage_profiles: Table<WageProfile> }
@@ -32,6 +32,8 @@ export async function loadDay(factory:string,date:string):Promise<ShiftDay> {
 export async function saveDay(factory:string,date:string,day:ShiftDay) {
   // Check current database settings, since the cached job list may be stale.
   const [currentJobs, savedDay] = await Promise.all([loadJobs(factory), loadDay(factory, date)])
+  const specialError = specialWorkError(day.entries, currentJobs)
+  if (specialError) throw new Error(specialError)
   for (const entry of day.entries) {
     const job = currentJobs.find(j => j.id === entry.job_id)
     if (!job) throw new Error(`ไม่พบรหัสงาน ${entry.job_code_snapshot || entry.job_id} ในโรงงานนี้ กรุณารีเฟรช`)
@@ -42,6 +44,8 @@ export async function saveDay(factory:string,date:string,day:ShiftDay) {
   }
   const entriesPayload = day.entries.map((e:Entry)=>({
     employee_id:e.employee_id,
+    non_billable_rate: e.non_billable_rate ?? null,
+    non_billable_reason: e.non_billable_reason || null,
     shift_index:e.shift_index,
     job_id:e.job_id,
     is_half_shift:!!e.is_half_shift,
@@ -77,6 +81,8 @@ export async function preassignShifts(
 ) {
   const entriesPayload = entries.map((e: Entry) => ({
     employee_id: e.employee_id,
+    non_billable_rate: e.non_billable_rate ?? null,
+    non_billable_reason: e.non_billable_reason || null,
     shift_index: e.shift_index,
     job_id: e.job_id,
     is_half_shift: !!e.is_half_shift,
@@ -99,6 +105,9 @@ export async function preassignShifts(
     if (error) throw error
     return data
   } catch (err: any) {
+    if (entries.some(e => e.non_billable || e.non_billable_rate != null || e.non_billable_reason)) throw err
+    const currentJobs = await loadJobs(factory)
+    if (entries.some(e => currentJobs.some(j => j.id === e.job_id && j.job_type === 'non_billable'))) throw err
     console.warn('tpi_preassign_shifts RPC fallback:', err)
     for (const d of targetDates) {
       await tpiDb.from('tpi_shift_days').upsert({

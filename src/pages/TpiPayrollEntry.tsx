@@ -1,3 +1,4 @@
+import { TpiOnly } from '../features/tpi/TpiOnly'
 import { resolveDiligence, diligenceOverrideReason, formatDiligenceOverride } from '../features/tpi/diligence'
 import { DeductionProductPicker } from '../components/payroll/DeductionProductPicker'
 import { formatSafetyEquipmentDetail, formatUniformDetail } from '../lib/deductionProducts'
@@ -90,7 +91,9 @@ export const getStoredHolidaysForFactory = (factoryId?: string): Set<string> => 
   return set
 }
 
-export default function TpiPayrollEntry() {
+export default function TpiPayrollEntry() { return <TpiOnly><TpiPayrollEntryContent /></TpiOnly> }
+
+function TpiPayrollEntryContent() {
   const { onMenuClick } = useOutletContext<{ onMenuClick: () => void }>()
   const { user } = useAppStore()
   const queryClient = useQueryClient()
@@ -221,7 +224,7 @@ export default function TpiPayrollEntry() {
         try {
           const { data, error } = await supabase
             .from('tpi_shift_entries' as any)
-            .select('id,work_date,employee_id,shift_index,job_id,job_code_snapshot,rate_tier,rate_snapshot,is_half_shift,actual_hours,ot_hours,ot_pay,is_holiday_ot')
+            .select('*')
             .eq('factory_id', user?.factory_id ?? '')
             .gte('work_date', currentPeriod.period_start)
             .lte('work_date', currentPeriod.period_end)
@@ -1209,6 +1212,11 @@ export default function TpiPayrollEntry() {
             </div>
           ) : (
             <>
+              {empShifts.some(s => s.non_billable && !s.is_pending) && <div className="tpi-non-billable-panel" role="note">
+                <strong>มีงานไม่ตั้งเบิก</strong>
+                <span>ค่าแรงส่วนนี้รวมในยอดจ่ายและคำนวณประกันสังคมตามกติกาเดิม แต่ไม่รวมในเอกสารตั้งเบิก</span>
+                <span>ทำงานไม่ตั้งเบิก {new Set(empShifts.filter(s => s.non_billable && !s.is_pending).map(s => s.work_date)).size} วัน</span>
+              </div>}
               {/* Header */}
               <div style={{ marginBottom: 20 }}>
                 {(() => {

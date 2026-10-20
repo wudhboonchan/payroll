@@ -23,6 +23,7 @@ export interface BillingShiftEntry {
   actual_hours?: number
   ot_hours?: number
   ot_pay?: number
+  non_billable?: boolean
   is_holiday_ot?: boolean
 }
 
@@ -148,6 +149,7 @@ export function calculateFactoryBilling(
   periodLabel: string,
   factoryName = 'บริษัท ทีพีไอ โพลีน จำกัด (มหาชน)'
 ): FactoryBillingSummary {
+  shifts = shifts.filter(s => !s.non_billable)
   const empMap = new Map<string, BillingEmployee>()
   employees.forEach(e => empMap.set(e.id, e))
 

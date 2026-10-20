@@ -1,3 +1,4 @@
+import { NonBillableAudit } from '../features/tpi/NonBillableAudit'
 import { diligenceOverrideReason } from '../features/tpi/diligence'
 import { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -947,6 +948,8 @@ export default function Dashboard() {
                   </span>
                 </div>
                 <hr className="vk-rule" />
+
+                {isTpi && isSuperUser && activePeriod && user?.factory_id && <NonBillableAudit key={user.factory_id} factoryId={user.factory_id} start={(activePeriod as PayrollPeriod).period_start} end={(activePeriod as PayrollPeriod).period_end} />}
 
                 {superUserOverrides.length === 0 ? (
                   <div style={{
