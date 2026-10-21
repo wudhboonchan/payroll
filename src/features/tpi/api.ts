@@ -1,3 +1,4 @@
+import { mergeShiftDay } from './shiftConcurrency'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { supabase } from '../../lib/supabase'
 import type { Json } from '../../types/database'
@@ -29,9 +30,13 @@ export async function loadDay(factory:string,date:string):Promise<ShiftDay> {
   if(error) throw error
   return data as unknown as ShiftDay
 }
-export async function saveDay(factory:string,date:string,day:ShiftDay) {
+export async function saveDay(factory:string,date:string,day:ShiftDay, base?: ShiftDay, retry = true) {
   // Check current database settings, since the cached job list may be stale.
   const [currentJobs, savedDay] = await Promise.all([loadJobs(factory), loadDay(factory, date)])
+  if (savedDay.revision !== day.revision) {
+    if (!base || base.revision !== day.revision) throw new Error('ข้อมูลวันนี้ถูกแก้ไขแล้ว กรุณาเปิดข้อมูลล่าสุดก่อนบันทึก')
+    day = mergeShiftDay(base, day, savedDay)
+  }
   const specialError = specialWorkError(day.entries, currentJobs)
   if (specialError) throw new Error(specialError)
   for (const entry of day.entries) {
@@ -68,6 +73,9 @@ export async function saveDay(factory:string,date:string,day:ShiftDay) {
   } as any)
 
   if (error) {
+    if (retry && /Stale write rejected|ข้อมูลวันนี้ถูกแก้ไขแล้ว/.test(error.message)) {
+      return saveDay(factory, date, day, savedDay, false)
+    }
     console.error('saveDay RPC error:', error)
     throw error
   }
@@ -157,8 +165,11 @@ export const errorMessage = (error: unknown): string => {
   if (msg.includes('FOR SHARE cannot be applied')) {
     return 'ฟังก์ชันในฐานข้อมูลติดเงื่อนไขการล็อกตาราง กรุณาคัดลอกคำสั่งใน migration_fix_for_share_outer_join.sql ไปรันใน Supabase SQL Editor'
   }
+  if (msg.includes('Stale write rejected')) {
+    return 'ข้อมูลถูกแก้ไขระหว่างบันทึก กรุณาลองบันทึกอีกครั้ง หากยังไม่สำเร็จให้เก็บรายการที่แก้ไว้ก่อนเปิดข้อมูลล่าสุด'
+  }
   if (msg.includes('ข้อมูลวันนี้ถูกแก้ไขแล้ว')) {
-    return 'ข้อมูลวันนี้ถูกแก้ไขหรือยังไม่ตรงกับฐานข้อมูล กรุณารีเฟรชก่อนบันทึก'
+    return msg
   }
   if (msg.includes('พนักงานลงได้สูงสุด 2 กะ')) {
     return 'พนักงานสามารถลงได้สูงสุด 2 กะต่อวัน และห้ามจัดกะซ้ำ'

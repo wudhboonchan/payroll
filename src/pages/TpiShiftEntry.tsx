@@ -518,6 +518,8 @@ const TpiShiftEntryContent: React.FC<TpiShiftEntryProps> = ({
   // Load actual day's entries from Supabase
   const { data: dayData } = useQuery({
     queryKey: ['tpi-shift-day', user?.factory_id, activeDateStr],
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     queryFn: async () => {
       if (!user?.factory_id || preview) return null
       const localHoliday = getStoredHoliday(user.factory_id, activeDateStr)
@@ -1440,7 +1442,7 @@ const TpiShiftEntryContent: React.FC<TpiShiftEntryProps> = ({
         revision: dayRevision,
         is_holiday: isHoliday,
         entries: validEntries.map((e) => ({ ...e, is_holiday_ot: isHoliday })),
-      })
+      }, dayData ?? undefined)
       setDayRevision(nextRev)
       queryClient.invalidateQueries({ queryKey: ['tpi-shift-day', user.factory_id, activeDateStr] })
       queryClient.invalidateQueries({ queryKey: ['all-tpi-period-shifts'] })
@@ -2039,7 +2041,7 @@ const TpiShiftEntryContent: React.FC<TpiShiftEntryProps> = ({
         revision: dayRevision,
         is_holiday: isHoliday,
         entries: validEntries.map((e) => ({ ...e, is_holiday_ot: isHoliday })),
-      })
+      }, dayData ?? undefined)
       setDayRevision(nextRev)
       return true
     },
