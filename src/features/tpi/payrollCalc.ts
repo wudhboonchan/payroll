@@ -224,7 +224,7 @@ export function calculateTpiPayroll(input: TpiPayrollInput): TpiPayrollCalculati
 
   let baseNormalWage = 0 // First shift of each day ("ค่าจ้างปกติ") -> Base for Social Security
   let baseShiftWage = 0  // Second shift of each day ("ค่ากะ") -> Not subject to Social Security
-  let totalBaseShiftWage = 0 // Sum of all shift base wages
+  let totalBaseShiftWage = 0 // Ordinary shift wages, excluding holidays paid entirely as OT
   let amountHolidayOt = 0
   let totalOtHours = 0
   let regularOtPay = 0
@@ -268,12 +268,8 @@ export function calculateTpiPayroll(input: TpiPayrollInput): TpiPayrollCalculati
         amountHolidayOt += holidayPay
         totalShiftWage = holidayPay
 
-        // The base 1x rate is accounted into normal vs shift wage
-        if (isFirstShiftOfDay) {
-          baseNormalWage += baseWage
-        } else {
-          baseShiftWage += baseWage
-        }
+        // The full 2x wage is paid as holiday OT. Adding a base wage here
+        // would pay the same shift a third time and inflate the SS base.
       } else {
         normalShiftsCount += 1
         if (isFirstShiftOfDay) {
@@ -281,9 +277,9 @@ export function calculateTpiPayroll(input: TpiPayrollInput): TpiPayrollCalculati
         } else {
           baseShiftWage += baseWage
         }
+        totalBaseShiftWage += baseWage
       }
 
-      totalBaseShiftWage += baseWage
       dayTotalWage += totalShiftWage
       dayTotalOt += otMoney
 

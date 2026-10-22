@@ -556,18 +556,19 @@ export default function PaySlip() {
       const tpiFallbackRate = empRate > 0 ? empRate : 357
 
       // Normal days
-      const tpiDnDays = tpiCalc ? tpiCalc.workDaysCount : (amtNormal > 0 ? Math.round(amtNormal / tpiFallbackRate) : 0)
+      const ordinaryShifts = tpiCalc?.dailyAudit.flatMap(day => day.shifts).filter(shift => !shift.isHoliday)
+      const tpiDnDays = ordinaryShifts ? ordinaryShifts.filter(shift => shift.isFirstShiftOfDay).length : (amtNormal > 0 ? Math.round(amtNormal / tpiFallbackRate) : 0)
       const tpiNormalRate = tpiDnDays > 0 ? Math.round(amtNormal / tpiDnDays) : tpiFallbackRate
 
       // Shift (2nd shift / ควบกะ)
       const tpiDsDays = amtShift > 0
-        ? (tpiCalc
-            ? Math.max(0, tpiCalc.totalShiftsCount - tpiCalc.workDaysCount)
+        ? (ordinaryShifts
+            ? ordinaryShifts.filter(shift => !shift.isFirstShiftOfDay).length
             : Math.round(amtShift / tpiFallbackRate))
         : 0
       const tpiShiftRate = tpiDsDays > 0 ? Math.round(amtShift / tpiDsDays) : tpiFallbackRate
 
-      workingDays = tpiDnDays
+      workingDays = tpiCalc?.workDaysCount ?? tpiDnDays
 
       const detailNormal = !isOutdated && tpiDnDays > 0
         ? `฿${tpiNormalRate} × ${tpiDnDays} วัน`
