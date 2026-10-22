@@ -9,7 +9,7 @@ export interface PeriodApprovalStatus {
   savedCount: number
   outdatedCount: number
   unsavedCount: number
-  outdatedEmployees: { id: string; employee_code: string; name: string }[]
+  outdatedEmployees: { id: string; employee_code: string; name: string; reasons?: string[] }[]
   unsavedEmployees: { id: string; employee_code: string; name: string }[]
   errorMessage?: string
 }
@@ -60,7 +60,7 @@ export async function checkPeriodApprovalStatus(
     entryMap.set(e.employee_id, e)
   }
 
-  const outdatedEmployees: { id: string; employee_code: string; name: string }[] = []
+  const outdatedEmployees: PeriodApprovalStatus['outdatedEmployees'] = []
   const unsavedEmployees: { id: string; employee_code: string; name: string }[] = []
   let savedCount = 0
   let workersWithShiftsCount = 0
@@ -242,9 +242,9 @@ export async function checkPeriodApprovalStatus(
       const empAdvances = empAdvMap.get(emp.id) || []
       const isEmpClerk = emp.position === 'clerk'
       const empIsThai = !emp.nationality || emp.nationality === 'ไทย'
-      const empHasSsNumber = !empIsThai ? !!(emp.national_id?.trim() || emp.social_security_number?.trim()) : true
-      const empProfileComplete = !!emp.data_complete
-      const empSsEligible = !emp.exempt_social_security && (empIsThai || (empHasSsNumber && empProfileComplete))
+      // Match PayrollEntry: Tra Phet only deducts social security for Thai employees.
+      // TPI has its own eligibility rules in calculateTpiPayroll.
+      const empSsEligible = !emp.exempt_social_security && empIsThai
       const empSsRate = empSsEligible ? (period.social_security_rate ?? 0.05) : 0
       const isUnpaidShift = (s: any) => Number(s.actual_hours) === -1
       const payableShifts = shifts.filter(s => !isUnpaidShift(s))
@@ -288,23 +288,25 @@ export async function checkPeriodApprovalStatus(
         deduct_uniform: 0,
       })
 
-      const checks: [number, number][] = [
-        [c.amount_normal, Number(entry.amount_normal)],
-        [c.amount_shift, Number(entry.amount_shift)],
-        [c.amount_ot + c.amount_ot_1x, Number(entry.amount_ot)],
-        [autoW, Number(entry.amount_wood_excess)],
-        [autoF, Number(entry.amount_film)],
-        [advTotal, Number(entry.deduct_advance)],
-        [c.deduct_social_security, Number(entry.deduct_social_security)],
+      const checks: [string, number, number][] = [
+        ['ค่าจ้างปกติ', c.amount_normal, Number(entry.amount_normal)],
+        ['ค่ากะ', c.amount_shift, Number(entry.amount_shift)],
+        ['ค่า OT/วันหยุด', c.amount_ot + c.amount_ot_1x, Number(entry.amount_ot)],
+        ['ค่าไม้เกิน', autoW, Number(entry.amount_wood_excess)],
+        ['ค่าฟิล์ม', autoF, Number(entry.amount_film)],
+        ['เบิกล่วงหน้า', advTotal, Number(entry.deduct_advance)],
+        ['ประกันสังคม', c.deduct_social_security, Number(entry.deduct_social_security)],
+        // Match the entry page's shift-only income checks, including legacy extras.
+        ['เงินพิเศษ', autoSp, Number(entry.amount_special)],
+        ['เงินพิเศษที่ปรับเอง', 0, Number(entry.override_special || 0)],
+        ['เบี้ยขยัน', 0, Number(entry.amount_diligence || 0)],
+        ['ค่าตำแหน่ง', 0, Number(entry.amount_position || 0)],
       ]
+      const reasons = checks.filter(([, expected, saved]) => Math.abs(expected - saved) > eps)
+        .map(([label, expected, saved]) => `${label}: คำนวณ ${expected.toLocaleString('th-TH')} บาท / บันทึก ${saved.toLocaleString('th-TH')} บาท`)
 
-      const specDiff = Math.min(
-        Math.abs((autoSp + Number(entry.override_special || 0)) - Number(entry.amount_special)),
-        Math.abs(Number(entry.override_special ?? autoSp) - Number(entry.amount_special))
-      )
-
-      if (checks.some(([a, b]) => Math.abs(a - b) > eps) || specDiff > eps) {
-        outdatedEmployees.push({ id: emp.id, employee_code: emp.employee_code, name: empName })
+      if (reasons.length > 0) {
+        outdatedEmployees.push({ id: emp.id, employee_code: emp.employee_code, name: empName, reasons })
       } else {
         savedCount++
       }
