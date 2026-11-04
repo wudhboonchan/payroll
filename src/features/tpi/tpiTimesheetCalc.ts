@@ -1,3 +1,4 @@
+import { applyShiftPayMultiplier } from './model.ts'
 import { thaiBahtText } from './thaiBahtText.ts'
 import type { BillingShiftEntry, BillingEmployee } from './tpiBillingCalc'
 
@@ -206,7 +207,10 @@ export function calculateEmployeeTimesheetReport(
       } else {
         // Normal day shift
         normalHours += shiftBaseHrs
-        normalWage += (s.rate_snapshot ?? (dailyRate - Math.ceil(dailyRate / 8) * (8 - shiftBaseHrs)))
+        normalWage += applyShiftPayMultiplier(
+          s.rate_snapshot ?? (dailyRate - Math.ceil(dailyRate / 8) * (8 - shiftBaseHrs)),
+          s.shift_pay_multiplier
+        )
 
         if (otHrs > 0) {
           ot15Hours += otHrs

@@ -1224,10 +1224,18 @@
   gap: 4px;
 }
 
-.vk-field-group label {
+.vk-field-group label,
+.vk-shift-pay-rate legend {
   font-size: 11px;
   font-weight: 600;
   color: var(--vk-ink-3, #7a6f60);
+}
+
+.vk-shift-pay-rate {
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--vk-ink-2);
 }
 
 .vk-modal-select {

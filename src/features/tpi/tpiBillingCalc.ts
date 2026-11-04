@@ -1,3 +1,4 @@
+import { applyShiftPayMultiplier } from './model.ts'
 import type { Job } from './model'
 
 export interface BillingEmployee {
@@ -19,6 +20,7 @@ export interface BillingShiftEntry {
   job_code_snapshot: string
   rate_tier: 'normal' | 'skilled'
   rate_snapshot: number
+  shift_pay_multiplier?: number
   is_half_shift?: boolean
   actual_hours?: number
   ot_hours?: number
@@ -232,11 +234,11 @@ export function calculateFactoryBilling(
         if (isSkilled) {
           if (gender === 'male') skilledMaleShifts += shiftUnits
           else skilledFemaleShifts += shiftUnits
-          totalSkilledWage += (Number(s.rate_snapshot) || (skilledRate * shiftUnits))
+          totalSkilledWage += applyShiftPayMultiplier(Number(s.rate_snapshot) || (skilledRate * shiftUnits), s.shift_pay_multiplier)
         } else {
           if (gender === 'male') normalMaleShifts += shiftUnits
           else normalFemaleShifts += shiftUnits
-          totalNormalWage += (Number(s.rate_snapshot) || (normalRate * shiftUnits))
+          totalNormalWage += applyShiftPayMultiplier(Number(s.rate_snapshot) || (normalRate * shiftUnits), s.shift_pay_multiplier)
         }
       }
 

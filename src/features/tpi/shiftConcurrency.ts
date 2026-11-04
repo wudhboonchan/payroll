@@ -7,7 +7,7 @@ function signature(e?: Entry): string {
     e.job_id, !!e.is_half_shift, e.is_half_shift ? 4 : Number(e.actual_hours || 8),
     Number(e.ot_hours || 0), Number(e.ot_pay || 0), !!e.is_holiday_ot,
     !!e.is_ot_before_shift, e.ot_job_id || null, e.ot_job_code_snapshot || null,
-    !!e.is_pending, e.non_billable_rate ?? null, e.non_billable_reason || null,
+    e.shift_pay_multiplier ?? 1, !!e.is_pending, e.non_billable_rate ?? null, e.non_billable_reason || null,
   ])
 }
 

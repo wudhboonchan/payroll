@@ -73,7 +73,7 @@ export async function checkPeriodApprovalStatus(
     while (true) {
       const { data, error } = await supabase
         .from('tpi_shift_entries' as any)
-        .select('id, work_date, employee_id, shift_index, job_id, job_code_snapshot, rate_tier, rate_snapshot, is_half_shift, actual_hours, ot_hours, ot_pay, is_holiday_ot')
+        .select('id, work_date, employee_id, shift_index, job_id, job_code_snapshot, rate_tier, rate_snapshot, shift_pay_multiplier, is_half_shift, actual_hours, ot_hours, ot_pay, is_holiday_ot')
         .eq('factory_id', factoryId)
         .gte('work_date', period.period_start)
         .lte('work_date', period.period_end)

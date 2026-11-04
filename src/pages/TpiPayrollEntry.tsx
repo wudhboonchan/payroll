@@ -1502,6 +1502,10 @@ function TpiPayrollEntryContent() {
                                         <span style={{ color: '#b45309', background: '#fef3c7', border: '1px solid #fde68a', padding: '1px 6px', borderRadius: 4, fontSize: 10, fontWeight: 700 }}>
                                           นักขัตฤกษ์ (×2)
                                         </span>
+                                      ) : s.shiftPayMultiplier === 1.5 ? (
+                                        <span style={{ color: '#92400e', background: '#fef3c7', padding: '1px 5px', borderRadius: 4, fontSize: 10, fontWeight: 700 }}>
+                                          แรงพิเศษ ×1.5
+                                        </span>
                                       ) : s.isHalf ? (
                                         <span style={{ color: '#92400e', background: '#fef3c7', padding: '1px 5px', borderRadius: 4, fontSize: 10, fontWeight: 700 }}>
                                           ครึ่งกะ

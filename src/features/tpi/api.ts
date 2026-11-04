@@ -47,8 +47,19 @@ export async function saveDay(factory:string,date:string,day:ShiftDay, base?: Sh
       && saved.shift_index === entry.shift_index && saved.job_id === entry.job_id)
     if (message && !isExistingAssignment) throw new Error(message)
   }
+  if (day.entries.some(e => e.shift_pay_multiplier === 1.5)) {
+    const { error } = await supabase.from('tpi_shift_entries' as any)
+      .select('shift_pay_multiplier')
+      .eq('factory_id', factory)
+      .limit(0)
+    if (error?.code === '42703' || error?.code === 'PGRST204') {
+      throw new Error('ฐานข้อมูลยังไม่รองรับอัตราแรงพิเศษ 1.5 เท่า กรุณาอัปเดตฐานข้อมูลก่อนบันทึก')
+    }
+    if (error) throw error
+  }
   const entriesPayload = day.entries.map((e:Entry)=>({
     employee_id:e.employee_id,
+    shift_pay_multiplier: e.shift_pay_multiplier ?? 1,
     non_billable_rate: e.non_billable_rate ?? null,
     non_billable_reason: e.non_billable_reason || null,
     shift_index:e.shift_index,

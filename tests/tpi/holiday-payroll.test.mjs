@@ -63,3 +63,27 @@ test('ordinary shifts and explicit overrides retain their behavior', () => {
   })
   assert.equal(overridden.totalIncome, 600)
 })
+
+test('first-shift special wage replaces regular wage and creates no OT', () => {
+  const special = shift(1, 1, { shift_pay_multiplier: 1.5 })
+  const oneShift = calculate([special])
+  assert.equal(oneShift.totalIncome, 535)
+  assert.equal(oneShift.dailyAudit[0].shifts[0].shiftPayMultiplier, 1.5)
+  assert.equal(oneShift.effectiveOt, 0)
+  assert.equal(oneShift.totalOtHours, 0)
+
+  const twoShifts = calculate([shift(1, 2), special])
+  assert.equal(twoShifts.effectiveNormal, 535)
+  assert.equal(twoShifts.effectiveShift, 357)
+  assert.equal(twoShifts.totalIncome, 892)
+  assert.equal(twoShifts.dailyAudit[0].dayTotalWage, 892)
+  assert.equal(calculateFactoryBilling([special], [employee], [], 'test').totalWagePaid, 535)
+  assert.equal(wageCostSplit([special]).total, 535)
+})
+
+test('special wage uses the already reduced base and does not stack with holiday pay', () => {
+  const partial = shift(1, 0, { shift_pay_multiplier: 1.5, rate_snapshot: 222, actual_hours: 5 })
+  assert.equal(calculate([partial]).totalIncome, 333)
+  assert.equal(calculate([{ ...partial, is_holiday_ot: true }]).totalIncome, 444)
+  assert.equal(calculate([shift(1, 0), { ...partial, shift_index: 1 }]).effectiveShift, 222)
+})

@@ -31,6 +31,7 @@ export type Entry = {
   shift_index: number
   job_id: string
   rate_tier?: RateTier
+  shift_pay_multiplier?: number
   rate_snapshot?: number
   job_code_snapshot?: string
   is_half_shift?: boolean
@@ -148,6 +149,10 @@ export function isClerkJob(job?: { job_group?: string; code?: string; descriptio
   return false
 }
 
+export function applyShiftPayMultiplier(wage: number, multiplier?: number, isHoliday = false): number {
+  return multiplier === 1.5 && !isHoliday ? Math.floor(wage * 1.5) : wage
+}
+
 export function entryRate(entry: Entry, jobs: Job[], profiles: WageProfile[], date: string, employees?: Employee[]): number | null {
   if (entry.non_billable_rate != null) {
     const full = Number(entry.non_billable_rate)
@@ -239,6 +244,10 @@ export function validateEntries(entries: Entry[]) {
   // Validate mutual exclusivity: 2 shifts (16 hours) cannot have OT
   for (const [, list] of empEntries) {
     const shiftCount = new Set(list.map(e => e.shift_index)).size
+    const firstShiftIndex = Math.min(...list.map(e => e.shift_index))
+    if (list.some(e => e.shift_pay_multiplier === 1.5 && e.shift_index !== firstShiftIndex)) {
+      return 'อัตราแรงพิเศษ 1.5 เท่าใช้ได้เฉพาะกะแรกของวัน'
+    }
     const hasOt = list.some(e => Number(e.ot_hours || 0) > 0)
     if (shiftCount >= 2 && hasOt) {
       return 'พนักงานที่ทำงานควบ 2 กะ (16 ชม.) ไม่สามารถทำ OT ได้ (ต้องเลือกอย่างใดอย่างหนึ่ง)'

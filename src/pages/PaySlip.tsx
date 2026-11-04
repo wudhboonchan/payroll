@@ -332,7 +332,7 @@ export default function PaySlip() {
         try {
           const { data, error } = await supabase
             .from('tpi_shift_entries' as any)
-            .select('id,work_date,employee_id,shift_index,job_id,job_code_snapshot,rate_tier,rate_snapshot,is_half_shift,actual_hours,ot_hours,ot_pay,is_holiday_ot')
+            .select('id,work_date,employee_id,shift_index,job_id,job_code_snapshot,rate_tier,rate_snapshot,shift_pay_multiplier,is_half_shift,actual_hours,ot_hours,ot_pay,is_holiday_ot')
             .eq('factory_id', user?.factory_id ?? '')
             .gte('work_date', currentPeriod.period_start)
             .lte('work_date', currentPeriod.period_end)
