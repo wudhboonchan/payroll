@@ -1,4 +1,4 @@
-import { SHIFTS } from './model.ts'
+import { SHIFTS, applyShiftPayMultiplier } from './model.ts'
 
 export interface TpiShiftRow {
   id: string
@@ -9,6 +9,7 @@ export interface TpiShiftRow {
   job_code_snapshot: string
   rate_tier: 'normal' | 'skilled'
   rate_snapshot: number
+  shift_pay_multiplier?: number
   is_half_shift: boolean
   actual_hours: number
   ot_hours: number
@@ -89,6 +90,7 @@ export interface DailyShiftAudit {
     hours: number
     wage: number
     isFirstShiftOfDay: boolean
+    shiftPayMultiplier: number
     holidayWageMultiplier: number
     totalShiftWage: number
     otHours: number
@@ -224,7 +226,7 @@ export function calculateTpiPayroll(input: TpiPayrollInput): TpiPayrollCalculati
 
   let baseNormalWage = 0 // First shift of each day ("ค่าจ้างปกติ") -> Base for Social Security
   let baseShiftWage = 0  // Second shift of each day ("ค่ากะ") -> Not subject to Social Security
-  let totalBaseShiftWage = 0 // Sum of all shift base wages
+  let totalBaseShiftWage = 0 // Ordinary shift wages, excluding holidays paid entirely as OT
   let amountHolidayOt = 0
   let totalOtHours = 0
   let regularOtPay = 0
@@ -246,7 +248,11 @@ export function calculateTpiPayroll(input: TpiPayrollInput): TpiPayrollCalculati
       const isFirstShiftOfDay = idx === 0
       const isHalf = !!s.is_half_shift
       const isHoliday = !!s.is_holiday_ot
-      const baseWage = Number(s.rate_snapshot) || 0
+      const shiftPayMultiplier = isFirstShiftOfDay && !isHoliday && s.shift_pay_multiplier === 1.5 ? 1.5 : 1
+      const baseWage = applyShiftPayMultiplier(
+        Number(s.rate_snapshot) || 0,
+        shiftPayMultiplier
+      )
       const otHrs = Number(s.ot_hours) || 0
       const otMoney = Number(s.ot_pay) || 0
 
@@ -268,12 +274,8 @@ export function calculateTpiPayroll(input: TpiPayrollInput): TpiPayrollCalculati
         amountHolidayOt += holidayPay
         totalShiftWage = holidayPay
 
-        // The base 1x rate is accounted into normal vs shift wage
-        if (isFirstShiftOfDay) {
-          baseNormalWage += baseWage
-        } else {
-          baseShiftWage += baseWage
-        }
+        // The full 2x wage is paid as holiday OT. Adding a base wage here
+        // would pay the same shift a third time and inflate the SS base.
       } else {
         normalShiftsCount += 1
         if (isFirstShiftOfDay) {
@@ -281,9 +283,9 @@ export function calculateTpiPayroll(input: TpiPayrollInput): TpiPayrollCalculati
         } else {
           baseShiftWage += baseWage
         }
+        totalBaseShiftWage += baseWage
       }
 
-      totalBaseShiftWage += baseWage
       dayTotalWage += totalShiftWage
       dayTotalOt += otMoney
 
@@ -308,6 +310,7 @@ export function calculateTpiPayroll(input: TpiPayrollInput): TpiPayrollCalculati
         hours: Number(s.actual_hours) || (isHalf ? 4 : 8),
         wage: baseWage,
         isFirstShiftOfDay,
+        shiftPayMultiplier,
         holidayWageMultiplier: isHoliday ? 2 : 1,
         totalShiftWage,
         otHours: otHrs,

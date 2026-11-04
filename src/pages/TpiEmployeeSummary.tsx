@@ -792,6 +792,9 @@ function TpiEmployeeSummaryContent() {
                                     <span style={chipStyle(isFirst ? '#374151' : '#065f46', isFirst ? '#f3f4f6' : '#d1fae5')}>
                                       {isFirst ? `กะ 1: ฿${monoNum(s.totalShiftWage)}${starText}` : `กะ 2: +฿${monoNum(s.totalShiftWage)}${starText}`}
                                     </span>
+                                    {s.shiftPayMultiplier === 1.5 && (
+                                      <span style={chipStyle('#92400e', '#fef3c7')}>แรงพิเศษ ×1.5</span>
+                                    )}
                                     {s.otPay > 0 && (
                                       <span style={chipStyle('#4c1d95', '#ede9fe')}>
                                         OT ({s.otHours} ชม.) +฿${monoNum(s.otPay)}

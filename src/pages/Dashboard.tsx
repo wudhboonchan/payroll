@@ -649,13 +649,13 @@ export default function Dashboard() {
               <AlertTriangle style={{ width: 22, height: 22, color: '#d97706', flexShrink: 0 }} />
               <div>
                 <div style={{ fontWeight: 700, fontSize: 13, color: '#92400e' }}>
-                  ยังไม่สามารถอนุมัติงวดนี้ได้ (หน้ากรอกค่าจ้างยังไม่เขียวทุกคน)
+                  ยังไม่สามารถอนุมัติงวดนี้ได้ กรุณาตรวจสอบรายการค่าจ้าง
                 </div>
                 <div style={{ fontSize: 12, color: '#b45309', marginTop: 2 }}>
                   {approvalReadiness.outdatedCount > 0 && <span>🟠 ข้อมูลเปลี่ยนแปลง (Outdated): <strong>{approvalReadiness.outdatedCount}</strong> คน </span>}
                   {approvalReadiness.outdatedCount > 0 && approvalReadiness.unsavedCount > 0 && <span>• </span>}
                   {approvalReadiness.unsavedCount > 0 && <span>⚪ ยังไม่บันทึกค่าจ้าง: <strong>{approvalReadiness.unsavedCount}</strong> คน </span>}
-                  <span>— กรุณาบันทึกค่าจ้างให้ครบและเป็นสถานะ "บันทึกแล้ว" ทุกคนก่อนส่งอนุมัติ</span>
+                  <span> กรุณาบันทึกค่าจ้างให้ครบและเป็นสถานะ "บันทึกแล้ว" ทุกคนก่อนส่งอนุมัติ</span>
                 </div>
               </div>
             </div>
@@ -1229,9 +1229,13 @@ export default function Dashboard() {
                   <div style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
                     <span>🟠</span> มีการเปลี่ยนแปลง (Outdated): {approvalReadiness.outdatedCount} คน
                   </div>
-                  <div style={{ fontSize: 11, color: '#b45309', marginTop: 4, maxHeight: 60, overflowY: 'auto' }}>
-                    {approvalReadiness.outdatedEmployees.map(e => `${e.employee_code} ${e.name}`).slice(0, 8).join(', ')}
-                    {approvalReadiness.outdatedEmployees.length > 8 && ` และอีก ${approvalReadiness.outdatedEmployees.length - 8} คน`}
+                  <div style={{ fontSize: 11, color: '#b45309', marginTop: 4, maxHeight: 240, overflowY: 'auto' }}>
+                    {approvalReadiness.outdatedEmployees.map(e => (
+                      <div key={e.id} style={{ marginTop: 6 }}>
+                        <strong>{e.employee_code} {e.name}</strong>
+                        {e.reasons?.map(reason => <div key={reason}>{reason}</div>)}
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}

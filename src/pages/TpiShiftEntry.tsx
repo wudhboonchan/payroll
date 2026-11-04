@@ -32,12 +32,14 @@ import { loadDailyAttendance, formatAttendanceSummary } from '../features/tpi/at
 import {
   SHIFTS,
   entryRate,
+  applyShiftPayMultiplier,
   isJobAvailable,
   isClerkJob,
   wageTier,
   validateEntries,
   usage,
   getJobQuotaStatus,
+  getJobBaseRate,
   calculateEntryOt,
   getShiftOtTimeRange,
 } from '../features/tpi/model'
@@ -518,6 +520,8 @@ const TpiShiftEntryContent: React.FC<TpiShiftEntryProps> = ({
   // Load actual day's entries from Supabase
   const { data: dayData } = useQuery({
     queryKey: ['tpi-shift-day', user?.factory_id, activeDateStr],
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     queryFn: async () => {
       if (!user?.factory_id || preview) return null
       const localHoliday = getStoredHoliday(user.factory_id, activeDateStr)
@@ -599,6 +603,7 @@ const TpiShiftEntryContent: React.FC<TpiShiftEntryProps> = ({
   const [modalShift1JobId, setModalShift1JobId] = useState<string>('')
   const [modalShift1Index, setModalShift1Index] = useState<number>(0)
   const [modalShift1DeductHours, setModalShift1DeductHours] = useState<number>(1)
+  const [modalShift1PayMultiplier, setModalShift1PayMultiplier] = useState<1 | 1.5>(1)
   const [modalShift1IsHalf, setModalShift1IsHalf] = useState<boolean>(false)
   const [modalShift1HasOt, setModalShift1HasOt] = useState<boolean>(false)
   const [modalShift1OtHours, setModalShift1OtHours] = useState<number>(1)
@@ -999,7 +1004,8 @@ const TpiShiftEntryContent: React.FC<TpiShiftEntryProps> = ({
   }
 
   const openEmployeeModal = (emp: Employee) => {
-    const empEntries = entries.filter((e) => e.employee_id === emp.id)
+    const empEntries = entries.filter((e) => e.employee_id === emp.id).sort((a, b) => a.shift_index - b.shift_index)
+    setModalShift1PayMultiplier(empEntries[0]?.shift_pay_multiplier === 1.5 ? 1.5 : 1)
     const defaultJobId = availableJobs[0]?.id || jobs[0]?.id || ''
     const defaultOtHours = 1
 
@@ -1279,6 +1285,7 @@ const TpiShiftEntryContent: React.FC<TpiShiftEntryProps> = ({
         employee_id: modalEmp.id,
         job_id: modalShift1JobId,
         shift_index: modalShift1Index,
+        shift_pay_multiplier: isHoliday ? 1 : modalShift1PayMultiplier,
         is_half_shift: false,
         actual_hours: modalShift1IsHalf ? 8 - modalShift1DeductHours : 8,
         ot_hours: ot1.ot_hours,
@@ -1313,6 +1320,7 @@ const TpiShiftEntryContent: React.FC<TpiShiftEntryProps> = ({
         employee_id: modalEmp.id,
         job_id: modalShift2JobId,
         shift_index: modalShift2Index,
+        shift_pay_multiplier: 1,
         is_half_shift: false,
         actual_hours: modalShift2IsHalf ? 8 - modalShift2DeductHours : 8,
         ot_hours: 0,
@@ -1332,7 +1340,7 @@ const TpiShiftEntryContent: React.FC<TpiShiftEntryProps> = ({
     if (modalSafetyFineEnabled && modalSafetyFineReason.trim()) {
       handleSaveSafetyFine()
     }
-    toast.success(`✓ บันทึกการจัดกะของ ${modalEmp.first_name} ${modalEmp.last_name} เรียบร้อยแล้ว`)
+    toast.success(`✓ จัดกะของ ${modalEmp.first_name} ${modalEmp.last_name} แล้ว กด “บันทึกวันนี้” เพื่อบันทึกลงระบบ`)
     setModalEmp(null)
   }
 
@@ -1440,7 +1448,7 @@ const TpiShiftEntryContent: React.FC<TpiShiftEntryProps> = ({
         revision: dayRevision,
         is_holiday: isHoliday,
         entries: validEntries.map((e) => ({ ...e, is_holiday_ot: isHoliday })),
-      })
+      }, dayData ?? undefined)
       setDayRevision(nextRev)
       queryClient.invalidateQueries({ queryKey: ['tpi-shift-day', user.factory_id, activeDateStr] })
       queryClient.invalidateQueries({ queryKey: ['all-tpi-period-shifts'] })
@@ -2039,7 +2047,7 @@ const TpiShiftEntryContent: React.FC<TpiShiftEntryProps> = ({
         revision: dayRevision,
         is_holiday: isHoliday,
         entries: validEntries.map((e) => ({ ...e, is_holiday_ot: isHoliday })),
-      })
+      }, dayData ?? undefined)
       setDayRevision(nextRev)
       return true
     },
@@ -2054,6 +2062,7 @@ const TpiShiftEntryContent: React.FC<TpiShiftEntryProps> = ({
       queryClient.invalidateQueries({ queryKey: ['tpi-shift-days-period'] })
       queryClient.invalidateQueries({ queryKey: ['summary-all-shifts'] })
       queryClient.invalidateQueries({ queryKey: ['payslip-all-shifts'] })
+      queryClient.invalidateQueries({ queryKey: ['payslip-all-tpi-shifts'] })
       toast.success(`✓ บันทึกข้อมูลการจัดกะ ${fmtDisplay(activeDateStr)} สำเร็จ`)
     },
     onError: (e: any) => toast.error('บันทึกไม่สำเร็จ', { description: errorMessage(e) }),
@@ -3225,7 +3234,20 @@ const TpiShiftEntryContent: React.FC<TpiShiftEntryProps> = ({
           ? (modalTier === 'skilled' ? (modalOtJob?.skilled_rate ?? 377) : (modalOtJob?.normal_rate ?? 357))
           : (modalTier === 'skilled' && modalOtJob?.skilled_rate ? modalOtJob.skilled_rate : (modalOtJob?.normal_rate || 357))
 
-        const modalShift1Wage = modalShift1IsHalf ? modalBaseRate1 - Math.ceil(modalBaseRate1 / 8) * modalShift1DeductHours : modalBaseRate1
+        const modalShift1RegularWage = modalShift1IsHalf
+          ? modalBaseRate1 - Math.ceil(modalBaseRate1 / 8) * modalShift1DeductHours
+          : modalBaseRate1
+        const existingShift1 = entries.find(e => e.employee_id === modalEmp.id &&
+          e.shift_index === modalShift1Index && e.job_id === modalShift1JobId)
+        const specialBaseRate = existingShift1?.non_billable_rate ??
+          (modalJob1?.job_type === 'non_billable' ? existingShift1?.full_rate_snapshot : null) ??
+          getJobBaseRate(modalJob1, modalEmp.id, wageProfiles, activeDateStr, employees)
+        const specialBaseWage = modalShift1IsHalf
+          ? specialBaseRate - Math.ceil(specialBaseRate / 8) * modalShift1DeductHours
+          : specialBaseRate
+        const modalShift1Wage = !isHoliday && modalShift1PayMultiplier === 1.5
+          ? applyShiftPayMultiplier(specialBaseWage, modalShift1PayMultiplier)
+          : modalShift1RegularWage
         const modalShift1OtCalc = modalShift1HasOt
           ? calculateEntryOt(modalShift1OtHours, modalOtBaseRate)
           : { ot_hours: 0, ot_pay: 0 }
@@ -3383,6 +3405,25 @@ const TpiShiftEntryContent: React.FC<TpiShiftEntryProps> = ({
                     </div>
                   </div>
 
+                  {!isHoliday && (
+                    <fieldset className="vk-shift-pay-rate" style={{ margin: '10px 0 0', padding: '8px 12px', border: '1px solid var(--vk-rule-soft)', borderRadius: 6 }}>
+                      <legend>อัตราจ่ายกะที่ 1</legend>
+                      <div style={{ display: 'flex', gap: '8px 20px', flexWrap: 'wrap' }}>
+                        <label>
+                          <input type="radio" name="shift-1-pay-rate" checked={modalShift1PayMultiplier === 1} onChange={() => setModalShift1PayMultiplier(1)} />
+                          {' '}ปกติ 1 เท่า
+                        </label>
+                        <label>
+                          <input type="radio" name="shift-1-pay-rate" checked={modalShift1PayMultiplier === 1.5} onChange={() => setModalShift1PayMultiplier(1.5)} />
+                          {' '}แรงพิเศษ 1.5 เท่า
+                        </label>
+                      </div>
+                      {modalShift1PayMultiplier === 1.5 && (
+                        <div aria-live="polite">ค่าแรงกะที่ 1 <strong>฿{modalShift1Wage.toLocaleString('th-TH')}</strong></div>
+                      )}
+                    </fieldset>
+                  )}
+
                   {/* Half-Shift / Leave Option */}
                   <div
                     style={{
@@ -3440,7 +3481,7 @@ const TpiShiftEntryContent: React.FC<TpiShiftEntryProps> = ({
                       </div>
                       <div className="vk-hour-deduction__summary" aria-live="polite">
                         <div><span>หักค่าแรง {modalShift1DeductHours} ชม.</span><strong className="vk-hour-deduction__amount">−{(Math.ceil(modalBaseRate1 / 8) * modalShift1DeductHours).toLocaleString('th-TH')} บาท</strong></div>
-                        <div><span>ค่าแรงคงเหลือ</span><strong>{modalShift1Wage.toLocaleString('th-TH')} บาท</strong></div>
+                        <div><span>ค่าแรงคงเหลือ</span><strong>{modalShift1RegularWage.toLocaleString('th-TH')} บาท</strong></div>
                       </div>
                       <p className="vk-hour-deduction__note">หลังบันทึกกะ กรุณาเลือกประเภทและกรอกเหตุผลที่หน้าบันทึกขาดลามาสาย</p>
                     </div>
