@@ -556,7 +556,7 @@ function TpiEmployeeSummaryContent() {
                             <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 999, background: 'rgba(177,71,41,0.12)', color: 'var(--vk-persimmon)', letterSpacing: '0.04em', flexShrink: 0 }}>เสมียน</span>
                           )}
                         </div>
-                        <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 10, color: 'var(--vk-ink-3)', marginTop: 1 }}>{emp.employee_code}</div>
+                        <div className="vk-employee-code" style={{ marginTop: 1 }}>{emp.employee_code}</div>
                       </div>
                     </div>
                   </div>
@@ -610,7 +610,7 @@ function TpiEmployeeSummaryContent() {
                     )}
                   </div>
                   <div style={{ marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
-                    <span style={{ fontFamily: 'var(--vk-mono)', fontSize: 11, color: 'var(--vk-ink-3)', fontWeight: 600 }}>{selectedEmp.employee_code}</span>
+                    <span className="vk-employee-code">{selectedEmp.employee_code}</span>
                     <span style={{ color: 'var(--vk-rule)', fontSize: 11 }}>·</span>
                     <span style={{ fontSize: 12, color: 'var(--vk-ink-3)' }}>
                       {selectedEmp.position === 'clerk' ? 'กลุ่มงานเสมียน' : 'กลุ่มงานทั่วไป'}

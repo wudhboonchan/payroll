@@ -597,6 +597,9 @@ const TpiShiftEntryContent: React.FC<TpiShiftEntryProps> = ({
   // ── Selection and Search State (Diamond Pattern) ────────────────────
   const [selectedPoolIds, setSelectedPoolIds] = useState<Set<string>>(new Set())
   const [searchTerm, setSearchTerm] = useState('')
+  const [jobCodeSearch, setJobCodeSearch] = useState('')
+  const [clerkJobsOnly, setClerkJobsOnly] = useState(false)
+  const matrixScrollRef = useRef<HTMLDivElement>(null)
 
   // ── Modal State for Editing / Adding Shifts to a Worker ─────────────
   const [modalEmp, setModalEmp] = useState<Employee | null>(null)
@@ -806,6 +809,24 @@ const TpiShiftEntryContent: React.FC<TpiShiftEntryProps> = ({
       jobs: groupJobs,
     }))
   }, [temporaryJobs])
+
+  const jobCodeQuery = jobCodeSearch.trim().toLowerCase()
+  const isJobFilterActive = Boolean(jobCodeQuery || clerkJobsOnly)
+  const visibleJobIds = useMemo(() => new Set(availableJobs
+    .filter((job) => job.code.toLowerCase().includes(jobCodeQuery) && (!clerkJobsOnly || isClerkJob(job)))
+    .map((job) => job.id)), [availableJobs, jobCodeQuery, clerkJobsOnly])
+
+  function filterJobGroups(groups: { department: string; jobs: Job[] }[]) {
+    return groups
+      .map((group) => ({ ...group, visibleJobs: group.jobs.filter((job) => visibleJobIds.has(job.id)) }))
+      .filter((group) => !isJobFilterActive || group.visibleJobs.length > 0)
+  }
+
+  const visibleRegularGroups = filterJobGroups(regularGroups)
+
+  useEffect(() => {
+    if (matrixScrollRef.current) matrixScrollRef.current.scrollTop = 0
+  }, [jobCodeQuery, clerkJobsOnly])
 
   const grandTotalTarget = useMemo(() => {
     return availableJobs.reduce((sum, j) => {
@@ -1609,7 +1630,7 @@ const TpiShiftEntryContent: React.FC<TpiShiftEntryProps> = ({
                 )}
               </div>
               <div className="vk-tpi-double-line2">
-                <span className="vk-double-code">{emp.employee_code}</span>
+                <span className="vk-employee-code">{emp.employee_code}</span>
               </div>
             </div>
             <div className="vk-tpi-double-right">
@@ -1704,7 +1725,7 @@ const TpiShiftEntryContent: React.FC<TpiShiftEntryProps> = ({
                 )}
               </div>
               <div className="vk-tpi-double-line2">
-                <span className="vk-double-code">{emp.employee_code}</span>
+                <span className="vk-employee-code">{emp.employee_code}</span>
               </div>
             </div>
             <div className="vk-tpi-double-right">
@@ -1801,7 +1822,7 @@ const TpiShiftEntryContent: React.FC<TpiShiftEntryProps> = ({
                 )}
               </div>
               <div className="vk-tpi-double-line2">
-                <span className="vk-double-code">{emp.employee_code} · กะเช้า</span>
+                <span className="vk-employee-code">{emp.employee_code} · กะเช้า</span>
               </div>
             </div>
             <div className="vk-tpi-double-right">
@@ -1897,7 +1918,7 @@ const TpiShiftEntryContent: React.FC<TpiShiftEntryProps> = ({
                 )}
               </div>
               <div className="vk-tpi-double-line2">
-                <span className="vk-double-code">{emp.employee_code} · กะดึก</span>
+                <span className="vk-employee-code">{emp.employee_code} · กะดึก</span>
               </div>
             </div>
             <div className="vk-tpi-double-right">
@@ -2602,7 +2623,7 @@ const TpiShiftEntryContent: React.FC<TpiShiftEntryProps> = ({
 
                       {/* Line 2: Code & Manage Button */}
                       <div className="vk-pool-card-line2">
-                        <span className="vk-emp-code-txt">{emp.employee_code}</span>
+                        <span className="vk-employee-code">{emp.employee_code}</span>
                         <button
                           type="button"
                           className="vk-pool-btn-manage"
@@ -2625,6 +2646,37 @@ const TpiShiftEntryContent: React.FC<TpiShiftEntryProps> = ({
 
         {/* Right Panel: TPI 3-Shift Job Matrix */}
         <div className="vk-tpi-matrix-wrapper">
+          <div className="vk-tpi-job-filters">
+            <label>
+              รหัสงาน
+              <span className="vk-search-container">
+                <Search className="vk-search-icon" aria-hidden="true" />
+                <input
+                  className="vk-search-input"
+                  type="search"
+                  placeholder="เช่น 692021"
+                  value={jobCodeSearch}
+                  onChange={(event) => setJobCodeSearch(event.target.value)}
+                />
+              </span>
+            </label>
+            <label className="vk-tpi-clerk-filter">
+              <input
+                type="checkbox"
+                checked={clerkJobsOnly}
+                onChange={(event) => setClerkJobsOnly(event.target.checked)}
+              />
+              เฉพาะกลุ่มเสมียน
+            </label>
+            {isJobFilterActive && (
+              <button type="button" className="vk-btn" onClick={() => {
+                setJobCodeSearch('')
+                setClerkJobsOnly(false)
+              }}>
+                ล้างตัวกรอง
+              </button>
+            )}
+          </div>
           {/* Sticky Matrix Header */}
           <div className="vk-tpi-matrix-sticky-header">
             <div className="vk-tpi-th-info">
@@ -2642,9 +2694,14 @@ const TpiShiftEntryContent: React.FC<TpiShiftEntryProps> = ({
             })}
           </div>
 
-          <div className="vk-tpi-matrix-scroll-area">
+          <div className="vk-tpi-matrix-scroll-area" ref={matrixScrollRef}>
+            {isJobFilterActive && (
+              <div className="vk-tpi-job-filter-status" role="status">
+                {visibleJobIds.size === 0 ? 'ไม่พบรหัสงานที่ตรงกับตัวกรอง' : `พบ ${visibleJobIds.size} รหัสงานจากทั้งหมด ${availableJobs.length} รหัส`}
+              </div>
+            )}
             {/* Section 1: ประเภทงานประจำ (Regular Jobs) */}
-            <div className="vk-tpi-group-section">
+            <div className="vk-tpi-group-section" hidden={isJobFilterActive && visibleRegularGroups.length === 0}>
               <div className="vk-tpi-group-banner banner-regular">
                 <div className="vk-tpi-banner-title">
                   <h2>1. ประเภทงานประจำ (Regular Jobs)</h2>
@@ -2655,7 +2712,7 @@ const TpiShiftEntryContent: React.FC<TpiShiftEntryProps> = ({
                 </div>
               </div>
 
-              {regularGroups.map((group) => {
+              {visibleRegularGroups.map((group) => {
                 const deptTarget = group.jobs.reduce((sum, j) => {
                   const t = getShiftTargets(j)
                   return sum + t[0] + t[1] + t[2]
@@ -2675,7 +2732,7 @@ const TpiShiftEntryContent: React.FC<TpiShiftEntryProps> = ({
                       </span>
                     </div>
 
-                    {group.jobs.map((job) => {
+                    {group.visibleJobs.map((job) => {
                       const { total } = usage(entries, job.id)
                       const targets = getShiftTargets(job)
                       const todayTarget = targets[0] + targets[1] + targets[2]
@@ -2843,7 +2900,7 @@ const TpiShiftEntryContent: React.FC<TpiShiftEntryProps> = ({
                                               )}
                                             </div>
                                             <div className="vk-tpi-worker-pill-line2">
-                                              <span className="vk-tpi-wp-code">{emp.employee_code}</span>
+                                              <span className="vk-employee-code">{emp.employee_code}</span>
                                             </div>
                                           </div>
                                           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -2923,9 +2980,10 @@ const TpiShiftEntryContent: React.FC<TpiShiftEntryProps> = ({
 
             {/* Section 2: ประเภทงานชั่วคราว (Temporary Jobs) */}
             {[
-              { sectionType: 'temporary', sectionTitle: '2. ประเภทงานชั่วคราว (Temporary Jobs)', sectionTarget: tempTargetTotal, sectionJobs: temporaryJobs, sectionGroups: temporaryGroups },
-              { sectionType: 'non_billable', sectionTitle: '3. งานไม่ตั้งเบิก', sectionTarget: nonBillableTargetTotal, sectionJobs: nonBillableJobs, sectionGroups: nonBillableGroups },
-            ].map(({ sectionType, sectionTitle, sectionTarget, sectionJobs, sectionGroups }) => (
+              { sectionType: 'temporary', sectionTitle: '2. ประเภทงานชั่วคราว (Temporary Jobs)', sectionTarget: tempTargetTotal, sectionJobs: temporaryJobs, sectionGroups: filterJobGroups(temporaryGroups) },
+              { sectionType: 'non_billable', sectionTitle: '3. งานไม่ตั้งเบิก', sectionTarget: nonBillableTargetTotal, sectionJobs: nonBillableJobs, sectionGroups: filterJobGroups(nonBillableGroups) },
+            ].filter(({ sectionGroups }) => !isJobFilterActive || sectionGroups.length > 0)
+              .map(({ sectionType, sectionTitle, sectionTarget, sectionJobs, sectionGroups }) => (
             <div className="vk-tpi-group-section" key={sectionType}>
               <div className={`vk-tpi-group-banner ${sectionType === 'non_billable' ? 'banner-non-billable' : 'banner-temp'}`}>
                 <div className="vk-tpi-banner-title">
@@ -2957,7 +3015,7 @@ const TpiShiftEntryContent: React.FC<TpiShiftEntryProps> = ({
                       </span>
                     </div>
 
-                    {group.jobs.map((job) => {
+                    {group.visibleJobs.map((job) => {
                       const { total } = usage(entries, job.id)
                       const targets = getShiftTargets(job)
                       const todayTarget = targets[0] + targets[1] + targets[2]
@@ -3127,7 +3185,7 @@ const TpiShiftEntryContent: React.FC<TpiShiftEntryProps> = ({
                                               )}
                                             </div>
                                             <div className="vk-tpi-worker-pill-line2">
-                                              <span className="vk-tpi-wp-code">{emp.employee_code}</span>
+                                              <span className="vk-employee-code">{emp.employee_code}</span>
                                             </div>
                                           </div>
                                           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -4818,7 +4876,7 @@ const TpiShiftEntryContent: React.FC<TpiShiftEntryProps> = ({
                               )}
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--vk-ink-3)', marginTop: 2, flexWrap: 'wrap' }}>
-                              <span style={{ fontFamily: 'var(--vk-mono)', fontWeight: 600 }}>{emp?.employee_code}</span>
+                              <span className="vk-employee-code">{emp?.employee_code}</span>
                               <span>•</span>
                               <span style={{ color: '#047857', fontWeight: 600 }}>{shiftLabels}</span>
                               <span>•</span>

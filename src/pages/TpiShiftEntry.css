@@ -133,12 +133,6 @@
   gap: 6px;
 }
 
-.vk-emp-code-txt {
-  font-family: var(--vk-mono, monospace);
-  font-size: 10px;
-  color: var(--vk-ink-3, #7a6f60);
-}
-
 .vk-pool-btn-manage {
   background: #f1f5f9;
   border: 1px solid #cbd5e1;
@@ -702,12 +696,6 @@
   min-width: 0;
 }
 
-.vk-double-code {
-  font-family: var(--vk-mono, monospace);
-  font-size: 10px;
-  color: var(--vk-ink-3, #7a6f60);
-}
-
 .vk-tpi-double-right {
   display: flex;
   align-items: center;
@@ -961,12 +949,6 @@
   min-width: 0;
 }
 
-.vk-tpi-wp-code {
-  font-family: var(--vk-mono, monospace);
-  font-size: 10px;
-  color: var(--vk-ink-3, #7a6f60);
-}
-
 .vk-tpi-btn-del {
   background: transparent;
   border: 0;
@@ -1067,8 +1049,9 @@
 
 .vk-meta-code {
   font-family: var(--vk-mono, monospace);
+  font-size: 13px;
   font-weight: 700;
-  color: var(--vk-ink-2, #3a332c);
+  color: var(--vk-ink, #161311);
 }
 
 .vk-meta-nat {
@@ -1648,3 +1631,39 @@
 .tpi-job-type-filters button[data-kind="temporary"][aria-pressed="true"] { background: #dbeafe; color: #1e40af; }
 .tpi-job-type-filters button[data-kind="non_billable"][aria-pressed="true"] { background: #f7e8ed; color: #800020; }
 .tpi-job-management .tpi-job-add-non-billable { color: #800020; border: 1px solid #b77b8a; background: #fff; display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+
+.vk-tpi-job-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  flex-shrink: 0;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--vk-rule-soft);
+  color: var(--vk-ink);
+  font-family: var(--vk-sans);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.vk-tpi-job-filters label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.vk-tpi-job-filters .vk-search-container {
+  width: 9rem;
+  margin: 0;
+}
+
+.vk-tpi-job-filter-status {
+  font-family: var(--vk-sans);
+  font-size: 13px;
+  color: var(--vk-ink-2);
+}
+
+.vk-tpi-clerk-filter {
+  min-height: 36px;
+  cursor: pointer;
+}

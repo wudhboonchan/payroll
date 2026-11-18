@@ -523,7 +523,7 @@ export default function PayrollEntry() {
                 value={empSearch}
                 onChange={e => setEmpSearch(e.target.value)}
                 placeholder="ค้นหาชื่อหรือรหัส..."
-                style={{ width: '100%', height: 32, paddingLeft: 26, paddingRight: empSearch ? 26 : 8, fontSize: 12, fontFamily: 'var(--vk-sans)', border: '1px solid var(--vk-rule)', background: 'var(--vk-bone)', color: 'var(--vk-ink)', outline: 'none', boxSizing: 'border-box' }}
+                style={{ width: '100%', height: 36, paddingLeft: 26, paddingRight: empSearch ? 26 : 8, fontSize: 14, fontFamily: 'var(--vk-sans)', border: '1px solid var(--vk-rule)', background: 'var(--vk-bone)', color: 'var(--vk-ink)', outline: 'none', boxSizing: 'border-box' }}
               />
               {empSearch && (
                 <button onClick={() => setEmpSearch('')} style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', padding: 2, color: 'var(--vk-ink-3)', display: 'flex' }}>
@@ -563,7 +563,7 @@ export default function PayrollEntry() {
                         <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 999, background: 'rgba(177,71,41,0.12)', color: 'var(--vk-persimmon)', letterSpacing: '0.04em', flexShrink: 0 }}>เสมียน</span>
                       )}
                     </div>
-                    <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 10, color: 'var(--vk-ink-3)', marginTop: 1 }}>{emp.employee_code}</div>
+                    <div className="vk-employee-code" style={{ marginTop: 1 }}>{emp.employee_code}</div>
                   </div>
                 </div>
               </div>
@@ -619,8 +619,8 @@ export default function PayrollEntry() {
                             <span style={{ fontWeight: 400, fontSize: 13, color: 'var(--vk-ink-3)', marginLeft: 6 }}>({fmtNationality(selectedEmp.nationality)})</span>
                           )}
                         </div>
-                        <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 11, color: 'var(--vk-ink-3)', marginTop: 2 }}>
-                          {selectedEmp.employee_code}
+                        <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 14, color: 'var(--vk-ink-2)', marginTop: 2 }}>
+                          <span className="vk-employee-code">{selectedEmp.employee_code}</span>
                           {' · '}
                           {selectedEmp.position === 'clerk' ? 'เสมียน' : selectedEmp.position === 'foreman' ? 'โฟร์แมน' : selectedEmp.position === 'office' ? 'พนักงานออฟฟิศ' : selectedEmp.position === 'manager' ? 'ผู้จัดการ' : 'พนักงานทั่วไป'}
                           {selectedEmp.job_title ? ` – ${selectedEmp.job_title}` : ''}
@@ -736,12 +736,12 @@ export default function PayrollEntry() {
                       ].map((r, i) => (
                         <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '7px 0', borderBottom: '1px dashed var(--vk-rule-soft)' }}>
                           <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: 13 }}>{r.label}</div>
+                            <div style={{ fontSize: 15 }}>{r.label}</div>
                             {'detail' in r && r.detail && (
                               <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 10, color: 'var(--vk-persimmon)', marginTop: 1, letterSpacing: '0.01em' }}>{r.detail}</div>
                             )}
                           </div>
-                          <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 13, fontVariantNumeric: 'tabular-nums', textAlign: 'right', color: r.isOverridden ? 'var(--vk-marigold)' : 'var(--vk-ink)' }}>
+                          <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 15, fontVariantNumeric: 'tabular-nums', textAlign: 'right', color: r.isOverridden ? 'var(--vk-marigold)' : 'var(--vk-ink)' }}>
                             {monoNum(r.value)}
                           </div>
                         </div>
@@ -752,7 +752,7 @@ export default function PayrollEntry() {
                         <div style={{ padding: '7px 0', borderBottom: '1px dashed var(--vk-rule-soft)' }}>
                           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
                             <div style={{ flex: 1, fontSize: 13 }}>ค่าทำงานข้ามตำแหน่ง</div>
-                            <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 13, fontVariantNumeric: 'tabular-nums', textAlign: 'right' }}>
+                            <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 15, fontVariantNumeric: 'tabular-nums', textAlign: 'right' }}>
                               {monoNum(crossPositions.reduce((s, p) => s + p.amount, 0))}
                             </div>
                           </div>
@@ -917,7 +917,7 @@ export default function PayrollEntry() {
                                   style={{
                                     width: 85,
                                     fontFamily: 'var(--vk-mono)',
-                                    fontSize: 13,
+                                    fontSize: 15,
                                     textAlign: 'right',
                                     border: '1px solid var(--vk-persimmon)',
                                     background: '#fff',
@@ -1121,7 +1121,7 @@ export default function PayrollEntry() {
                                   style={{
                                     width: 85,
                                     fontFamily: 'var(--vk-mono)',
-                                    fontSize: 13,
+                                    fontSize: 15,
                                     textAlign: 'right',
                                     border: '1px solid var(--vk-persimmon)',
                                     background: '#fff',

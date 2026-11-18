@@ -549,6 +549,14 @@ select.vk-input {
 
 
 /* Premium Employee cards in list/pool */
+.vk-employee-code {
+  color: var(--vk-ink);
+  font-family: var(--vk-mono);
+  font-size: 12px;
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+
 .vk-employee-card {
   padding: 10px 14px;
   margin-bottom: 6px;
@@ -626,6 +634,21 @@ select.vk-input {
 .vk-deduct-col {
   min-width: 0;
   border-top: none;
+}
+
+.vk-tpi-payroll-breakdown {
+  --vk-deduction-product-text-size: 14px;
+}
+
+.vk-tpi-payroll-breakdown .vk-eyebrow {
+  font-size: 14px;
+  letter-spacing: 0.06em;
+  color: var(--vk-ink-2);
+}
+
+.vk-tpi-payroll-breakdown .vk-input,
+.vk-tpi-payroll-breakdown .vk-btn {
+  font-size: 15px;
 }
 
 /* Net pay number — responsive font size */

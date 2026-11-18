@@ -984,7 +984,7 @@ export default function PaySlip() {
                         <span style={{ fontSize: 9, fontWeight: 600, padding: '1px 5px', borderRadius: 4, background: '#fee2e2', color: '#991b1b', flexShrink: 0 }}>ไม่ใช้งาน</span>
                       )}
                     </div>
-                    <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 10, color: 'var(--vk-ink-3)', marginTop: 1 }}>{emp.employee_code}</div>
+                    <div className="vk-employee-code" style={{ marginTop: 1 }}>{emp.employee_code}</div>
                   </div>
                 </div>
               </div>

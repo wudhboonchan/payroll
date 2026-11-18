@@ -937,7 +937,7 @@ const isDisciplinaryAdvanceNote = (notes?: string | null): boolean => {
                         <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 999, background: 'rgba(177,71,41,0.12)', color: 'var(--vk-persimmon)', letterSpacing: '0.04em', flexShrink: 0 }}>เสมียน</span>
                       )}
                     </div>
-                    <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 10, color: 'var(--vk-ink-3)', marginTop: 1 }}>{emp.employee_code}</div>
+                    <div className="vk-employee-code" style={{ marginTop: 1 }}>{emp.employee_code}</div>
                   </div>
                 </div>
               )
@@ -997,7 +997,7 @@ const isDisciplinaryAdvanceNote = (notes?: string | null): boolean => {
                           )}
                         </div>
                         <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 3 }}>
-                          <span style={{ fontFamily: 'var(--vk-mono)', fontSize: 10, color: 'var(--vk-ink-3)' }}>{emp.code}</span>
+                          <span className="vk-employee-code">{emp.code}</span>
                           {emp.isNew && <Pill color="jade">ใหม่</Pill>}
                           {(emp.isUnpaid || emp.partialHours === -1) ? (
                             <span

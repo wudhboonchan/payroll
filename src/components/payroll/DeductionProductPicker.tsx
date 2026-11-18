@@ -33,7 +33,7 @@ export function DeductionProductPicker({ onAdd, factory = 'tpi' }: Props) {
 
   return (
     <div style={{ display: 'grid', gap: 8, padding: 12, border: '1px solid var(--vk-rule-soft)', borderRadius: 6, background: 'var(--vk-paper)' }}>
-      <label htmlFor={`${id}-product`} style={{ fontSize: 12, fontWeight: 600 }}>{pickerTitle}</label>
+      <label htmlFor={`${id}-product`} style={{ fontSize: 'var(--vk-deduction-product-text-size, 12px)', fontWeight: 600 }}>{pickerTitle}</label>
       <select id={`${id}-product`} className="vk-input" value={productId}
         onChange={event => { setProductId(event.target.value); setMessage('') }}>
         <option value="">{selectPlaceholder}</option>
@@ -48,10 +48,10 @@ export function DeductionProductPicker({ onAdd, factory = 'tpi' }: Props) {
         ))}
       </select>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <label htmlFor={`${id}-quantity`} style={{ fontSize: 12 }}>จำนวน</label>
+        <label htmlFor={`${id}-quantity`} style={{ fontSize: 'var(--vk-deduction-product-text-size, 12px)' }}>จำนวน</label>
         <input id={`${id}-quantity`} type="number" min="1" step="1" className="vk-input"
           style={{ width: 72 }} value={quantity} onChange={event => { setQuantity(event.target.value); setMessage('') }} />
-        <span style={{ fontSize: 12, marginLeft: 'auto' }}>รวม {(deduction?.amount || 0).toLocaleString('th-TH')} บาท</span>
+        <span style={{ fontSize: 'var(--vk-deduction-product-text-size, 12px)', marginLeft: 'auto' }}>รวม {(deduction?.amount || 0).toLocaleString('th-TH')} บาท</span>
         <button type="button" className="vk-btn" disabled={!deduction} onClick={() => {
           if (!deduction) return
           const previous = purchases.find(item => item.id === editingId)
@@ -76,7 +76,7 @@ export function DeductionProductPicker({ onAdd, factory = 'tpi' }: Props) {
             if (!product) return null
             return (
               <li key={item.id} style={{ padding: '10px 0', borderTop: '1px solid var(--vk-rule-soft)', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
-                <div style={{ flex: '1 1 170px', fontSize: 12 }}>
+                <div style={{ flex: '1 1 170px', fontSize: 'var(--vk-deduction-product-text-size, 12px)' }}>
                   <div style={{ fontWeight: 600 }}>{product.label}</div>
                   <div>{product.price} บาท × {item.quantity} = {(product.price * item.quantity).toLocaleString('th-TH')} บาท</div>
                 </div>
@@ -97,7 +97,7 @@ export function DeductionProductPicker({ onAdd, factory = 'tpi' }: Props) {
           })}
         </ul>
       )}
-      {message && <div role="status" style={{ fontSize: 12, color: 'var(--vk-jade)' }}>{message}</div>}
+      {message && <div role="status" style={{ fontSize: 'var(--vk-deduction-product-text-size, 12px)', color: 'var(--vk-jade)' }}>{message}</div>}
     </div>
   )
 }

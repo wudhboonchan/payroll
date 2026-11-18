@@ -1049,10 +1049,10 @@ function TpiPayrollEntryContent() {
                 placeholder="ค้นหาชื่อหรือรหัส..."
                 style={{
                   width: '100%',
-                  height: 32,
+                  height: 36,
                   paddingLeft: 26,
                   paddingRight: empSearch ? 26 : 8,
-                  fontSize: 12,
+                  fontSize: 14,
                   fontFamily: 'var(--vk-sans)',
                   border: '1px solid var(--vk-rule)',
                   background: 'var(--vk-bone)',
@@ -1139,8 +1139,8 @@ function TpiPayrollEntryContent() {
                       </div>
 
                       {/* Line 2: Employee Code on LEFT, Shift/OT/Attendance Badges fixed on RIGHT */}
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-                        <span style={{ fontFamily: 'var(--vk-mono)', fontSize: 10, color: 'var(--vk-ink-3)', flexShrink: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', flexWrap: 'wrap', gap: 4 }}>
+                        <span className="vk-employee-code">
                           {emp.employee_code}
                         </span>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
@@ -1259,8 +1259,8 @@ function TpiPayrollEntryContent() {
                             </span>
                           )}
                         </div>
-                        <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 11, color: 'var(--vk-ink-3)', marginTop: 2 }}>
-                          {selectedEmp.employee_code}
+                        <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 14, color: 'var(--vk-ink-2)', marginTop: 2 }}>
+                          <span className="vk-employee-code">{selectedEmp.employee_code}</span>
                           {' · '}
                           {selectedEmp.position === 'clerk' ? 'พนักงานกลุ่มเสมียน' : 'พนักงานทั่วไป'}
                           {selectedEmp.job_title ? ` – ${selectedEmp.job_title}` : ''}
@@ -1551,7 +1551,7 @@ function TpiPayrollEntryContent() {
                   </div>
 
                   {/* ── Income & Deduct Column (Diamond Style) ── */}
-                  <div className="vk-income-grid" style={{ border: '1px solid var(--vk-rule)', marginBottom: 0, width: '100%' }}>
+                  <div className="vk-income-grid vk-tpi-payroll-breakdown" style={{ border: '1px solid var(--vk-rule)', marginBottom: 0, width: '100%' }}>
                     {/* Income Column */}
                     <div className="vk-income-col" style={{ padding: '20px 24px', background: 'var(--vk-bone)', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
                       <div className="vk-eyebrow" style={{ color: 'var(--vk-jade)', marginBottom: 14 }}>INCOME · รายได้</div>
@@ -1589,11 +1589,11 @@ function TpiPayrollEntryContent() {
                       ].map((r, i) => (
                         <div key={i} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, padding: '7px 0', borderBottom: '1px dashed var(--vk-rule-soft)' }}>
                           <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 13, fontWeight: 600 }}>{r.label}</div>
-                            {r.sub && <div style={{ fontSize: 11, color: 'var(--vk-ink-3)', marginTop: 1, wordBreak: 'break-word', whiteSpace: 'normal' }}>{r.sub}</div>}
-                            {r.detail && <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 10, color: 'var(--vk-persimmon)', marginTop: 1, wordBreak: 'break-word', whiteSpace: 'normal' }}>{r.detail}</div>}
+                            <div style={{ fontSize: 15, fontWeight: 600 }}>{r.label}</div>
+                            {r.sub && <div style={{ fontSize: 14, color: 'var(--vk-ink-2)', marginTop: 1, wordBreak: 'break-word', whiteSpace: 'normal' }}>{r.sub}</div>}
+                            {r.detail && <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 13, color: 'var(--vk-persimmon)', marginTop: 1, wordBreak: 'break-word', whiteSpace: 'normal' }}>{r.detail}</div>}
                           </div>
-                          <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 13, fontVariantNumeric: 'tabular-nums', textAlign: 'right', color: r.isOverridden ? 'var(--vk-marigold)' : 'var(--vk-ink)', fontWeight: 700, flexShrink: 0 }}>
+                          <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 17, fontVariantNumeric: 'tabular-nums', textAlign: 'right', color: r.isOverridden ? 'var(--vk-marigold)' : 'var(--vk-ink)', fontWeight: 700, flexShrink: 0 }}>
                             {monoNum(r.value)}
                           </div>
                         </div>
@@ -1601,24 +1601,24 @@ function TpiPayrollEntryContent() {
 
                       {/* Overrides Input */}
                       <div style={{ marginTop: 10, padding: '8px 10px', background: 'rgba(0,0,0,0.03)', borderRadius: 4, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                          <span style={{ fontSize: 11, color: 'var(--vk-ink-3)' }}>แก้ไขค่าจ้างปกติกะแรก (Override):</span>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
+                          <span style={{ fontSize: 14, color: 'var(--vk-ink-2)' }}>แก้ไขค่าจ้างปกติกะแรก (Override):</span>
                           <input
                             type="number"
                             value={overrideNormal !== null ? overrideNormal : ''}
                             onChange={e => setOverrideNormal(e.target.value === '' ? null : Number(e.target.value))}
                             placeholder={`อัตโนมัติ (${calc.baseNormalWage})`}
-                            style={{ width: 110, fontSize: 11, fontFamily: 'var(--vk-mono)', textAlign: 'right', border: '1px solid var(--vk-rule-soft)', padding: '2px 6px', background: '#fff' }}
+                            style={{ width: 144, maxWidth: '100%', fontSize: 15, fontFamily: 'var(--vk-mono)', textAlign: 'right', border: '1px solid var(--vk-rule-soft)', padding: '4px 6px', background: '#fff' }}
                           />
                         </div>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                          <span style={{ fontSize: 11, color: 'var(--vk-ink-3)' }}>แก้ไขค่ากะ 2 (Override):</span>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
+                          <span style={{ fontSize: 14, color: 'var(--vk-ink-2)' }}>แก้ไขค่ากะ 2 (Override):</span>
                           <input
                             type="number"
                             value={overrideShift !== null ? overrideShift : ''}
                             onChange={e => setOverrideShift(e.target.value === '' ? null : Number(e.target.value))}
                             placeholder={`อัตโนมัติ (${calc.baseShiftWage})`}
-                            style={{ width: 110, fontSize: 11, fontFamily: 'var(--vk-mono)', textAlign: 'right', border: '1px solid var(--vk-rule-soft)', padding: '2px 6px', background: '#fff' }}
+                            style={{ width: 144, maxWidth: '100%', fontSize: 15, fontFamily: 'var(--vk-mono)', textAlign: 'right', border: '1px solid var(--vk-rule-soft)', padding: '4px 6px', background: '#fff' }}
                           />
                         </div>
                       </div>
@@ -1631,17 +1631,17 @@ function TpiPayrollEntryContent() {
                         <div style={{ padding: '10px 12px', background: 'var(--vk-paper)', borderRadius: 6, border: '1px solid var(--vk-rule-soft)' }}>
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
                             <div>
-                              <div style={{ fontSize: 12, color: 'var(--vk-ink)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <div style={{ fontSize: 15, color: 'var(--vk-ink)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
                                 <span>เบี้ยขยัน (฿)</span>
                                 {overrideDiligence !== null && (
-                                  <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 4, background: '#fffbeb', color: '#b45309', border: '1px solid #fde68a' }}>
+                                  <span style={{ fontSize: 12, fontWeight: 700, padding: '1px 5px', borderRadius: 4, background: '#fffbeb', color: '#b45309', border: '1px solid #fde68a' }}>
                                     OVERRIDE
                                   </span>
                                 )}
                               </div>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
                                 <span style={{
-                                  fontSize: 9,
+                                  fontSize: 12,
                                   fontWeight: 700,
                                   padding: '1px 6px',
                                   borderRadius: 4,
@@ -1671,7 +1671,7 @@ function TpiPayrollEntryContent() {
                               {!calc.isEndOfMonth ? (
                                 <span style={{
                                   fontFamily: 'var(--vk-mono)',
-                                  fontSize: 13,
+                                  fontSize: 15,
                                   fontWeight: 700,
                                   color: 'var(--vk-ink-3)',
                                   minWidth: 60,
@@ -1683,7 +1683,7 @@ function TpiPayrollEntryContent() {
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                                   <span style={{
                                     fontFamily: 'var(--vk-mono)',
-                                    fontSize: 13,
+                                    fontSize: 15,
                                     fontWeight: 700,
                                     color: overrideDiligence !== null ? 'var(--vk-marigold)' : 'var(--vk-ink)',
                                     minWidth: 60,
@@ -1717,7 +1717,7 @@ function TpiPayrollEntryContent() {
                                       setOverrideDiligence(0 !== defaultDiligence ? 0 : null)
                                     }}
                                     style={{
-                                      fontSize: 10,
+                                      fontSize: 13,
                                       padding: '3px 6px',
                                       borderRadius: 4,
                                       border: '1px solid #fca5a5',
@@ -1738,7 +1738,7 @@ function TpiPayrollEntryContent() {
                                       setOverrideDiligence(300 !== defaultDiligence ? 300 : null)
                                     }}
                                     style={{
-                                      fontSize: 10,
+                                      fontSize: 13,
                                       padding: '3px 6px',
                                       borderRadius: 4,
                                       border: '1px solid #6ee7b7',
@@ -1762,7 +1762,7 @@ function TpiPayrollEntryContent() {
                                       setExtraEntries(prev => ({ ...prev, amount_diligence: val }))
                                       setOverrideDiligence(val !== defaultDiligence ? val : null)
                                     }}
-                                    style={{ width: 75, fontFamily: 'var(--vk-mono)', fontSize: 13, textAlign: 'right', border: '1px solid var(--vk-persimmon)', background: '#fff', padding: '4px 6px', outline: 'none' }}
+                                    style={{ width: 75, fontFamily: 'var(--vk-mono)', fontSize: 15, textAlign: 'right', border: '1px solid var(--vk-persimmon)', background: '#fff', padding: '4px 6px', outline: 'none' }}
                                     placeholder="0"
                                   />
                                   <button
@@ -1787,7 +1787,7 @@ function TpiPayrollEntryContent() {
                                       borderRadius: 4,
                                       padding: '4px 8px',
                                       cursor: 'pointer',
-                                      fontSize: 11,
+                                      fontSize: 14,
                                       fontWeight: 600,
                                     }}
                                   >
@@ -1812,7 +1812,7 @@ function TpiPayrollEntryContent() {
                                         cursor: 'pointer',
                                         display: 'inline-flex',
                                         alignItems: 'center',
-                                        fontSize: 11,
+                                        fontSize: 14,
                                       }}
                                     >
                                       <RotateCcw style={{ width: 11, height: 11 }} />
@@ -1825,7 +1825,7 @@ function TpiPayrollEntryContent() {
 
                           {calc.isEndOfMonth && overrideDiligence !== null && (
                             <div style={{ marginTop: 10 }}>
-                              <label htmlFor="diligence-override-reason" style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--vk-ink-2)', marginBottom: 5 }}>
+                              <label htmlFor="diligence-override-reason" style={{ display: 'block', fontSize: 14, fontWeight: 600, color: 'var(--vk-ink-2)', marginBottom: 5 }}>
                                 เหตุผลที่แก้ไขเบี้ยขยัน <span style={{ color: 'var(--vk-crimson)' }}>*</span>
                               </label>
                               <textarea
@@ -1836,9 +1836,9 @@ function TpiPayrollEntryContent() {
                                 required
                                 aria-describedby="diligence-reason-help"
                                 placeholder="ระบุเหตุผลและข้อมูลประกอบการแก้ไข"
-                                style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical', padding: '8px 10px', border: '1px solid var(--vk-rule-soft)', borderRadius: 4, background: 'var(--vk-bone)', color: 'var(--vk-ink)', fontFamily: 'var(--vk-sans)', fontSize: 12, lineHeight: 1.5 }}
+                                style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical', padding: '8px 10px', border: '1px solid var(--vk-rule-soft)', borderRadius: 4, background: 'var(--vk-bone)', color: 'var(--vk-ink)', fontFamily: 'var(--vk-sans)', fontSize: 15, lineHeight: 1.5 }}
                               />
-                              <div id="diligence-reason-help" style={{ marginTop: 4, fontSize: 11, color: diligenceReason.trim() ? 'var(--vk-ink-3)' : 'var(--vk-crimson)' }}>
+                              <div id="diligence-reason-help" style={{ marginTop: 4, fontSize: 14, color: diligenceReason.trim() ? 'var(--vk-ink-3)' : 'var(--vk-crimson)' }}>
                                 {diligenceReason.trim() ? 'เหตุผลจะถูกเก็บไว้กับรายการค่าจ้าง พร้อมผู้บันทึกและเวลาบันทึก' : 'ต้องระบุเหตุผลก่อนบันทึกยอด override'}
                               </div>
                             </div>
@@ -1849,7 +1849,7 @@ function TpiPayrollEntryContent() {
                             const selectedLogs = attendanceByEmp.get(selectedEmp?.id || '') || []
                             if (selectedLogs.length > 0) {
                               return (
-                                <div style={{ background: '#fff5f5', border: '1px solid #fed7d7', borderRadius: 6, padding: '8px 10px', fontSize: 11, color: '#9b2c2c', marginTop: 8 }}>
+                                <div style={{ background: '#fff5f5', border: '1px solid #fed7d7', borderRadius: 6, padding: '8px 10px', fontSize: 14, color: '#9b2c2c', marginTop: 8 }}>
                                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700 }}>
                                     <AlertTriangle style={{ width: 13, height: 13, color: '#e53e3e', flexShrink: 0 }} />
                                     <span>พบประวัติ ขาด/ลา/มาสาย ในเดือนนี้ ({selectedLogs.length} ครั้ง):</span>
@@ -1871,14 +1871,14 @@ function TpiPayrollEntryContent() {
                             }
                             if (isDiligenceWaived) {
                               return (
-                                <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 6, padding: '6px 10px', fontSize: 11, color: '#92400e', marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 6, padding: '6px 10px', fontSize: 14, color: '#92400e', marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
                                   <AlertTriangle style={{ width: 13, height: 13, color: '#d97706', flexShrink: 0 }} />
                                   <span>งวดสิ้นเดือนนี้ตั้งค่างดจ่ายค่าเบี้ยขยันสำหรับพนักงานต่างชาติเป็นกรณีพิเศษ (เบี้ยขยัน = 0 บ.)</span>
                                 </div>
                               )
                             }
                             return (
-                              <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 6, padding: '4px 10px', fontSize: 11, color: '#166534', marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 6, padding: '4px 10px', fontSize: 14, color: '#166534', marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
                                 <CheckCircle2 style={{ width: 13, height: 13, color: '#16a34a', flexShrink: 0 }} />
                                 <span>ไม่มีประวัติ ขาด/ลา/มาสาย ตลอดทั้งเดือนนี้ {monthCycle && `(${monthCycle}) `}(ได้รับเบี้ยขยัน 300 บาท)</span>
                               </div>
@@ -1890,16 +1890,16 @@ function TpiPayrollEntryContent() {
                         <div style={{ background: '#ffffff', borderRadius: 6, border: '1px solid #fed7aa', padding: '10px 12px' }}>
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, borderBottom: '1px solid #ffedd5', paddingBottom: 6 }}>
                             <div>
-                              <div style={{ fontSize: 12, fontWeight: 700, color: '#9a3412', display: 'flex', alignItems: 'center', gap: 5 }}>
+                              <div style={{ fontSize: 15, fontWeight: 700, color: '#9a3412', display: 'flex', alignItems: 'center', gap: 5 }}>
                                 <span>หมวดเงินพิเศษ</span>
                               </div>
-                              <div style={{ fontSize: 10, color: 'var(--vk-ink-3)' }}>
+                              <div style={{ fontSize: 13, color: 'var(--vk-ink-2)' }}>
                                 รวมรายการ: ค่า จป., เงินพิเศษอื่นๆ
                               </div>
                             </div>
                             <div style={{ textAlign: 'right' }}>
-                              <span style={{ fontSize: 10, color: '#9a3412', fontWeight: 600, marginRight: 4 }}>รวม:</span>
-                              <span style={{ fontFamily: 'var(--vk-mono)', fontSize: 13, fontWeight: 700, color: '#c2410c' }}>
+                              <span style={{ fontSize: 13, color: '#9a3412', fontWeight: 600, marginRight: 4 }}>รวม:</span>
+                              <span style={{ fontFamily: 'var(--vk-mono)', fontSize: 15, fontWeight: 700, color: '#c2410c' }}>
                                 ฿{monoNum((extraEntries.amount_safety || 0) + (extraEntries.amount_other_special || 0))}
                               </span>
                             </div>
@@ -1910,16 +1910,16 @@ function TpiPayrollEntryContent() {
                             {/* Sub-category 2: ค่า จป. */}
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingLeft: 6, borderLeft: '2px solid #10b981', flexWrap: 'wrap' }}>
                               <div>
-                                <div style={{ fontSize: 12, color: 'var(--vk-ink)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
-                                  <span>• ค่า จป. {monthCycle && <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--vk-ink-3)' }}>({monthCycle})</span>} (฿)</span>
+                                <div style={{ fontSize: 15, color: 'var(--vk-ink)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  <span>• ค่า จป. {monthCycle && <span style={{ fontSize: 14, fontWeight: 400, color: 'var(--vk-ink-3)' }}>({monthCycle})</span>} (฿)</span>
                                   {overrideSafety !== null && (
-                                    <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 4, background: '#fffbeb', color: '#b45309', border: '1px solid #fde68a' }}>
+                                    <span style={{ fontSize: 12, fontWeight: 700, padding: '1px 5px', borderRadius: 4, background: '#fffbeb', color: '#b45309', border: '1px solid #fde68a' }}>
                                       OVERRIDE
                                     </span>
                                   )}
                                 </div>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
-                                  <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 4, background: selectedEmp?.is_safety_officer ? '#ecfdf5' : '#f3f4f6', color: selectedEmp?.is_safety_officer ? '#047857' : '#7a6f60' }}>
+                                  <span style={{ fontSize: 12, fontWeight: 700, padding: '1px 6px', borderRadius: 4, background: selectedEmp?.is_safety_officer ? '#ecfdf5' : '#f3f4f6', color: selectedEmp?.is_safety_officer ? '#047857' : '#7a6f60' }}>
                                     {selectedEmp?.is_safety_officer
                                       ? (calc.isEndOfMonth ? `ดึงจากฐานข้อมูล (500 บ.)${monthCycle ? ` · รอบ ${monthCycle}` : ''}` : 'จ่ายงวดสิ้นเดือน')
                                       : 'ไม่มีสิทธิ์ค่า จป.'}
@@ -1931,7 +1931,7 @@ function TpiPayrollEntryContent() {
                                 {!calc.isEndOfMonth ? (
                                   <span style={{
                                     fontFamily: 'var(--vk-mono)',
-                                    fontSize: 13,
+                                    fontSize: 15,
                                     fontWeight: 700,
                                     color: 'var(--vk-ink-3)',
                                     minWidth: 60,
@@ -1943,7 +1943,7 @@ function TpiPayrollEntryContent() {
                                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                                     <span style={{
                                       fontFamily: 'var(--vk-mono)',
-                                      fontSize: 13,
+                                      fontSize: 15,
                                       fontWeight: 700,
                                       color: overrideSafety !== null ? 'var(--vk-marigold)' : 'var(--vk-ink)',
                                       minWidth: 60,
@@ -1980,7 +1980,7 @@ function TpiPayrollEntryContent() {
                                         setExtraEntries(prev => ({ ...prev, amount_safety: val }))
                                         setOverrideSafety(val !== defaultSafety ? val : null)
                                       }}
-                                      style={{ width: 85, fontFamily: 'var(--vk-mono)', fontSize: 13, textAlign: 'right', border: '1px solid var(--vk-persimmon)', background: '#fff', padding: '4px 6px', outline: 'none' }}
+                                      style={{ width: 85, fontFamily: 'var(--vk-mono)', fontSize: 15, textAlign: 'right', border: '1px solid var(--vk-persimmon)', background: '#fff', padding: '4px 6px', outline: 'none' }}
                                       placeholder="0"
                                     />
                                     <button
@@ -2001,7 +2001,7 @@ function TpiPayrollEntryContent() {
                                         borderRadius: 4,
                                         padding: '4px 8px',
                                         cursor: 'pointer',
-                                        fontSize: 11,
+                                        fontSize: 14,
                                         fontWeight: 600,
                                       }}
                                     >
@@ -2025,7 +2025,7 @@ function TpiPayrollEntryContent() {
                                           cursor: 'pointer',
                                           display: 'inline-flex',
                                           alignItems: 'center',
-                                          fontSize: 11,
+                                          fontSize: 14,
                                         }}
                                       >
                                         <RotateCcw style={{ width: 11, height: 11 }} />
@@ -2039,15 +2039,15 @@ function TpiPayrollEntryContent() {
                             {/* Sub-category 3: เงินพิเศษอื่นๆ */}
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingLeft: 6, borderLeft: '2px solid #f59e0b' }}>
                               <div>
-                                <div style={{ fontSize: 12, color: 'var(--vk-ink)', fontWeight: 600 }}>• เงินพิเศษอื่นๆ (฿)</div>
-                                <span style={{ fontSize: 9, color: 'var(--vk-ink-3)' }}>ระบุเพิ่มเติมได้</span>
+                                <div style={{ fontSize: 15, color: 'var(--vk-ink)', fontWeight: 600 }}>• เงินพิเศษอื่นๆ (฿)</div>
+                                <span style={{ fontSize: 12, color: 'var(--vk-ink-3)' }}>ระบุเพิ่มเติมได้</span>
                               </div>
                               <input
                                 type="number"
                                 min="0"
                                 value={extraEntries.amount_other_special || ''}
                                 onChange={e => setExtraEntries(prev => ({ ...prev, amount_other_special: Number(e.target.value) || 0 }))}
-                                style={{ width: 90, fontFamily: 'var(--vk-mono)', fontSize: 13, textAlign: 'right', border: '1px solid var(--vk-rule)', background: 'var(--vk-paper)', padding: '4px 8px' }}
+                                style={{ width: 90, fontFamily: 'var(--vk-mono)', fontSize: 15, textAlign: 'right', border: '1px solid var(--vk-rule)', background: 'var(--vk-paper)', padding: '4px 8px' }}
                                 placeholder="0"
                               />
                             </div>
@@ -2059,7 +2059,7 @@ function TpiPayrollEntryContent() {
                                 value={specialNote}
                                 onChange={e => setSpecialNote(e.target.value)}
                                 placeholder="หมายเหตุเงินพิเศษ (เช่น ระบุรายละเอียดรางวัล หรือค่าตอบแทนพิเศษ)..."
-                                style={{ width: '100%', fontSize: 11, padding: '4px 8px', border: '1px solid var(--vk-rule-soft)', background: '#ffffff', borderRadius: 4 }}
+                                style={{ width: '100%', fontSize: 14, padding: '4px 8px', border: '1px solid var(--vk-rule-soft)', background: '#ffffff', borderRadius: 4 }}
                               />
                             </div>
                           </div>
@@ -2068,7 +2068,7 @@ function TpiPayrollEntryContent() {
 
                       <div style={{ display: 'flex', justifyContent: 'space-between', padding: '14px 0 0', marginTop: 'auto', borderTop: '2px solid var(--vk-rule)' }}>
                         <div className="vk-eyebrow">รวมรายได้</div>
-                        <div style={{ fontFamily: 'var(--vk-mono)', fontWeight: 700, fontSize: 16, color: 'var(--vk-jade)' }}>
+                        <div style={{ fontFamily: 'var(--vk-mono)', fontWeight: 700, fontSize: 18, color: 'var(--vk-jade)' }}>
                           + {monoNum(calc.totalIncome)}
                         </div>
                       </div>
@@ -2132,10 +2132,10 @@ function TpiPayrollEntryContent() {
                       ].filter(r => r.value !== 0 || r.showAlways).map((r, i) => (
                         <div key={i} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, padding: '7px 0', borderBottom: '1px dashed var(--vk-rule-soft)' }}>
                           <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'pre-line' }}>{r.label}</div>
-                            {r.sub && <div style={{ fontSize: 11, color: 'var(--vk-ink-3)', marginTop: 1, wordBreak: 'break-word', whiteSpace: 'normal' }}>{r.sub}</div>}
+                            <div style={{ fontSize: 15, fontWeight: 600, whiteSpace: 'pre-line' }}>{r.label}</div>
+                            {r.sub && <div style={{ fontSize: 14, color: 'var(--vk-ink-2)', marginTop: 1, wordBreak: 'break-word', whiteSpace: 'normal' }}>{r.sub}</div>}
                           </div>
-                          <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 13, fontVariantNumeric: 'tabular-nums', color: 'var(--vk-crimson)', fontWeight: 700, flexShrink: 0 }}>
+                          <div style={{ fontFamily: 'var(--vk-mono)', fontSize: 15, fontVariantNumeric: 'tabular-nums', color: 'var(--vk-crimson)', fontWeight: 700, flexShrink: 0 }}>
                             {monoNum(r.value)}
                           </div>
                         </div>
@@ -2154,11 +2154,11 @@ function TpiPayrollEntryContent() {
                           borderRadius: 4
                         }}>
                           <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 13, fontWeight: 600 }}>หักเครื่องแบบพนักงาน</div>
+                            <div style={{ fontSize: 15, fontWeight: 600 }}>หักเครื่องแบบพนักงาน</div>
                             {extraEntries.deduct_uniform > 0 && (
                               <div style={{
                                 fontFamily: 'var(--vk-mono)',
-                                fontSize: 10,
+                                fontSize: 13,
                                 color: 'var(--vk-persimmon)',
                                 marginTop: 1,
                                 wordBreak: 'break-word',
@@ -2169,7 +2169,7 @@ function TpiPayrollEntryContent() {
                               </div>
                             )}
                             {editingUniform && (
-                              <div style={{ fontSize: 11, color: 'var(--vk-ink-3)', marginTop: 2 }}>
+                              <div style={{ fontSize: 14, color: 'var(--vk-ink-2)', marginTop: 2 }}>
                                 กำหนดจำนวนเงิน หรือกดไอคอนถังขยะเพื่อยกเลิกยอดหัก (อย่าลืมกด "บันทึกค่าจ้าง")
                               </div>
                             )}
@@ -2179,7 +2179,7 @@ function TpiPayrollEntryContent() {
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                               <span style={{
                                 fontFamily: 'var(--vk-mono)',
-                                fontSize: 13,
+                                fontSize: 15,
                                 fontVariantNumeric: 'tabular-nums',
                                 color: 'var(--vk-crimson)',
                                 fontWeight: 700,
@@ -2239,7 +2239,7 @@ function TpiPayrollEntryContent() {
                                 style={{
                                   width: 85,
                                   fontFamily: 'var(--vk-mono)',
-                                  fontSize: 13,
+                                  fontSize: 15,
                                   textAlign: 'right',
                                   border: '1px solid var(--vk-persimmon)',
                                   background: '#fff',
@@ -2260,7 +2260,7 @@ function TpiPayrollEntryContent() {
                                   borderRadius: 4,
                                   padding: '4px 8px',
                                   cursor: 'pointer',
-                                  fontSize: 11,
+                                  fontSize: 14,
                                   fontWeight: 600,
                                 }}
                               >
@@ -2283,7 +2283,7 @@ function TpiPayrollEntryContent() {
                                   cursor: 'pointer',
                                   display: 'inline-flex',
                                   alignItems: 'center',
-                                  fontSize: 11,
+                                  fontSize: 14,
                                 }}
                               >
                                 <Trash2 style={{ width: 12, height: 12 }} />
@@ -2320,11 +2320,11 @@ function TpiPayrollEntryContent() {
                           borderRadius: 4
                         }}>
                           <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 13, fontWeight: 600 }}>ค่าอุปกรณ์ความปลอดภัย</div>
+                            <div style={{ fontSize: 15, fontWeight: 600 }}>ค่าอุปกรณ์ความปลอดภัย</div>
                             {extraEntries.deduct_safety_equipment > 0 && (
                               <div style={{
                                 fontFamily: 'var(--vk-mono)',
-                                fontSize: 10,
+                                fontSize: 13,
                                 color: 'var(--vk-persimmon)',
                                 marginTop: 1,
                                 wordBreak: 'break-word',
@@ -2335,7 +2335,7 @@ function TpiPayrollEntryContent() {
                               </div>
                             )}
                             {editingSafetyEquip && (
-                              <div style={{ fontSize: 11, color: 'var(--vk-ink-3)', marginTop: 2 }}>
+                              <div style={{ fontSize: 14, color: 'var(--vk-ink-2)', marginTop: 2 }}>
                                 กำหนดจำนวนเงิน หรือกดปุ่มลัด / ถังขยะเพื่อยกเลิกยอดหัก (อย่าลืมกด "บันทึกค่าจ้าง")
                               </div>
                             )}
@@ -2345,7 +2345,7 @@ function TpiPayrollEntryContent() {
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                               <span style={{
                                 fontFamily: 'var(--vk-mono)',
-                                fontSize: 13,
+                                fontSize: 15,
                                 fontVariantNumeric: 'tabular-nums',
                                 color: 'var(--vk-crimson)',
                                 fontWeight: 700,
@@ -2406,7 +2406,7 @@ function TpiPayrollEntryContent() {
                                   style={{
                                     width: 85,
                                     fontFamily: 'var(--vk-mono)',
-                                    fontSize: 13,
+                                    fontSize: 17,
                                     textAlign: 'right',
                                     border: '1px solid var(--vk-persimmon)',
                                     background: '#fff',
@@ -2427,7 +2427,7 @@ function TpiPayrollEntryContent() {
                                     borderRadius: 4,
                                     padding: '4px 8px',
                                     cursor: 'pointer',
-                                    fontSize: 11,
+                                    fontSize: 14,
                                     fontWeight: 600,
                                   }}
                                 >
@@ -2450,7 +2450,7 @@ function TpiPayrollEntryContent() {
                                     cursor: 'pointer',
                                     display: 'inline-flex',
                                     alignItems: 'center',
-                                    fontSize: 11,
+                                    fontSize: 14,
                                   }}
                                 >
                                   <Trash2 style={{ width: 12, height: 12 }} />
@@ -2475,7 +2475,7 @@ function TpiPayrollEntryContent() {
                                   type="button"
                                   onClick={() => setExtraEntries(prev => ({ ...prev, deduct_safety_equipment: 550 }))}
                                   style={{
-                                    fontSize: 10,
+                                    fontSize: 13,
                                     padding: '2px 6px',
                                     borderRadius: 3,
                                     border: '1px solid #fed7aa',
@@ -2492,7 +2492,7 @@ function TpiPayrollEntryContent() {
                                   type="button"
                                   onClick={() => setExtraEntries(prev => ({ ...prev, deduct_safety_equipment: 1100 }))}
                                   style={{
-                                    fontSize: 10,
+                                    fontSize: 13,
                                     padding: '2px 6px',
                                     borderRadius: 3,
                                     border: '1px solid #fed7aa',
@@ -2514,21 +2514,21 @@ function TpiPayrollEntryContent() {
                       {/* Advance Breakdown Sub-items: Separated into 3 clear cards with multiline notes */}
                       {advRegular.length > 0 && (
                         <div style={{ padding: '8px 10px', background: 'rgba(162, 35, 27, 0.04)', borderRadius: 6, marginTop: 8, border: '1px dashed rgba(162, 35, 27, 0.25)' }}>
-                          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--vk-crimson)', marginBottom: 6 }}>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--vk-crimson)', marginBottom: 6 }}>
                             รายละเอียดเบิกล่วงหน้า ({advRegular.length} รายการ):
                           </div>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                             {advRegular.map((adv, idx) => (
                               <div key={idx} style={{ padding: '7px 10px', background: '#ffffff', borderRadius: 4, border: '1px solid #fee2e2' }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
-                                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--vk-crimson)' }}>
+                                  <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--vk-crimson)' }}>
                                     รายการที่ {idx + 1}
                                   </span>
-                                  <span style={{ fontFamily: 'var(--vk-mono)', fontWeight: 700, fontSize: 12, color: 'var(--vk-crimson)' }}>
+                                  <span style={{ fontFamily: 'var(--vk-mono)', fontWeight: 700, fontSize: 15, color: 'var(--vk-crimson)' }}>
                                     –฿{monoNum(Number(adv.amount))}
                                   </span>
                                 </div>
-                                <div style={{ fontSize: 11, color: 'var(--vk-ink-2)', lineHeight: 1.45, wordBreak: 'break-word', whiteSpace: 'normal' }}>
+                                <div style={{ fontSize: 14, color: 'var(--vk-ink-2)', lineHeight: 1.45, wordBreak: 'break-word', whiteSpace: 'normal' }}>
                                   {adv.note || 'เบิกเงินสดทั่วไป'}
                                 </div>
                               </div>
@@ -2539,7 +2539,7 @@ function TpiPayrollEntryContent() {
 
                       {advScan.length > 0 && (
                         <div style={{ padding: '8px 10px', background: 'rgba(234, 88, 12, 0.05)', borderRadius: 6, marginTop: 8, border: '1px dashed #fed7aa' }}>
-                          <div style={{ fontSize: 11, fontWeight: 700, color: '#c2410c', marginBottom: 6 }}>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: '#c2410c', marginBottom: 6 }}>
                             รายละเอียดหักสแกนหน้าไม่ผ่าน ({advScan.length} รายการ):
                           </div>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -2549,15 +2549,15 @@ function TpiPayrollEntryContent() {
                               return (
                                 <div key={idx} style={{ padding: '7px 10px', background: '#ffffff', borderRadius: 4, border: '1px solid #ffedd5' }}>
                                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                                    <span style={{ fontSize: 11, fontWeight: 700, color: '#c2410c' }}>
+                                    <span style={{ fontSize: 14, fontWeight: 700, color: '#c2410c' }}>
                                       รายการที่ {idx + 1}
                                     </span>
-                                    <span style={{ fontFamily: 'var(--vk-mono)', fontWeight: 700, fontSize: 12, color: '#ea580c' }}>
+                                    <span style={{ fontFamily: 'var(--vk-mono)', fontWeight: 700, fontSize: 15, color: '#ea580c' }}>
                                       –฿{monoNum(Number(adv.amount))}
                                     </span>
                                   </div>
                                   {parts.length > 1 ? (
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 11, color: 'var(--vk-ink-2)', lineHeight: 1.45 }}>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 14, color: 'var(--vk-ink-2)', lineHeight: 1.45 }}>
                                       {parts.map((p, pIdx) => (
                                         <div key={pIdx} style={{ wordBreak: 'break-word', whiteSpace: 'normal', display: 'flex', alignItems: 'flex-start', gap: 4 }}>
                                           <span style={{ color: '#ea580c', flexShrink: 0 }}>•</span>
@@ -2566,7 +2566,7 @@ function TpiPayrollEntryContent() {
                                       ))}
                                     </div>
                                   ) : (
-                                    <div style={{ fontSize: 11, color: 'var(--vk-ink-2)', lineHeight: 1.45, wordBreak: 'break-word', whiteSpace: 'normal' }}>
+                                    <div style={{ fontSize: 14, color: 'var(--vk-ink-2)', lineHeight: 1.45, wordBreak: 'break-word', whiteSpace: 'normal' }}>
                                       {cleanNote || 'สแกนหน้าไม่สำเร็จ'}
                                     </div>
                                   )}
@@ -2579,7 +2579,7 @@ function TpiPayrollEntryContent() {
 
                       {advDisc.length > 0 && (
                         <div style={{ padding: '8px 10px', background: 'rgba(153, 27, 27, 0.05)', borderRadius: 6, marginTop: 8, border: '1px dashed #fca5a5' }}>
-                          <div style={{ fontSize: 11, fontWeight: 700, color: '#991b1b', marginBottom: 6 }}>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: '#991b1b', marginBottom: 6 }}>
                             รายละเอียดหักลงโทษขาดงานไม่มีคนแทน ({advDisc.length} รายการ):
                           </div>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -2592,15 +2592,15 @@ function TpiPayrollEntryContent() {
                               return (
                                 <div key={idx} style={{ padding: '7px 10px', background: '#ffffff', borderRadius: 4, border: '1px solid #fee2e2' }}>
                                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                                    <span style={{ fontSize: 11, fontWeight: 700, color: '#991b1b' }}>
+                                    <span style={{ fontSize: 14, fontWeight: 700, color: '#991b1b' }}>
                                       รายการที่ {idx + 1}
                                     </span>
-                                    <span style={{ fontFamily: 'var(--vk-mono)', fontWeight: 700, fontSize: 12, color: 'var(--vk-crimson)' }}>
+                                    <span style={{ fontFamily: 'var(--vk-mono)', fontWeight: 700, fontSize: 15, color: 'var(--vk-crimson)' }}>
                                       –฿{monoNum(Number(adv.amount))}
                                     </span>
                                   </div>
                                   {parts.length > 1 ? (
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 11, color: 'var(--vk-ink-2)', lineHeight: 1.45 }}>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 14, color: 'var(--vk-ink-2)', lineHeight: 1.45 }}>
                                       {parts.map((p, pIdx) => (
                                         <div key={pIdx} style={{ wordBreak: 'break-word', whiteSpace: 'normal', display: 'flex', alignItems: 'flex-start', gap: 4 }}>
                                           <span style={{ color: '#991b1b', flexShrink: 0 }}>•</span>
@@ -2609,7 +2609,7 @@ function TpiPayrollEntryContent() {
                                       ))}
                                     </div>
                                   ) : (
-                                    <div style={{ fontSize: 11, color: 'var(--vk-ink-2)', lineHeight: 1.45, wordBreak: 'break-word', whiteSpace: 'normal' }}>
+                                    <div style={{ fontSize: 14, color: 'var(--vk-ink-2)', lineHeight: 1.45, wordBreak: 'break-word', whiteSpace: 'normal' }}>
                                       {cleanNote || 'หักลงโทษ 2 เท่า'}
                                     </div>
                                   )}
@@ -2622,7 +2622,7 @@ function TpiPayrollEntryContent() {
 
                       {advSafetyFine.length > 0 && (
                         <div style={{ padding: '8px 10px', background: 'rgba(124, 58, 237, 0.05)', borderRadius: 6, marginTop: 8, border: '1px dashed #c4b5fd' }}>
-                          <div style={{ fontSize: 11, fontWeight: 700, color: '#6d28d9', marginBottom: 6 }}>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: '#6d28d9', marginBottom: 6 }}>
                             รายละเอียดหักค่าปรับผิดระเบียบวินัย จป. ({advSafetyFine.length} รายการ):
                           </div>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -2632,15 +2632,15 @@ function TpiPayrollEntryContent() {
                               return (
                                 <div key={idx} style={{ padding: '7px 10px', background: '#ffffff', borderRadius: 4, border: '1px solid #ede9fe' }}>
                                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                                    <span style={{ fontSize: 11, fontWeight: 700, color: '#6d28d9' }}>
+                                    <span style={{ fontSize: 14, fontWeight: 700, color: '#6d28d9' }}>
                                       รายการที่ {idx + 1}
                                     </span>
-                                    <span style={{ fontFamily: 'var(--vk-mono)', fontWeight: 700, fontSize: 12, color: '#7c3aed' }}>
+                                    <span style={{ fontFamily: 'var(--vk-mono)', fontWeight: 700, fontSize: 15, color: '#7c3aed' }}>
                                       –฿{monoNum(Number(adv.amount))}
                                     </span>
                                   </div>
                                   {parts.length > 1 ? (
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 11, color: 'var(--vk-ink-2)', lineHeight: 1.45 }}>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 14, color: 'var(--vk-ink-2)', lineHeight: 1.45 }}>
                                       {parts.map((p, pIdx) => (
                                         <div key={pIdx} style={{ wordBreak: 'break-word', whiteSpace: 'normal', display: 'flex', alignItems: 'flex-start', gap: 4 }}>
                                           <span style={{ color: '#7c3aed', flexShrink: 0 }}>•</span>
@@ -2649,7 +2649,7 @@ function TpiPayrollEntryContent() {
                                       ))}
                                     </div>
                                   ) : (
-                                    <div style={{ fontSize: 11, color: 'var(--vk-ink-2)', lineHeight: 1.45, wordBreak: 'break-word', whiteSpace: 'normal' }}>
+                                    <div style={{ fontSize: 14, color: 'var(--vk-ink-2)', lineHeight: 1.45, wordBreak: 'break-word', whiteSpace: 'normal' }}>
                                       {cleanNote || 'หักค่าปรับผิดระเบียบวินัย จป.'}
                                     </div>
                                   )}
@@ -2672,7 +2672,7 @@ function TpiPayrollEntryContent() {
 
                       <div style={{ display: 'flex', justifyContent: 'space-between', padding: '14px 0 0', marginTop: 'auto', borderTop: '2px solid var(--vk-rule)' }}>
                         <div className="vk-eyebrow">รวมรายการหัก</div>
-                        <div style={{ fontFamily: 'var(--vk-mono)', fontWeight: 700, fontSize: 16, color: 'var(--vk-crimson)' }}>
+                        <div style={{ fontFamily: 'var(--vk-mono)', fontWeight: 700, fontSize: 18, color: 'var(--vk-crimson)' }}>
                           – {monoNum(calc.totalDeductions)}
                         </div>
                       </div>
